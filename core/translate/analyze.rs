@@ -319,6 +319,7 @@ pub fn translate_analyze(
                 cursor_id: stat_cursor,
                 pc_if_next: loop_start,
                 fullscan: false,
+                is_index: false,
             });
         } else {
             let rowid_reg = program.alloc_register();
@@ -335,6 +336,7 @@ pub fn translate_analyze(
                 cursor_id: stat_cursor,
                 pc_if_next: loop_start,
                 fullscan: false,
+                is_index: false,
             });
         }
 
@@ -343,6 +345,7 @@ pub fn translate_analyze(
             cursor_id: stat_cursor,
             pc_if_next: loop_start,
             fullscan: false,
+            is_index: false,
         });
         program.preassign_label_to_next_insn(rewind_done);
 
@@ -582,6 +585,7 @@ fn emit_index_stats(
         cursor_id: idx_cursor,
         pc_if_next: lbl_loop,
         fullscan: false,
+        is_index: false,
     });
 
     // stat_get(accum) to get the final stat string

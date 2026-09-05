@@ -708,6 +708,7 @@ fn emit_add_virtual_column_validation(
         cursor_id,
         pc_if_next: loop_start,
         fullscan: false,
+        is_index: false,
     });
 
     program.preassign_label_to_next_insn(skip_label);

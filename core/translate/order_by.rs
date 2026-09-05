@@ -477,6 +477,7 @@ impl EmitOrderBy {
                 cursor_id: sort_cursor,
                 pc_if_next: sort_loop_start_label,
                 fullscan: false,
+                is_index: false,
             });
         }
         program.preassign_label_to_next_insn(sort_loop_end_label);

@@ -254,6 +254,7 @@ pub(crate) fn emit_returning_scan_back(program: &mut ProgramBuilder, buf: &Retur
         cursor_id: buf.cursor_id,
         pc_if_next: scan_start,
         fullscan: false,
+        is_index: false,
     });
     program.preassign_label_to_next_insn(end_label);
 }

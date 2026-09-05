@@ -932,6 +932,7 @@ pub enum Insn {
         /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
         /// which tags the opcode with P5 at codegen time.
         fullscan: bool,
+        is_index: bool,
     },
 
     Prev {
@@ -939,6 +940,8 @@ pub enum Insn {
         pc_if_prev: BranchOffset,
         /// See [Insn::Next::fullscan].
         fullscan: bool,
+        /// See [Insn::Next::is_index].
+        is_index: bool,
     },
 
     /// Halt the program.

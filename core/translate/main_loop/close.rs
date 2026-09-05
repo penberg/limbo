@@ -95,12 +95,14 @@ impl CloseLoop {
                                     cursor_id: iteration_cursor_id,
                                     pc_if_prev: loop_labels.loop_start,
                                     fullscan,
+                                    is_index: false,
                                 });
                             } else {
                                 program.emit_insn(Insn::Next {
                                     cursor_id: iteration_cursor_id,
                                     pc_if_next: loop_labels.loop_start,
                                     fullscan,
+                                    is_index: false,
                                 });
                             }
                         }
@@ -123,12 +125,14 @@ impl CloseLoop {
                                             cursor_id: *cursor_id,
                                             pc_if_prev: loop_labels.loop_start,
                                             fullscan: false,
+                                            is_index: false,
                                         });
                                     } else {
                                         program.emit_insn(Insn::Next {
                                             cursor_id: *cursor_id,
                                             pc_if_next: loop_labels.loop_start,
                                             fullscan: false,
+                                            is_index: false,
                                         });
                                     }
                                 } else {
@@ -196,12 +200,14 @@ impl CloseLoop {
                                     cursor_id: iteration_cursor_id,
                                     pc_if_prev: loop_labels.loop_start,
                                     fullscan: false,
+                                    is_index: false,
                                 });
                             } else {
                                 program.emit_insn(Insn::Next {
                                     cursor_id: iteration_cursor_id,
                                     pc_if_next: loop_labels.loop_start,
                                     fullscan: false,
+                                    is_index: false,
                                 });
                             }
                         }
@@ -223,6 +229,7 @@ impl CloseLoop {
                                     cursor_id: iteration_cursor_id,
                                     pc_if_next: loop_labels.loop_start,
                                     fullscan: false,
+                                    is_index: false,
                                 });
                             }
 
@@ -233,6 +240,7 @@ impl CloseLoop {
                                 cursor_id: ephemeral_cursor_id,
                                 pc_if_next: outer_loop_start,
                                 fullscan: false,
+                                is_index: false,
                             });
                         }
                     }
@@ -244,6 +252,7 @@ impl CloseLoop {
                         cursor_id: index_cursor_id.unwrap(),
                         pc_if_next: loop_labels.loop_start,
                         fullscan: false,
+                        is_index: false,
                     });
                     program.preassign_label_to_next_insn(loop_labels.loop_end);
                 }
@@ -273,6 +282,7 @@ impl CloseLoop {
                         cursor_id: probe_cursor_id,
                         pc_if_next: loop_labels.loop_start,
                         fullscan: false,
+                        is_index: false,
                     });
                     program.preassign_label_to_next_insn(loop_labels.loop_end);
 
@@ -605,6 +615,7 @@ pub(super) fn emit_autoindex(
         cursor_id: table_cursor_id,
         pc_if_next: label_ephemeral_build_loop_start,
         fullscan: false,
+        is_index: false,
     });
     program.preassign_label_to_next_insn(label_ephemeral_build_end);
     Ok(AutoIndexResult { use_bloom_filter })
