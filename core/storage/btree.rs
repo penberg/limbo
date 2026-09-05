@@ -6729,17 +6729,6 @@ impl CursorTrait for BTreeCursor {
                 }
             }
         }
-        let cached = self
-            .reusable_immutable_record
-            .as_ref()
-            .is_some_and(|record| !record.is_invalidated());
-        if cached {
-            return Ok(IOResult::Done(
-                self.reusable_immutable_record
-                    .as_ref()
-                    .map(ImmutableRecord::get_payload),
-            ));
-        }
         let contents = self.stack.top_ref().get_contents();
         let cell_idx = self.stack.current_cell_index();
         // Optimistically use a faster decoder that only handles leaf cells without overflow pages.
