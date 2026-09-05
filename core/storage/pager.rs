@@ -1784,9 +1784,10 @@ impl Pager {
                 // SAFETY: see RegisteredCursor's invariant.
                 unsafe { surviving.as_mut().set_has_peers_for_external_writes(false) };
             }
-            if bucket.is_empty() {
-                registry.remove(&root);
-            }
+            // An empty bucket stays in the map with its capacity: the next
+            // cursor on this root reuses it instead of inserting a new map
+            // entry and growing a new Vec. Roots are few and bounded by the
+            // schema of the pager, so the map does not grow without limit.
         }
     }
 
