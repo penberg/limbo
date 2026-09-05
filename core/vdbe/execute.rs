@@ -832,6 +832,20 @@ pub fn op_compare(
         return Err(LimboError::InternalError("Compare registers overlap".to_string()).into());
     }
 
+    // One integer against another needs no collation and no NULL order:
+    // the case of every GROUP BY on an integer key.
+    if key_info.len() == 1 {
+        if let Some((a, b)) = integer_operands(state, start_reg_a, start_reg_b) {
+            let cmp = a.cmp(&b);
+            state.last_compare = Some(match key_info[0].sort_order {
+                turso_parser::ast::SortOrder::Asc => cmp,
+                turso_parser::ast::SortOrder::Desc => cmp.reverse(),
+            });
+            state.pc += 1;
+            return Ok(InsnFunctionStepResult::Step);
+        }
+    }
+
     // (https://github.com/tursodatabase/turso/issues/2304): reusing logic from compare_immutable().
     // TODO: There are tons of cases like this where we could reuse this in a similar vein
     let a_range =
