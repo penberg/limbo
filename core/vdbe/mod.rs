@@ -526,6 +526,10 @@ pub struct OpHashProbeState {
     pub probe_buffered: bool,
 }
 
+// repr(u8): with the tag in its own byte, the idle test that every Column
+// and RowId runs is one byte compare instead of a niche computation on a
+// nested payload.
+#[repr(u8)]
 enum ActiveOpState {
     None,
     ClearBtree(OpClearBtreeState),
