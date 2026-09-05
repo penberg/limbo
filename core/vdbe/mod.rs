@@ -108,6 +108,11 @@ use std::{
 };
 use tracing::{instrument, Level};
 
+const MAX_CHECK_MASK: u64 = 255;
+// we use the check interval as bitmask so that we can efficiently calculate if the `vm_steps` counter
+// has reached a check interval (if `n` is a power of 2, `x & (n - 1)` checks for multiples of `n`)
+const _: () = assert!((MAX_CHECK_MASK + 1).is_power_of_two());
+
 type MvccCommitStateMachine = CommitStateMachine<MvccClock, DynAllocator>;
 
 /// State machine for committing view deltas with I/O handling
@@ -985,7 +990,7 @@ impl ProgramState {
         let cursor_seqs = vec![0i64; max_cursors];
         let registers = vec![Register::Value(Value::Null); max_registers].into_boxed_slice();
         Self {
-            check_mask: 63,
+            check_mask: MAX_CHECK_MASK,
             io_completions: None,
             pc: 0,
             cursors,
@@ -2329,24 +2334,15 @@ impl Program {
         }
     }
 
-    /// The checks the dispatch loop runs once every CHECK_INTERVAL
-    /// instructions: a closed connection, an interrupt, the deadline and the
-    /// progress handler. A handler with interval N < 64 narrows the mask at
-    /// the next firing (a one-time lag of at most CHECK_INTERVAL
-    /// instructions; the cadence is approximate by contract).
     #[inline(never)]
     fn periodic_checks(
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
     ) -> Result<Option<StepResult>, Box<LimboError>> {
-        // The interval must stay a power of two so the gate in the loop is
-        // a mask test, never a division.
-        const CHECK_INTERVAL: u64 = 64;
-        const _: () = assert!(CHECK_INTERVAL.is_power_of_two());
         let progress_ops = self.connection.progress_ops();
-        state.check_mask = if progress_ops == 0 || progress_ops >= CHECK_INTERVAL {
-            CHECK_INTERVAL - 1
+        state.check_mask = if progress_ops == 0 || progress_ops >= MAX_CHECK_MASK {
+            MAX_CHECK_MASK
         } else {
             progress_ops.next_power_of_two() - 1
         };
