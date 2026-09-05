@@ -511,13 +511,14 @@ pub fn op_divide(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(Divide { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_divide(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    // A zero divisor (NULL) and i64::MIN / -1 (a float quotient) stay on
+    // the slow path, which handles them like every other operand mix.
+    if let Some(result) = integer_operands(state, *lhs, *rhs).and_then(|(l, r)| l.checked_div(r)) {
+        state.registers[*dest].set_int(result);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_divide)
 }
 
 pub fn op_drop_index(
@@ -566,13 +567,12 @@ pub fn op_bit_and(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(BitAnd { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_bit_and(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    if let Some((l, r)) = integer_operands(state, *lhs, *rhs) {
+        state.registers[*dest].set_int(l & r);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_bit_and)
 }
 
 pub fn op_bit_or(
@@ -582,13 +582,12 @@ pub fn op_bit_or(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(BitOr { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_bit_or(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    if let Some((l, r)) = integer_operands(state, *lhs, *rhs) {
+        state.registers[*dest].set_int(l | r);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_bit_or)
 }
 
 pub fn op_bit_not(
