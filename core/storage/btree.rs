@@ -6549,7 +6549,7 @@ impl CursorTrait for BTreeCursor {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn next_row(&mut self) -> CursorStep {
         if self.null_flag {
             self.null_flag = false;
@@ -6612,15 +6612,15 @@ impl CursorTrait for BTreeCursor {
     }
 
     #[cfg_attr(debug_assertions, instrument(skip(self), level = Level::DEBUG))]
-    #[inline]
+    #[inline(always)]
     fn rowid(&mut self) -> IOResultOr<Option<i64>> {
         if self.needs_restore() {
-            return_if_io!(self.restore_context());
+            return rowid_general(self);
         }
         if self.get_null_flag() {
             return Ok(IOResult::Done(None));
         }
-        if self.has_record() {
+        return if self.has_record() {
             let page = self.stack.top_ref();
             let contents = page.get_contents();
             if contents.is_table() {
@@ -6632,11 +6632,22 @@ impl CursorTrait for BTreeCursor {
                 };
                 Ok(IOResult::Done(Some(cell.rowid)))
             } else {
-                let _ = return_if_io!(self.record());
-                Ok(IOResult::Done(self.get_index_rowid_from_record()))
+                index_rowid(self)
             }
         } else {
             Ok(IOResult::Done(None))
+        };
+
+        #[inline(never)]
+        fn rowid_general(cursor: &mut BTreeCursor) -> IOResultOr<Option<i64>> {
+            return_if_io!(cursor.restore_context());
+            cursor.rowid()
+        }
+
+        #[inline(never)]
+        fn index_rowid(cursor: &mut BTreeCursor) -> IOResultOr<Option<i64>> {
+            let _ = return_if_io!(cursor.record());
+            Ok(IOResult::Done(cursor.get_index_rowid_from_record()))
         }
     }
 
@@ -6712,7 +6723,7 @@ impl CursorTrait for BTreeCursor {
         Ok(IOResult::Done(self.reusable_immutable_record.as_ref()))
     }
 
-    #[inline]
+    #[inline(always)]
     fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
         if self.needs_restore() {
             return restore_record_payload(self);
