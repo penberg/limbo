@@ -1471,10 +1471,18 @@ pub struct Pager {
     /// each statement execution does not allocate and free a page-sized
     /// buffer per cursor.
     record_pool: Mutex<Vec<crate::types::RecordBuf>>,
+    /// Heap allocations of closed b-tree cursors, kept for the next cursor so
+    /// each statement execution does not allocate and free one per cursor.
+    /// The boxes are the point: each one is a cursor-sized allocation.
+    #[allow(clippy::vec_box)]
+    cursor_allocations: Mutex<Vec<Box<std::mem::MaybeUninit<crate::storage::btree::BTreeCursor>>>>,
 }
 
 /// Retired record buffers kept per pager. Each holds a page-sized allocation.
 const RECORD_POOL_SIZE: usize = 8;
+
+/// Retired cursor allocations kept per pager.
+const CURSOR_POOL_SIZE: usize = 8;
 
 /// Raw fat pointer to a registered cursor.
 ///
@@ -1764,7 +1772,27 @@ impl Pager {
             sync_type: AtomicFileSyncType::new(FileSyncType::Fsync),
             cursor_registry: Mutex::new(rustc_hash::FxHashMap::default()),
             record_pool: Mutex::new(Vec::new()),
+            cursor_allocations: Mutex::new(Vec::new()),
         })
+    }
+
+    /// An allocation retired by an earlier b-tree cursor on this pager, if any.
+    pub(crate) fn take_cursor_allocation(
+        &self,
+    ) -> Option<Box<std::mem::MaybeUninit<crate::storage::btree::BTreeCursor>>> {
+        self.cursor_allocations.lock().pop()
+    }
+
+    /// Keep the allocation of a closed b-tree cursor for the next cursor on
+    /// this pager. Extra allocations beyond the pool size are freed.
+    pub(crate) fn recycle_cursor_allocation(
+        &self,
+        allocation: Box<std::mem::MaybeUninit<crate::storage::btree::BTreeCursor>>,
+    ) {
+        let mut pool = self.cursor_allocations.lock();
+        if pool.len() < CURSOR_POOL_SIZE {
+            pool.push(allocation);
+        }
     }
 
     /// A record buffer retired by an earlier cursor on this pager, if any.

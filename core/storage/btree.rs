@@ -779,6 +779,10 @@ pub trait CursorTrait: Any + Send + Sync {
     /// Opt into the pager's cursor_registry. Default no-op so non-BTreeCursor
     /// impls (MvccLazyCursor) stay out. Opt-in impls must unregister in Drop.
     fn register_with_pager(&self) {}
+    /// Drops the cursor at statement reset. BTreeCursor keeps its heap
+    /// allocation in the pager's pool for the next cursor; the default is a
+    /// plain drop.
+    fn recycle(self: Box<Self>) {}
     /// Mirror of SQLite's BTCF_Multiple flag; toggled by Pager when a bucket
     /// crosses the 1↔2 threshold.
     fn set_has_peers_for_external_writes(&self, _has_peers: bool) {}
@@ -1157,6 +1161,15 @@ impl BTreeCursor {
 
     pub fn new_table(pager: Arc<Pager>, root_page: i64, num_columns: usize) -> Self {
         Self::new(pager, root_page, num_columns)
+    }
+
+    /// Moves the cursor to the heap, into an allocation retired by an earlier
+    /// cursor on the same pager when the pool has one.
+    pub fn into_boxed(self) -> Box<Self> {
+        match self.pager.take_cursor_allocation() {
+            Some(allocation) => Box::write(allocation, self),
+            None => Box::new(self),
+        }
     }
 
     pub fn new_without_rowid_table(
@@ -7303,6 +7316,20 @@ impl CursorTrait for BTreeCursor {
         self.did_register
             .store(true, crate::sync::atomic::Ordering::Relaxed);
         self.pager.register_cursor(self);
+    }
+
+    fn recycle(self: Box<Self>) {
+        let pager = self.pager.clone();
+        let raw = Box::into_raw(self);
+        // SAFETY: `raw` came from a Box of a live cursor. Its contents are
+        // dropped exactly once here (Drop unregisters the cursor and retires
+        // its record buffer), and the allocation goes on as uninitialized
+        // memory of the same layout.
+        let allocation = unsafe {
+            std::ptr::drop_in_place(raw);
+            Box::from_raw(raw.cast::<std::mem::MaybeUninit<BTreeCursor>>())
+        };
+        pager.recycle_cursor_allocation(allocation);
     }
 
     fn set_has_peers_for_external_writes(&self, has_peers: bool) {

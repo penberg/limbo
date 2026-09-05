@@ -1098,7 +1098,9 @@ impl ProgramState {
             {
                 cursor.close(context);
             }
-            let _ = cursor.take();
+            if let Some(Cursor::BTree(cursor)) = cursor.take() {
+                cursor.recycle();
+            }
             *context = None;
         }
         for (mut cursor, context) in self.closed_index_method_cursors.drain(..) {

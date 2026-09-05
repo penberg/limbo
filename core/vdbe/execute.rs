@@ -1321,11 +1321,12 @@ pub fn op_open_read(
             // This is a materialized view with storage
             // Create btree cursor for reading the persistent data
 
-            let btree_cursor = Box::new(BTreeCursor::new_table(
+            let btree_cursor = BTreeCursor::new_table(
                 pager.clone(),
                 maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                 num_columns,
-            ));
+            )
+            .into_boxed();
             let cursor = maybe_promote_to_mvcc_cursor(btree_cursor, MvccCursorType::Table)?;
 
             // Get the view name and look up or create its transaction state
@@ -1357,18 +1358,20 @@ pub fn op_open_read(
                 .into());
             }
             let btree_cursor: Box<dyn CursorTrait> = if table.has_rowid {
-                Box::new(BTreeCursor::new_table(
+                BTreeCursor::new_table(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                     num_columns,
-                ))
+                )
+                .into_boxed()
             } else {
-                Box::new(BTreeCursor::new_without_rowid_table(
+                BTreeCursor::new_without_rowid_table(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                     table.as_ref(),
                     num_columns,
-                ))
+                )
+                .into_boxed()
             };
             let cursor = maybe_promote_to_mvcc_cursor(btree_cursor, MvccCursorType::Table)?;
             cursors
@@ -1377,12 +1380,13 @@ pub fn op_open_read(
                 .replace(Cursor::new_btree(cursor));
         }
         CursorType::BTreeIndex(index) => {
-            let btree_cursor = Box::new(BTreeCursor::new_index(
+            let btree_cursor = BTreeCursor::new_index(
                 pager,
                 maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                 index.as_ref(),
                 num_columns,
-            )?);
+            )?
+            .into_boxed();
             let index_info = Arc::new(if let Some(mv_store) = mv_store.as_ref() {
                 IndexInfo::new_from_index_in(index, mv_store.allocator())?
             } else {
