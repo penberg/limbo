@@ -8918,6 +8918,28 @@ fn op_agg_step_slow(program: &Program, state: &mut ProgramState, data: &AggStepD
 
     // Initialize aggregate state if not already done
     if let Register::Value(Value::Null) = state.registers[*acc_reg] {
+        // Fast path for the first row of a COUNT group
+        if let AggFunc::Count | AggFunc::Count0 = func {
+            let counts = match (func, &state.registers[*col]) {
+                (AggFunc::Count0, _) => Some(true),
+                (_, Register::Value(Value::Null)) => Some(false),
+                (_, Register::Value(_) | Register::Record(_)) => Some(true),
+                (_, Register::Aggregate(_)) => None,
+            };
+            if let Some(counts) = counts {
+                let mut payload = state
+                    .spare_agg_payloads
+                    .pop()
+                    .unwrap_or_else(|| crate::alloc::vec![]);
+                init_agg_payload(func, &mut payload)?;
+                if counts {
+                    payload[0] = Value::from_i64(1);
+                }
+                state.registers[*acc_reg] = Register::Aggregate(AggContext::Builtin(payload));
+                state.pc += 1;
+                return Ok(InsnFunctionStepResult::Step);
+            }
+        }
         state.registers[*acc_reg] = match func {
             AggFunc::External(ext_func) => match ext_func.as_ref() {
                 ExtFunc::Aggregate {
