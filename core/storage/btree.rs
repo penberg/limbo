@@ -2007,44 +2007,44 @@ impl BTreeCursor {
         // page read below, which is the only step here that can yield.
         {
             let contents = self.stack.get_page_contents_at_level(old_top_idx).unwrap();
-            while state.min_cell_idx <= state.max_cell_idx {
-                let cur_cell_idx = (state.min_cell_idx + state.max_cell_idx) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
-                let cell_rowid = contents.cell_table_interior_read_rowid(cur_cell_idx as usize)?;
-                // in sqlite btrees left child pages have <= keys.
-                // table btrees can have a duplicate rowid in the interior cell, so for example if we are looking for rowid=10,
-                // and we find an interior cell with rowid=10, we need to move to the left page since (due to the <= rule of sqlite btrees)
-                // the left page may have a rowid=10.
-                // Logic table for determining if target leaf page is in left subtree
-                //
-                // Forwards iteration (looking for first match in tree):
-                // OP  | Current Cell vs Seek Key   | Action?  | Explanation
-                // GT  | >                          | go left  | First > key is in left subtree
-                // GT  | = or <                     | go right | First > key is in right subtree
-                // GE  | > or =                     | go left  | First >= key is in left subtree
-                // GE  | <                          | go right | First >= key is in right subtree
-                //
-                // Backwards iteration (looking for last match in tree):
-                // OP  | Current Cell vs Seek Key   | Action?  | Explanation
-                // LE  | > or =                     | go left  | Last <= key is in left subtree
-                // LE  | <                          | go right | Last <= key is in right subtree
-                // LT  | > or =                     | go left  | Last < key is in left subtree
-                // LT  | <                          | go right?| Last < key is in right subtree, except if cell rowid is exactly 1 less
-                //
-                // No iteration (point query):
-                // EQ  | > or =                     | go left  | Last = key is in left subtree
-                // EQ  | <                          | go right | Last = key is in right subtree
-                let is_on_left = match seek_op {
-                    SeekOp::GT => cell_rowid > rowid,
-                    SeekOp::GE { .. } => cell_rowid >= rowid,
-                    SeekOp::LE { .. } => cell_rowid >= rowid,
-                    SeekOp::LT => cell_rowid + 1 >= rowid,
-                };
-                if is_on_left {
-                    state.nearest_matching_cell.replace(cur_cell_idx as usize);
-                    state.max_cell_idx = cur_cell_idx - 1;
-                } else {
-                    state.min_cell_idx = cur_cell_idx + 1;
+            if matches!(seek_op, SeekOp::GE { .. } | SeekOp::LE { .. }) {
+                tablebtree_search_interior::<true>(contents, rowid, seek_op, state)?;
+            } else {
+                tablebtree_search_interior::<false>(contents, rowid, seek_op, state)?;
+            }
+
+            #[inline]
+            fn tablebtree_search_interior<const INCLUSIVE: bool>(
+                contents: &PageContent,
+                rowid: i64,
+                seek_op: SeekOp,
+                state: &mut InteriorPageBinarySearchState,
+            ) -> Result<()> {
+                let mut min = state.min_cell_idx;
+                let mut max = state.max_cell_idx;
+                while min <= max {
+                    let cur_cell_idx = (min + max) >> 1;
+                    let cell_rowid =
+                        contents.cell_table_interior_read_rowid(cur_cell_idx as usize)?;
+                    let is_on_left = if INCLUSIVE {
+                        cell_rowid >= rowid
+                    } else {
+                        match seek_op {
+                            SeekOp::GT => cell_rowid > rowid,
+                            SeekOp::GE { .. } | SeekOp::LE { .. } => cell_rowid >= rowid,
+                            SeekOp::LT => cell_rowid + 1 >= rowid,
+                        }
+                    };
+                    if is_on_left {
+                        state.nearest_matching_cell = Some(cur_cell_idx as usize);
+                        max = cur_cell_idx - 1;
+                    } else {
+                        min = cur_cell_idx + 1;
+                    }
                 }
+                state.min_cell_idx = min;
+                state.max_cell_idx = max;
+                Ok(())
             }
         }
 
