@@ -2782,6 +2782,7 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 /// 4. **Sort order**: Applies ascending/descending order to comparison result
 /// 5. **Remaining fields**: If first field is equal and more fields exist,
 ///    delegates to `compare_records_generic()` with `skip=1`
+#[inline(always)]
 fn compare_payload_int<V, I>(
     left_packed: &[u8],
     right_unpacked: I,
