@@ -2705,28 +2705,19 @@ impl BTreeCursor {
 
         let mut state = *state;
 
-        loop {
-            let control = self.indexbtree_seek_inner(
-                seek_op,
-                old_top_idx,
-                key_values,
-                record_comparer,
-                &mut state,
-            )?;
-            // Persist state after each iteration since inner function modifies it
-            if matches!(
-                self.seek_state,
-                CursorSeekState::LeafPageBinarySearch { .. }
-            ) {
-                self.seek_state = CursorSeekState::LeafPageBinarySearch { state };
-            }
-            match control {
-                ControlFlow::Continue(_) => {}
-                ControlFlow::Break(res) => {
-                    return Ok(res);
-                }
-            }
-        }
+        let result = self.indexbtree_seek_inner(
+            seek_op,
+            old_top_idx,
+            key_values,
+            record_comparer,
+            &mut state,
+        )?;
+        // The search state goes back to the cursor once per call, not once
+        // per compare, as for the interior pages: only an overflow key read
+        // yields, and it returns before the range changes, so re-entry
+        // retries the same cell.
+        self.seek_state = CursorSeekState::LeafPageBinarySearch { state };
+        Ok(result)
     }
 
     fn indexbtree_seek_inner(
@@ -2736,109 +2727,110 @@ impl BTreeCursor {
         key_values: &[ValueRef<'_>],
         record_comparer: RecordCompare,
         state: &mut LeafPageBinarySearchState,
-    ) -> Result<ControlFlow<IOResult<SeekResult>>> {
+    ) -> IOResultOr<SeekResult> {
         let iter_dir = seek_op.iteration_direction();
-        let min = state.min_cell_idx;
-        let max = state.max_cell_idx;
         let eq_seen = state.eq_seen;
-        if min > max {
-            if let Some(nearest_matching_cell) = state.nearest_matching_cell {
-                self.stack.set_cell_index(nearest_matching_cell as i32);
-                self.set_has_record(true);
+        loop {
+            let min = state.min_cell_idx;
+            let max = state.max_cell_idx;
+            if min > max {
+                if let Some(nearest_matching_cell) = state.nearest_matching_cell {
+                    self.stack.set_cell_index(nearest_matching_cell as i32);
+                    self.set_has_record(true);
 
-                return Ok(ControlFlow::Break(IOResult::Done(SeekResult::Found)));
-            } else {
-                // set cursor to the position where which would hold the op-boundary if it were present
-                let target_cell = state.target_cell_when_not_found;
-                self.stack.set_cell_index(target_cell);
-                let has_record = target_cell >= 0
-                    && target_cell
-                        < self
-                            .stack
-                            .get_page_contents_at_level(old_top_idx)
-                            .unwrap()
-                            .cell_count() as i32;
-                self.has_record = has_record;
+                    return Ok(IOResult::Done(SeekResult::Found));
+                } else {
+                    // set cursor to the position where which would hold the op-boundary if it were present
+                    let target_cell = state.target_cell_when_not_found;
+                    self.stack.set_cell_index(target_cell);
+                    let has_record = target_cell >= 0
+                        && target_cell
+                            < self
+                                .stack
+                                .get_page_contents_at_level(old_top_idx)
+                                .unwrap()
+                                .cell_count() as i32;
+                    self.has_record = has_record;
 
-                // Similar logic as in tablebtree_seek(), but for indexes.
-                // The difference is that since index keys are not necessarily unique, we need to TryAdvance
-                // even when eq_only=true and we have seen an EQ match up in the tree in an interior node.
-                if seek_op.eq_only() && !eq_seen {
-                    return Ok(ControlFlow::Break(IOResult::Done(SeekResult::NotFound)));
-                }
-                return Ok(ControlFlow::Break(IOResult::Done(SeekResult::TryAdvance)));
-            };
-        }
-
-        let cur_cell_idx = (min + max) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
-        self.stack.set_cell_index(cur_cell_idx as i32);
-
-        let (payload, payload_size, first_overflow_page) = self
-            .stack
-            .get_page_contents_at_level(old_top_idx)
-            .unwrap()
-            .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
-
-        if let Some(next_page) = first_overflow_page {
-            let res = self.process_overflow_read(payload, next_page, payload_size)?;
-            if let IOResult::IO(io) = res {
-                return Ok(ControlFlow::Break(IOResult::IO(io)));
+                    // Similar logic as in tablebtree_seek(), but for indexes.
+                    // The difference is that since index keys are not necessarily unique, we need to TryAdvance
+                    // even when eq_only=true and we have seen an EQ match up in the tree in an interior node.
+                    if seek_op.eq_only() && !eq_seen {
+                        return Ok(IOResult::Done(SeekResult::NotFound));
+                    }
+                    return Ok(IOResult::Done(SeekResult::TryAdvance));
+                };
             }
-        } else {
-            self.get_immutable_record_or_create()?
-                .as_mut()
+
+            let cur_cell_idx = (min + max) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
+            self.stack.set_cell_index(cur_cell_idx as i32);
+
+            let (payload, payload_size, first_overflow_page) = self
+                .stack
+                .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .invalidate();
-            crate::with_btree_allocation_site!(
-                RecordPayload,
+                .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
+
+            if let Some(next_page) = first_overflow_page {
+                let res = self.process_overflow_read(payload, next_page, payload_size)?;
+                if let IOResult::IO(io) = res {
+                    return Ok(IOResult::IO(io));
+                }
+            } else {
                 self.get_immutable_record_or_create()?
                     .as_mut()
                     .unwrap()
-                    .start_serialization(payload)
-            )?;
-        };
+                    .invalidate();
+                crate::with_btree_allocation_site!(
+                    RecordPayload,
+                    self.get_immutable_record_or_create()?
+                        .as_mut()
+                        .unwrap()
+                        .start_serialization(payload)
+                )?;
+            };
 
-        let (cmp, found) = self.compare_with_current_record(
-            key_values,
-            seek_op,
-            &record_comparer,
-            self.index_info
-                .as_ref()
-                .expect("indexbtree_seek: index_info required"),
-        )?;
-        if found {
-            state.nearest_matching_cell.replace(cur_cell_idx as usize);
-            match iter_dir {
-                IterationDirection::Forwards => {
-                    state.max_cell_idx = cur_cell_idx - 1;
+            let (cmp, found) = self.compare_with_current_record(
+                key_values,
+                seek_op,
+                &record_comparer,
+                self.index_info
+                    .as_ref()
+                    .expect("indexbtree_seek: index_info required"),
+            )?;
+            if found {
+                state.nearest_matching_cell.replace(cur_cell_idx as usize);
+                match iter_dir {
+                    IterationDirection::Forwards => {
+                        state.max_cell_idx = cur_cell_idx - 1;
+                    }
+                    IterationDirection::Backwards => {
+                        state.min_cell_idx = cur_cell_idx + 1;
+                    }
                 }
-                IterationDirection::Backwards => {
-                    state.min_cell_idx = cur_cell_idx + 1;
+            } else if cmp.is_gt() {
+                if matches!(seek_op, SeekOp::GE { eq_only: true }) {
+                    state.target_cell_when_not_found =
+                        state.target_cell_when_not_found.min(cur_cell_idx as i32);
                 }
-            }
-        } else if cmp.is_gt() {
-            if matches!(seek_op, SeekOp::GE { eq_only: true }) {
-                state.target_cell_when_not_found =
-                    state.target_cell_when_not_found.min(cur_cell_idx as i32);
-            }
-            state.max_cell_idx = cur_cell_idx - 1;
-        } else if cmp.is_lt() {
-            if matches!(seek_op, SeekOp::LE { eq_only: true }) {
-                state.target_cell_when_not_found =
-                    state.target_cell_when_not_found.max(cur_cell_idx as i32);
-            }
-            state.min_cell_idx = cur_cell_idx + 1;
-        } else {
-            match iter_dir {
-                IterationDirection::Forwards => {
-                    state.min_cell_idx = cur_cell_idx + 1;
+                state.max_cell_idx = cur_cell_idx - 1;
+            } else if cmp.is_lt() {
+                if matches!(seek_op, SeekOp::LE { eq_only: true }) {
+                    state.target_cell_when_not_found =
+                        state.target_cell_when_not_found.max(cur_cell_idx as i32);
                 }
-                IterationDirection::Backwards => {
-                    state.max_cell_idx = cur_cell_idx - 1;
+                state.min_cell_idx = cur_cell_idx + 1;
+            } else {
+                match iter_dir {
+                    IterationDirection::Forwards => {
+                        state.min_cell_idx = cur_cell_idx + 1;
+                    }
+                    IterationDirection::Backwards => {
+                        state.max_cell_idx = cur_cell_idx - 1;
+                    }
                 }
             }
         }
-        Ok(ControlFlow::Continue(()))
     }
 
     fn compare_with_current_record(
