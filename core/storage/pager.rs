@@ -3194,7 +3194,7 @@ impl Pager {
     }
 
     #[inline(always)]
-    #[instrument(skip_all, level = Level::DEBUG)]
+    #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
     pub fn begin_read_tx(&self) -> Result<()> {
         let Some(wal) = self.wal.as_ref() else {
             return Ok(());
@@ -3435,7 +3435,7 @@ impl Pager {
         }
     }
 
-    #[instrument(skip_all, level = Level::DEBUG)]
+    #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
     pub fn end_read_tx(&self) {
         let Some(wal) = self.wal.as_ref() else {
             return;
@@ -3556,7 +3556,7 @@ impl Pager {
     /// `page_idx` arbitrarily many times. Each `Some(page_idx)` mapping in
     /// `pending_reads` corresponds to a single outstanding disk read; the
     /// entry is removed exactly when this method returns `Done`.
-    #[tracing::instrument(skip_all, level = Level::TRACE)]
+    #[cfg_attr(debug_assertions, tracing::instrument(skip_all, level = Level::TRACE))]
     pub fn read_page(&self, page_idx: i64) -> IOResultOr<(PageRef, Option<Completion>)> {
         self.read_page_into(page_idx, None)
     }

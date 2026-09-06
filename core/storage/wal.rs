@@ -3382,7 +3382,7 @@ impl Wal for WalFile {
 
     /// End a read transaction.
     #[inline(always)]
-    #[instrument(skip_all, level = Level::DEBUG)]
+    #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
     fn end_read_tx(&self) {
         let slot = self.max_frame_read_lock_index.load(Ordering::Acquire);
         if slot != NO_LOCK_HELD {
