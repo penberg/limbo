@@ -3952,69 +3952,74 @@ pub(crate) fn vtab_commit_all(conn: &Connection) -> crate::Result<()> {
 /// Stage pending writes on every index-method cursor before releasing the
 /// statement savepoint. Cursor order is bytecode cursor order, which is stable
 /// across resumptions and avoids attachment-order ambiguity.
+#[inline]
 pub(crate) fn index_method_stage_statement_all(state: &mut ProgramState) -> IOResultOr<()> {
     if state.index_methods_finalized || !has_index_method_work(state) {
         return Ok(IOResult::Done(()));
     }
+    return stage_statement_all_cold(state);
 
-    while state.index_method_finalize_cursor < state.cursors.len() {
-        let cursor_id = state.index_method_finalize_cursor;
-        if matches!(
-            state.cursors[cursor_id].as_ref(),
-            Some(Cursor::IndexMethod(_))
-        ) {
-            let Some(context) = state.index_method_contexts[cursor_id].clone() else {
-                return Err(LimboError::InternalError(format!(
-                    "index-method cursor {cursor_id} has no execution context"
-                ))
-                .into());
-            };
-            crate::mvcc::yield_points::inject_io_yield!(
-                context,
-                crate::index_method::IndexMethodYieldPoint::BeforePrepareStatement
-            );
-            let Some(Cursor::IndexMethod(cursor)) = state.cursors[cursor_id].as_mut() else {
-                unreachable!("cursor kind checked above")
-            };
-            match cursor.stage_statement_commit(&context)? {
-                IOResult::Done(()) => {}
-                IOResult::IO(io) => return Ok(IOResult::IO(io)),
+    #[inline(never)]
+    fn stage_statement_all_cold(state: &mut ProgramState) -> IOResultOr<()> {
+        while state.index_method_finalize_cursor < state.cursors.len() {
+            let cursor_id = state.index_method_finalize_cursor;
+            if matches!(
+                state.cursors[cursor_id].as_ref(),
+                Some(Cursor::IndexMethod(_))
+            ) {
+                let Some(context) = state.index_method_contexts[cursor_id].clone() else {
+                    return Err(LimboError::InternalError(format!(
+                        "index-method cursor {cursor_id} has no execution context"
+                    ))
+                    .into());
+                };
+                crate::mvcc::yield_points::inject_io_yield!(
+                    context,
+                    crate::index_method::IndexMethodYieldPoint::BeforePrepareStatement
+                );
+                let Some(Cursor::IndexMethod(cursor)) = state.cursors[cursor_id].as_mut() else {
+                    unreachable!("cursor kind checked above")
+                };
+                match cursor.stage_statement_commit(&context)? {
+                    IOResult::Done(()) => {}
+                    IOResult::IO(io) => return Ok(IOResult::IO(io)),
+                }
+                state.index_method_finalize_cursor += 1;
+                crate::mvcc::yield_points::inject_io_yield!(
+                    context,
+                    crate::index_method::IndexMethodYieldPoint::AfterPrepareStatement
+                );
+                continue;
             }
             state.index_method_finalize_cursor += 1;
-            crate::mvcc::yield_points::inject_io_yield!(
-                context,
-                crate::index_method::IndexMethodYieldPoint::AfterPrepareStatement
-            );
-            continue;
         }
-        state.index_method_finalize_cursor += 1;
-    }
 
-    let subprogram_keys = state
-        .index_method_finalize_subprogram_keys
-        .get_or_insert_with(|| {
-            let mut keys = state
+        let subprogram_keys = state
+            .index_method_finalize_subprogram_keys
+            .get_or_insert_with(|| {
+                let mut keys = state
+                    .subprogram_stmt_cache
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>();
+                keys.sort_unstable();
+                keys
+            });
+        while state.index_method_finalize_subprogram < subprogram_keys.len() {
+            let key = subprogram_keys[state.index_method_finalize_subprogram];
+            let statement = state
                 .subprogram_stmt_cache
-                .keys()
-                .copied()
-                .collect::<Vec<_>>();
-            keys.sort_unstable();
-            keys
-        });
-    while state.index_method_finalize_subprogram < subprogram_keys.len() {
-        let key = subprogram_keys[state.index_method_finalize_subprogram];
-        let statement = state
-            .subprogram_stmt_cache
-            .get_mut(&key)
-            .expect("finalization key must reference a cached subprogram");
-        match statement.prepare_index_methods()? {
-            IOResult::Done(()) => state.index_method_finalize_subprogram += 1,
-            IOResult::IO(io) => return Ok(IOResult::IO(io)),
+                .get_mut(&key)
+                .expect("finalization key must reference a cached subprogram");
+            match statement.prepare_index_methods()? {
+                IOResult::Done(()) => state.index_method_finalize_subprogram += 1,
+                IOResult::IO(io) => return Ok(IOResult::IO(io)),
+            }
         }
-    }
 
-    state.index_methods_finalized = true;
-    Ok(IOResult::Done(()))
+        state.index_methods_finalized = true;
+        Ok(IOResult::Done(()))
+    }
 }
 
 /// Discard statement-owned index-method work before a statement savepoint or
@@ -4095,6 +4100,7 @@ pub(crate) fn index_method_on_transaction_committed_all(
 /// statement into connection-level transaction ownership. Replacing an older
 /// cursor for the same attachment keeps outcome delivery exactly once while
 /// retaining the newest in-transaction view.
+#[inline]
 pub(crate) fn index_method_register_transaction_all(
     state: &mut ProgramState,
     connection: &Connection,
@@ -4102,6 +4108,14 @@ pub(crate) fn index_method_register_transaction_all(
     if !has_index_method_work(state) {
         return Ok(());
     }
+    register_index_method_transactions(state, connection)
+}
+
+#[inline(never)]
+fn register_index_method_transactions(
+    state: &mut ProgramState,
+    connection: &Connection,
+) -> crate::Result<()> {
     let mut registered = 0usize;
     for cursor_id in 0..state.cursors.len() {
         if !matches!(state.cursors[cursor_id], Some(Cursor::IndexMethod(_))) {
@@ -4141,6 +4155,7 @@ pub(crate) fn index_method_register_transaction_all(
 /// Whether this statement has index-method cursors, closed index-method
 /// cursors or cached subprograms that the commit hooks must visit. Almost
 /// every statement has none, and every halt calls the hooks.
+#[inline]
 fn has_index_method_work(state: &ProgramState) -> bool {
     !state.closed_index_method_cursors.is_empty()
         || !state.subprogram_stmt_cache.is_empty()
