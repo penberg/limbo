@@ -286,11 +286,15 @@ impl Value {
         Value::build_text(result)
     }
 
+    #[expect(
+        clippy::unnecessary_lazy_evaluations,
+        reason = "ok_or skips the drop glue that otherwise bloats the happy path"
+    )]
     pub fn exec_abs(&self) -> Result<Self> {
         Ok(match self {
             Value::Null => Value::Null,
             Value::Numeric(Numeric::Integer(v)) => {
-                Value::from_i64(v.checked_abs().ok_or(LimboError::IntegerOverflow)?)
+                Value::from_i64(v.checked_abs().ok_or_else(|| LimboError::IntegerOverflow)?)
             }
             Value::Numeric(Numeric::Float(non_nan)) => Value::from_f64(f64::from(*non_nan).abs()),
             _ => {

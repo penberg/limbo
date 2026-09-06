@@ -1,6 +1,20 @@
 @database :default:
 @database :default-no-rowidalias:
 
+test abs-integer-boundaries {
+    SELECT abs(-9223372036854775807), abs(9223372036854775807), abs(0), abs(NULL) IS NULL;
+}
+expect {
+    9223372036854775807|9223372036854775807|0|1
+}
+
+test abs-integer-overflow {
+    SELECT abs(-9223372036854775808);
+}
+expect error {
+    integer overflow
+}
+
 test concat-chars {
     select concat('l', 'i');
 }
