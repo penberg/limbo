@@ -873,6 +873,7 @@ mod tests {
             internal_id: TableInternalId::from(1),
             join_info: None,
             table,
+            plan_estimate: None,
             indexed: None,
         });
 
@@ -906,6 +907,7 @@ mod tests {
             identifier: "t1".to_string(),
             internal_id: TableInternalId::from(1),
             join_info: None,
+            plan_estimate: None,
             table: Table::BTree(Arc::new(BTreeTable::new(
                 0,
                 "t1".to_string(),
@@ -941,6 +943,7 @@ mod tests {
             identifier: "t2".to_string(),
             internal_id: TableInternalId::from(2),
             join_info: None,
+            plan_estimate: None,
             table: Table::BTree(Arc::new(BTreeTable::new(
                 0,
                 "t2".to_string(),
@@ -991,6 +994,7 @@ mod tests {
             identifier: "bar".to_string(),
             internal_id: TableInternalId::from(1),
             join_info: None,
+            plan_estimate: None,
             indexed: None,
             table: Table::BTree(Arc::new(BTreeTable::new(
                 0,

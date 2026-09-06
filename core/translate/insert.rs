@@ -345,6 +345,7 @@ pub fn translate_insert(
             expression_index_usages: Vec::new(),
             database_id,
             indexed: None,
+            plan_estimate: None,
         }],
         vec![],
     );

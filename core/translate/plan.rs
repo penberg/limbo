@@ -1204,6 +1204,23 @@ pub struct JoinedTable {
     pub database_id: usize,
     /// INDEXED BY / NOT INDEXED hint from the SQL statement.
     pub indexed: Option<ast::Indexed>,
+    /// Cost and row estimates for the selected table access.
+    pub plan_estimate: Option<TablePlanEstimate>,
+}
+
+/// Cost and row estimates for one table in a selected join plan.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TablePlanEstimate {
+    /// Rows from the join prefix before this table access.
+    pub input_rows: f64,
+    /// Rows that this access returns for each input row.
+    pub rows_per_input: f64,
+    /// Rows from the join prefix after this table access.
+    pub output_rows: f64,
+    /// Cost of this table access for all input rows.
+    pub access_cost: f64,
+    /// Cost of the join prefix through this table access.
+    pub total_cost: f64,
 }
 
 impl JoinedTable {
@@ -2558,6 +2575,7 @@ impl JoinedTable {
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
             indexed: None,
+            plan_estimate: None,
         })
     }
 
@@ -2604,6 +2622,7 @@ impl JoinedTable {
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
             indexed: None,
+            plan_estimate: None,
         })
     }
 
@@ -2636,6 +2655,7 @@ impl JoinedTable {
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
             indexed: None,
+            plan_estimate: None,
         })
     }
 

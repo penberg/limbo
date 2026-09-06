@@ -217,6 +217,7 @@ pub fn prepare_delete_plan(
         expression_index_usages: Vec::new(),
         database_id,
         indexed,
+        plan_estimate: None,
     }];
     let mut table_references = TableReferences::new(joined_tables, vec![]);
 

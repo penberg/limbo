@@ -83,3 +83,15 @@ the exact display string. `op` adds the structured fields, discriminated by
 
 Fields that are absent are simply omitted (e.g. `join` on the first table,
 `index` on a rowid search).
+
+Table access operations can include an `estimate` object. This object reports the values that selected the join plan.
+
+| Field | Meaning |
+|-------|---------|
+| `input_rows` | Rows from the join prefix before this table access. |
+| `rows_per_input` | Rows that this access returns for each input row. |
+| `output_rows` | Rows from the join prefix after this table access. |
+| `access_cost` | Cost of this table access for all input rows. |
+| `total_cost` | Cost of the join prefix through this table access. |
+
+These values are estimates, not execution counters. Use statement metrics to compare them with the work from an executed query.

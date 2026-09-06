@@ -280,6 +280,8 @@ pub struct JoinN {
     pub output_cardinality: f64,
     /// Estimated execution cost of this N-ary join.
     pub cost: Cost,
+    /// Estimated output rows after each table access in `data`.
+    pub prefix_cardinalities: Vec<f64>,
 }
 
 struct WhereTermInfo {
@@ -928,11 +930,17 @@ fn join_lhs_and_rhs<'a>(
     let mut best_access_methods = Vec::with_capacity(join_order.len());
     best_access_methods.extend(lhs.map_or(vec![], |l| l.data.clone()));
     best_access_methods.push((rhs_table_number, access_methods_arena.len() - 1));
+    let mut prefix_cardinalities = Vec::with_capacity(join_order.len());
+    if let Some(lhs) = lhs {
+        prefix_cardinalities.extend_from_slice(&lhs.prefix_cardinalities);
+    }
+    prefix_cardinalities.push(output_cardinality);
 
     Ok(Some(JoinN {
         data: best_access_methods,
         output_cardinality,
         cost,
+        prefix_cardinalities,
     }))
 }
 
@@ -3475,6 +3483,7 @@ mod tests {
             column_use_counts: Vec::new(),
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
+            plan_estimate: None,
             indexed: None,
         });
         available_indexes.insert_for_table_name(&joined_tables, "t1", VecDeque::from([index]));
@@ -3571,6 +3580,7 @@ mod tests {
             column_use_counts: Vec::new(),
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
+            plan_estimate: None,
             indexed: None,
         });
         available_indexes.insert_for_table_name(&joined_tables, "t1", VecDeque::from([index]));
@@ -3684,6 +3694,7 @@ mod tests {
             column_use_counts: Vec::new(),
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
+            plan_estimate: None,
             indexed: None,
         });
         available_indexes.insert_for_table_name(&joined_tables, "t1", VecDeque::from([index]));
@@ -3877,6 +3888,7 @@ mod tests {
             column_use_counts: Vec::new(),
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
+            plan_estimate: None,
             indexed: None,
         }
     }

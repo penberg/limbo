@@ -1308,6 +1308,7 @@ mod tests {
             column_use_counts: Vec::new(),
             expression_index_usages: Vec::new(),
             database_id: MAIN_DB_ID,
+            plan_estimate: None,
             indexed: None,
         }
     }
