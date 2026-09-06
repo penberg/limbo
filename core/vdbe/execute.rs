@@ -9114,24 +9114,28 @@ pub fn op_agg_final(
                     // External aggregates use FFI finalization
                     agg.compute_external()?
                 }
-                AggContext::Builtin(payload) => {
-                    // Built-in aggregates use shared finalization
-                    finalize_agg_payload(func, payload)?
-                }
+                AggContext::Builtin(payload) => match func {
+                    AggFunc::Count | AggFunc::Count0 => {
+                        let [Value::Numeric(Numeric::Integer(count))] = payload.as_slice() else {
+                            unreachable!("COUNT payload must contain one integer");
+                        };
+                        Value::from_i64(*count)
+                    }
+                    _ => finalize_agg_payload(func, payload)?,
+                },
             };
             if acc_reg == dest_reg {
-                // The result will replace the allocator, so we hold on to the allocated Vec so that
-                // another group can reuse the allocation.
                 let accumulator =
-                    std::mem::replace(&mut state.registers[acc_reg], Register::Value(Value::Null));
+                    std::mem::replace(&mut state.registers[acc_reg], Register::Value(value));
                 if let Register::Aggregate(AggContext::Builtin(mut payload)) = accumulator {
                     if state.spare_agg_payloads.len() < SPARE_AGG_PAYLOADS {
                         payload.clear();
                         state.spare_agg_payloads.push(payload);
                     }
                 }
+            } else {
+                state.registers[dest_reg].set_value(value);
             }
-            state.registers[dest_reg].set_value(value);
         }
         Register::Value(Value::Null) => {
             // No row was stepped: write the empty-set default explicitly.
