@@ -10226,7 +10226,13 @@ pub fn op_function(
                     ScalarFunc::Soundex => Some(reg_value.exec_soundex()),
                     _ => unreachable!(),
                 };
-                state.registers[*dest].set_value(result.unwrap_or(Value::Null));
+                // this is a `match` instead of `unwrap_or_else` because on the current pinned
+                // toolchain, it compiles to fewer instructions
+                let value = match result {
+                    Some(value) => value,
+                    None => Value::Null,
+                };
+                state.registers[*dest].set_value(value);
             }
             ScalarFunc::Hex => {
                 let reg_value = state.registers[*start_reg].borrow_mut();
