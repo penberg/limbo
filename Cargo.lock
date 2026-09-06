@@ -7023,6 +7023,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "turso-join-benchmark"
+version = "0.8.0-pre.8"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "turso_core",
+]
+
+[[package]]
 name = "turso-txn-latency"
 version = "0.8.0-pre.8"
 dependencies = [
