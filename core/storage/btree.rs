@@ -1197,7 +1197,7 @@ impl BTreeCursor {
             stack: PageStack {
                 current_page: -1,
                 node_states: [BTreeNodeState::default(); BTCURSOR_MAX_DEPTH + 1],
-                stack: [const { None }; BTCURSOR_MAX_DEPTH + 1],
+                stack: std::mem::ManuallyDrop::new([const { None }; BTCURSOR_MAX_DEPTH + 1]),
             },
             reusable_immutable_record: None,
             noted_payload: NotedPayload::NONE,
@@ -8554,7 +8554,9 @@ struct PageStack {
     /// Pointer to the current page being consumed
     current_page: i32,
     /// List of pages in the stack. Root page will be in index 0
-    pub stack: [Option<PageRef>; BTCURSOR_MAX_DEPTH + 1],
+    ///
+    /// [ManuallyDrop] because as an optimization, [Self::drop] clears only the slots that actually hold pages.
+    pub stack: std::mem::ManuallyDrop<[Option<PageRef>; BTCURSOR_MAX_DEPTH + 1]>,
     /// List of cell indices in the stack.
     /// node_states[current_page] is the current cell index being consumed. Similarly
     /// node_states[current_page-1] is the cell index of the parent of the current page
