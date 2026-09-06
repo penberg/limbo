@@ -2653,40 +2653,30 @@ pub enum RecordCompare {
     Generic,
 }
 
-impl RecordCompare {
-    #[inline(always)]
-    pub fn compare<V, E, I>(
-        &self,
-        serialized: &ImmutableRecord,
-        unpacked: I,
-        index_info: &IndexInfo,
-        skip: usize,
-        tie_breaker: std::cmp::Ordering,
-    ) -> Result<std::cmp::Ordering>
-    where
-        V: AsValueRef,
-        E: ExactSizeIterator<Item = V>,
-        I: IntoIterator<IntoIter = E, Item = E::Item>,
-    {
-        self.compare_payload(
-            serialized.get_payload(),
-            unpacked,
-            index_info,
-            skip,
-            tie_breaker,
-        )
-    }
+pub fn compare_record<V, I>(
+    left_payload: &[u8],
+    right_values: I,
+    index_info: &IndexInfo,
+    tie_breaker: std::cmp::Ordering,
+) -> Result<std::cmp::Ordering>
+where
+    V: AsValueRef,
+    I: ExactSizeIterator<Item = V> + Clone,
+{
+    let comparer = find_compare(right_values.clone().peekable(), index_info);
+    comparer.compare_payload(left_payload, right_values, index_info, tie_breaker)
+}
 
+impl RecordCompare {
     /// The comparison on the serialized bytes of a record. The seek loops
     /// compare the cells of a page where they lie, without a copy into the
     /// cursor's record buffer.
     #[inline(always)]
     pub fn compare_payload<V, E, I>(
         &self,
-        payload: &[u8],
-        unpacked: I,
+        left_payload: &[u8],
+        right_values: I,
         index_info: &IndexInfo,
-        skip: usize,
         tie_breaker: std::cmp::Ordering,
     ) -> Result<std::cmp::Ordering>
     where
@@ -2694,28 +2684,28 @@ impl RecordCompare {
         E: ExactSizeIterator<Item = V>,
         I: IntoIterator<IntoIter = E, Item = E::Item>,
     {
-        let unpacked = unpacked.into_iter();
+        let right_values = right_values.into_iter();
         match self {
-            RecordCompare::Int => compare_payload_int(payload, unpacked, index_info, tie_breaker),
+            RecordCompare::Int => {
+                compare_payload_int(left_payload, right_values, index_info, tie_breaker)
+            }
             RecordCompare::String => {
-                compare_payload_string(payload, unpacked, index_info, tie_breaker)
+                compare_payload_string(left_payload, right_values, index_info, tie_breaker)
             }
             RecordCompare::Generic => {
-                compare_payload_generic(payload, unpacked, index_info, skip, tie_breaker)
+                compare_payload_generic(left_payload, right_values, index_info, 0, tie_breaker)
             }
         }
     }
 }
 
-pub fn find_compare<I, E, V>(unpacked: I, index_info: &IndexInfo) -> RecordCompare
+pub fn find_compare<V, I>(mut right_values: Peekable<I>, index_info: &IndexInfo) -> RecordCompare
 where
     V: AsValueRef,
-    E: ExactSizeIterator<Item = V>,
-    I: IntoIterator<IntoIter = Peekable<E>, Item = V>,
+    I: ExactSizeIterator<Item = V>,
 {
-    let mut unpacked = unpacked.into_iter();
-    if unpacked.len() != 0 && index_info.num_cols <= 13 {
-        let val = unpacked.peek().unwrap();
+    if right_values.len() != 0 && index_info.num_cols <= 13 {
+        let val = right_values.peek().unwrap();
         match val.as_value_ref() {
             ValueRef::Numeric(Numeric::Integer(_)) => RecordCompare::Int,
             ValueRef::Text(_) if index_info.key_info[0].collation == CollationSeq::Binary => {
@@ -2745,7 +2735,7 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 
 /// Optimized integer-first record comparison function.
 ///
-/// This function is an optimized version of `compare_records_generic()` for the
+/// This function is an optimized version of `compare_payload_generic()` for the
 /// common case where:
 /// - (a) The first field of the unpacked record is an integer
 /// - (b) The serialized record's first field is also an integer
@@ -2762,7 +2752,7 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 /// - First serial type indicates integer (`1-6`, `8`, or `9`)
 /// - First unpacked field is a `ValueRef::Numeric(Numeric::Integer)`
 ///
-/// If any condition fails, it falls back to `compare_records_generic()`.
+/// If any condition fails, it falls back to `compare_payload_generic()`.
 ///
 /// # Arguments
 ///
@@ -2781,7 +2771,7 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 /// 3. **Native comparison**: Uses Rust's built-in `i64::cmp()` for speed
 /// 4. **Sort order**: Applies ascending/descending order to comparison result
 /// 5. **Remaining fields**: If first field is equal and more fields exist,
-///    delegates to `compare_records_generic()` with `skip=1`
+///    delegates to `compare_payload_generic()` with `skip=1`
 #[inline(always)]
 fn compare_payload_int<V, I>(
     left_packed: &[u8],
@@ -2847,7 +2837,7 @@ where
     }
 }
 
-/// This function is an optimized version of `compare_records_generic()` for the
+/// This function is an optimized version of `compare_payload_generic()` for the
 /// common case where:
 /// - (a) The first field of the unpacked record is a string
 /// - (b) The serialized record's first field is also a string
@@ -2865,7 +2855,7 @@ where
 /// - First serial type indicates string (`>= 13` and odd number)
 /// - First unpacked field is a `RefValue::Text`
 ///
-/// If any condition fails, it falls back to `compare_records_generic()`.
+/// If any condition fails, it falls back to `compare_payload_generic()`.
 ///
 /// # Arguments
 ///
@@ -2884,7 +2874,7 @@ where
 /// 3. **Sort order**: Applies ascending/descending order to comparison result
 /// 4. **Length comparison**: If strings are equal, compares lengths
 /// 5. **Remaining fields**: If first field is equal and more fields exist,
-///    delegates to `compare_records_generic()` with `skip=1`
+///    delegates to `compare_payload_generic()` with `skip=1`
 fn compare_payload_string<V, I>(
     left_packed: &[u8],
     right_unpacked: I,
@@ -3000,28 +2990,7 @@ where
 /// The serialized and unpacked records do not have to contain the same number
 /// of fields. If all fields that appear in both records are equal, then
 /// `tie_breaker` is returned.
-pub fn compare_records_generic<V, I>(
-    left_packed: &ImmutableRecord,
-    right_unpacked: I,
-    index_info: &IndexInfo,
-    skip: usize,
-    tie_breaker: std::cmp::Ordering,
-) -> Result<std::cmp::Ordering>
-where
-    V: AsValueRef,
-    I: ExactSizeIterator<Item = V>,
-{
-    compare_payload_generic(
-        left_packed.get_payload(),
-        right_unpacked,
-        index_info,
-        skip,
-        tie_breaker,
-    )
-}
-
-/// [compare_records_generic] on the serialized bytes of the record.
-pub fn compare_payload_generic<V, I>(
+fn compare_payload_generic<V, I>(
     left_packed: &[u8],
     right_unpacked: I,
     index_info: &IndexInfo,
@@ -4170,7 +4139,12 @@ mod tests {
 
         let comparer = find_compare(unpacked_values.iter().peekable(), index_info);
         let optimized_result = comparer
-            .compare(&serialized, &unpacked_values, index_info, 0, tie_breaker)
+            .compare_payload(
+                serialized.get_payload(),
+                &unpacked_values,
+                index_info,
+                tie_breaker,
+            )
             .unwrap();
 
         assert_eq!(
@@ -4178,8 +4152,17 @@ mod tests {
             "Test '{test_name}' failed: Full Comparison: {gold_result:?}, Optimized: {optimized_result:?}, Strategy: {comparer:?}"
         );
 
-        let generic_result = compare_records_generic(
-            &serialized,
+        let selected_result = compare_record(
+            serialized.get_payload(),
+            unpacked_values.iter(),
+            index_info,
+            tie_breaker,
+        )
+        .unwrap();
+        assert_eq!(gold_result, selected_result, "Test '{test_name}' failed");
+
+        let generic_result = compare_payload_generic(
+            serialized.get_payload(),
             unpacked_values.iter(),
             index_info,
             0,
@@ -4568,6 +4551,28 @@ mod tests {
     }
 
     #[test]
+    fn compare_record_preserves_prefix_tie_breakers() {
+        let index_info =
+            create_index_info(2, vec![SortOrder::Asc; 2], vec![CollationSeq::Binary; 2]);
+        for first in [Value::from_i64(42), Value::build_text("key"), Value::Null] {
+            let serialized = create_record(vec![first.clone(), Value::from_i64(99)]);
+            for tie_breaker in [Ordering::Less, Ordering::Equal, Ordering::Greater] {
+                let right_values = [first.as_ref()];
+                assert_eq!(
+                    compare_record(
+                        serialized.get_payload(),
+                        right_values.into_iter(),
+                        &index_info,
+                        tie_breaker,
+                    )
+                    .unwrap(),
+                    tie_breaker,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_skip_parameter() {
         let index_info = create_index_info(
             3,
@@ -4587,12 +4592,22 @@ mod tests {
         ];
 
         let tie_breaker = std::cmp::Ordering::Equal;
-        let result_skip_0 =
-            compare_records_generic(&serialized, unpacked.iter(), &index_info, 0, tie_breaker)
-                .unwrap();
-        let result_skip_1 =
-            compare_records_generic(&serialized, unpacked.iter(), &index_info, 1, tie_breaker)
-                .unwrap();
+        let result_skip_0 = compare_payload_generic(
+            serialized.get_payload(),
+            unpacked.iter(),
+            &index_info,
+            0,
+            tie_breaker,
+        )
+        .unwrap();
+        let result_skip_1 = compare_payload_generic(
+            serialized.get_payload(),
+            unpacked.iter(),
+            &index_info,
+            1,
+            tie_breaker,
+        )
+        .unwrap();
 
         assert_eq!(result_skip_0, std::cmp::Ordering::Less);
 

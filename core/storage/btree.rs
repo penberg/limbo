@@ -2287,7 +2287,6 @@ impl BTreeCursor {
                     self.index_info
                         .as_ref()
                         .expect("indexbtree_move_to: index_info required"),
-                    0,
                     tie_breaker,
                 )?;
 
@@ -2896,7 +2895,7 @@ impl BTreeCursor {
         ) -> Result<(Ordering, bool)> {
             let tie_breaker = get_tie_breaker_from_seek_op(seek_op);
             let cmp =
-                record_comparer.compare_payload(payload, key_values, index_info, 0, tie_breaker)?;
+                record_comparer.compare_payload(payload, key_values, index_info, tie_breaker)?;
 
             let found = match seek_op {
                 SeekOp::GT => cmp.is_gt(),

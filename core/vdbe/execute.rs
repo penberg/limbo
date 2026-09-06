@@ -29,7 +29,7 @@ use crate::storage::sqlite3_ondisk::{DatabaseHeader, PageSize, RawVersion};
 use crate::translate::collate::CollationSeq;
 use crate::types::IOResultOr;
 use crate::types::{
-    compare_immutable, compare_immutable_single, compare_records_generic, AsValueRef, Extendable,
+    compare_immutable, compare_immutable_single, compare_record, AsValueRef, Extendable,
     IOCompletions, IOResult, ImmutableRecord, IndexInfo, SeekResult, Text, ValueIterator,
 };
 use crate::util::{
@@ -6904,15 +6904,11 @@ pub fn op_idx_ge(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            // Create the comparison record from registers
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(
-                idx_record,  // The serialized record from the index
-                values,      // The record built from registers
-                &index_info, // Sort order flags
-                0,
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
                 tie_breaker,
             )?;
 
@@ -6974,10 +6970,13 @@ pub fn op_idx_le(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(idx_record, values, &index_info, 0, tie_breaker)?;
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
+                tie_breaker,
+            )?;
 
             if ord.is_le() {
                 target_pc.as_offset_int()
@@ -7021,10 +7020,13 @@ pub fn op_idx_gt(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(idx_record, values, &index_info, 0, tie_breaker)?;
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
+                tie_breaker,
+            )?;
 
             if ord.is_gt() {
                 target_pc.as_offset_int()
@@ -7068,11 +7070,13 @@ pub fn op_idx_lt(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
-
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(idx_record, values, &index_info, 0, tie_breaker)?;
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
+                tie_breaker,
+            )?;
 
             if ord.is_lt() {
                 target_pc.as_offset_int()
