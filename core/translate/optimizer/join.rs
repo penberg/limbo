@@ -74,7 +74,31 @@ fn constraint_output_multipliers(
     rhs_self_mask: TableMask,
     consumed_where_terms: &BitSet<usize>,
     skipped_where_terms: &BitSet<usize>,
+    where_clause: &[WhereTerm],
     params: &CostModelParams,
+) -> f64 {
+    constraint_output_multipliers_for(
+        rhs_constraints,
+        lhs_mask,
+        rhs_self_mask,
+        consumed_where_terms,
+        skipped_where_terms,
+        where_clause,
+        params,
+        |_| true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn constraint_output_multipliers_for(
+    rhs_constraints: &TableConstraints,
+    lhs_mask: &TableMask,
+    rhs_self_mask: TableMask,
+    consumed_where_terms: &BitSet<usize>,
+    skipped_where_terms: &BitSet<usize>,
+    where_clause: &[WhereTerm],
+    params: &CostModelParams,
+    include: impl Fn(&super::constraints::Constraint) -> bool,
 ) -> f64 {
     let mut multiplier = 1.0;
     let mut bounds: SmallVec<[(Option<usize>, bool, bool); 4]> = SmallVec::new();
@@ -100,6 +124,8 @@ fn constraint_output_multipliers(
             || constraint.lhs_mask.is_empty())
             && !consumed_where_terms.get(constraint.where_clause_pos.0)
             && !skipped_where_terms.get(constraint.where_clause_pos.0)
+            && !where_clause[constraint.where_clause_pos.0].consumed
+            && include(constraint)
     }) {
         multiplier *= constraint.selectivity;
 
@@ -125,6 +151,7 @@ fn constraint_output_multipliers(
 }
 
 /// Return the row count after one table and its ready filters.
+#[allow(clippy::too_many_arguments)]
 fn rows_after_join(
     input_cardinality: f64,
     method: &AccessMethod,
@@ -132,6 +159,7 @@ fn rows_after_join(
     lhs_mask: &TableMask,
     rhs_mask: TableMask,
     rhs_table: &JoinedTable,
+    where_clause: &[WhereTerm],
     params: &CostModelParams,
 ) -> f64 {
     if rhs_table
@@ -141,15 +169,82 @@ fn rows_after_join(
     {
         return input_cardinality;
     }
-    let remaining_filter_selectivity = constraint_output_multipliers(
+    let is_outer_join = rhs_table
+        .join_info
+        .as_ref()
+        .is_some_and(|join_info| join_info.is_outer());
+    if !is_outer_join {
+        let remaining_filter_selectivity = constraint_output_multipliers(
+            rhs_constraints,
+            lhs_mask,
+            rhs_mask,
+            &method.consumed_where_terms,
+            &Default::default(),
+            where_clause,
+            params,
+        );
+        return input_cardinality
+            * method.estimated_rows_per_outer_row
+            * remaining_filter_selectivity;
+    }
+
+    let is_on_term = |constraint: &super::constraints::Constraint| {
+        where_clause[constraint.where_clause_pos.0].from_outer_join == Some(rhs_table.internal_id)
+    };
+    let on_selectivity = constraint_output_multipliers_for(
+        rhs_constraints,
+        lhs_mask,
+        rhs_mask.clone(),
+        &method.consumed_where_terms,
+        &Default::default(),
+        where_clause,
+        params,
+        is_on_term,
+    );
+    let matching_rows_per_input = method.estimated_rows_per_outer_row * on_selectivity;
+    // Statistics give an average match count, but not its distribution.
+    // A Poisson model estimates the chance that an input row has no match.
+    let unmatched_probability = (-matching_rows_per_input).exp();
+    let outer_join_rows_per_input = matching_rows_per_input + unmatched_probability;
+
+    let selects_unmatched_rows = |constraint: &super::constraints::Constraint| {
+        if is_on_term(constraint)
+            || !matches!(constraint.operator.as_ast_operator(), Some(Operator::Is))
+        {
+            return false;
+        }
+        matches!(
+            constraint.get_constraining_expr_ref(where_clause),
+            turso_parser::ast::Expr::Literal(turso_parser::ast::Literal::Null)
+        ) && constraint.table_col_pos.is_some_and(|column_pos| {
+            rhs_table
+                .table
+                .get_column_at(column_pos)
+                .is_some_and(|column| column.is_rowid_alias() || column.notnull())
+        })
+    };
+    let selects_only_unmatched_rows = rhs_constraints.constraints.iter().any(|constraint| {
+        !method
+            .consumed_where_terms
+            .get(constraint.where_clause_pos.0)
+            && selects_unmatched_rows(constraint)
+    });
+    let where_selectivity = constraint_output_multipliers_for(
         rhs_constraints,
         lhs_mask,
         rhs_mask,
         &method.consumed_where_terms,
         &Default::default(),
+        where_clause,
         params,
+        |constraint| !is_on_term(constraint) && !selects_unmatched_rows(constraint),
     );
-    input_cardinality * method.estimated_rows_per_outer_row * remaining_filter_selectivity
+    let rows_per_input = if selects_only_unmatched_rows {
+        unmatched_probability
+    } else {
+        outer_join_rows_per_input
+    };
+    input_cardinality * rows_per_input * where_selectivity
 }
 
 /// Count calls to each subquery when all of its outer tables have been read.
@@ -212,6 +307,7 @@ fn count_subquery_calls_after_join(
             new_table_mask.clone(),
             &method.consumed_where_terms,
             &skipped_where_terms,
+            where_clause,
             params,
         );
         let rows = rows_before_filters * multiplier;
@@ -264,6 +360,7 @@ pub(super) fn count_subquery_calls_for_plan(
             &prior_tables,
             table_mask,
             &joined_tables[*table_number],
+            where_clause,
             params,
         );
         prior_tables.set(*table_number)?;
@@ -922,6 +1019,7 @@ fn join_lhs_and_rhs<'a>(
         &lhs_mask,
         rhs_self_mask,
         &joined_tables[rhs_table_number],
+        where_clause,
         params,
     );
 

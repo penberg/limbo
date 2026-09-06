@@ -1194,6 +1194,7 @@ dependencies = [
  "rand 0.9.4",
  "rand_chacha 0.9.0",
  "rusqlite",
+ "serde_json",
  "serial_test",
  "similar-asserts",
  "sql_generation",
