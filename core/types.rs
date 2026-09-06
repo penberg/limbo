@@ -2654,6 +2654,7 @@ pub enum RecordCompare {
 }
 
 impl RecordCompare {
+    #[inline(always)]
     pub fn compare<V, E, I>(
         &self,
         serialized: &ImmutableRecord,
