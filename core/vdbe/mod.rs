@@ -1229,10 +1229,18 @@ impl ProgramState {
         self.auto_txn_cleanup = TxnCleanup::None;
         *self.fk_immediate_violations_during_stmt.get_mut() = 0;
         *self.fk_deferred_violations_when_stmt_started.get_mut() = 0;
-        self.rowsets.clear();
-        self.bloom_filters.clear();
-        self.hash_tables.clear();
-        self.ephemeral_temp_files.clear();
+        if !self.rowsets.is_empty() {
+            self.rowsets.clear();
+        }
+        if !self.bloom_filters.is_empty() {
+            self.bloom_filters.clear();
+        }
+        if !self.hash_tables.is_empty() {
+            self.hash_tables.clear();
+        }
+        if !self.ephemeral_temp_files.is_empty() {
+            self.ephemeral_temp_files.clear();
+        }
         self.uses_subjournal = false;
         self.is_active_write = false;
         self.has_stmt_transaction = false;
