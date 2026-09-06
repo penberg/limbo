@@ -2385,11 +2385,11 @@ impl BTreeCursor {
                 }
             }
         };
-        let matching_cell = self
+        let left_child_page = self
             .stack
             .get_page_contents_at_level(old_top_idx)
             .unwrap()
-            .cell_get(leftmost_matching_cell, self.usable_space())?;
+            .cell_interior_read_left_child_page(leftmost_matching_cell)?;
         // We don't advance in case of forward iteration and index tree
         // internal nodes because we will visit this node going up.
         // In backwards iteration, we must retreat because otherwise we
@@ -2401,23 +2401,16 @@ impl BTreeCursor {
         //
         // On `IO(spill_c)` we MUST NOT mutate `cell_idx` (set or
         // retreat) — see the Done branch.
-        let BTreeCell::IndexInteriorCell(IndexInteriorCell {
-            left_child_page, ..
-        }) = &matching_cell
-        else {
-            unreachable!("unexpected cell type: {:?}", matching_cell);
-        };
-
         {
             let page = self.stack.get_page_at_level(old_top_idx).unwrap();
             turso_assert!(
-                page.get().id() != *left_child_page as usize,
+                page.get().id() != left_child_page as usize,
                 "corrupt: current page and left child page are the same",
                 { "cell": leftmost_matching_cell, "page_id": page.get().id() }
             );
         }
 
-        match self.read_page(*left_child_page as i64)? {
+        match self.read_page(left_child_page as i64)? {
             IOResult::Done((mem_page, c)) => {
                 self.stack.set_cell_index(leftmost_matching_cell as i32);
                 if iter_dir == IterationDirection::Backwards {
