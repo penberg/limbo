@@ -2754,6 +2754,38 @@ impl BTreeCursor {
         record_comparer: RecordCompare,
         state: &mut LeafPageBinarySearchState,
     ) -> IOResultOr<SeekResult> {
+        if matches!(seek_op, SeekOp::GE { eq_only: true }) {
+            self.indexbtree_seek_impl::<true>(
+                seek_op,
+                old_top_idx,
+                key_values,
+                record_comparer,
+                state,
+            )
+        } else {
+            self.indexbtree_seek_impl::<false>(
+                seek_op,
+                old_top_idx,
+                key_values,
+                record_comparer,
+                state,
+            )
+        }
+    }
+
+    fn indexbtree_seek_impl<const EXACT_FORWARD: bool>(
+        &mut self,
+        seek_op: SeekOp,
+        old_top_idx: usize,
+        key_values: &[ValueRef<'_>],
+        record_comparer: RecordCompare,
+        state: &mut LeafPageBinarySearchState,
+    ) -> IOResultOr<SeekResult> {
+        let seek_op = if EXACT_FORWARD {
+            SeekOp::GE { eq_only: true }
+        } else {
+            seek_op
+        };
         let iter_dir = seek_op.iteration_direction();
         let eq_seen = state.eq_seen;
         loop {
@@ -2809,7 +2841,7 @@ impl BTreeCursor {
                 payload
             };
 
-            let (cmp, found) = Self::compare_cell_with_key(
+            let (cmp, found) = compare_cell_with_key(
                 cell_payload,
                 key_values,
                 seek_op,
@@ -2851,28 +2883,29 @@ impl BTreeCursor {
                 }
             }
         }
-    }
 
-    fn compare_cell_with_key(
-        payload: &[u8],
-        key_values: &[ValueRef],
-        seek_op: SeekOp,
-        record_comparer: &RecordCompare,
-        index_info: &IndexInfo,
-    ) -> Result<(Ordering, bool)> {
-        let tie_breaker = get_tie_breaker_from_seek_op(seek_op);
-        let cmp =
-            record_comparer.compare_payload(payload, key_values, index_info, 0, tie_breaker)?;
+        #[inline(always)]
+        fn compare_cell_with_key(
+            payload: &[u8],
+            key_values: &[ValueRef],
+            seek_op: SeekOp,
+            record_comparer: &RecordCompare,
+            index_info: &IndexInfo,
+        ) -> Result<(Ordering, bool)> {
+            let tie_breaker = get_tie_breaker_from_seek_op(seek_op);
+            let cmp =
+                record_comparer.compare_payload(payload, key_values, index_info, 0, tie_breaker)?;
 
-        let found = match seek_op {
-            SeekOp::GT => cmp.is_gt(),
-            SeekOp::GE { eq_only: true } => cmp.is_eq(),
-            SeekOp::GE { eq_only: false } => cmp.is_ge(),
-            SeekOp::LE { eq_only: true } => cmp.is_eq(),
-            SeekOp::LE { eq_only: false } => cmp.is_le(),
-            SeekOp::LT => cmp.is_lt(),
-        };
-        Ok((cmp, found))
+            let found = match seek_op {
+                SeekOp::GT => cmp.is_gt(),
+                SeekOp::GE { eq_only: true } => cmp.is_eq(),
+                SeekOp::GE { eq_only: false } => cmp.is_ge(),
+                SeekOp::LE { eq_only: true } => cmp.is_eq(),
+                SeekOp::LE { eq_only: false } => cmp.is_le(),
+                SeekOp::LT => cmp.is_lt(),
+            };
+            Ok((cmp, found))
+        }
     }
 
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]

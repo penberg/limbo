@@ -4832,18 +4832,8 @@ impl Connection {
     }
 
     /// Get the query timeout duration.
-    pub fn get_query_timeout(&self) -> Duration {
-        Duration::from_millis(self.query_timeout_ms.load(Ordering::SeqCst))
-    }
-
-    /// The query timeout, None when none is set. Tests the stored
-    /// millisecond count itself: building the Duration divides, and every
-    /// statement asks at its first step.
-    pub(crate) fn query_timeout(&self) -> Option<Duration> {
-        match self.query_timeout_ms.load(Ordering::SeqCst) {
-            0 => None,
-            millis => Some(Duration::from_millis(millis)),
-        }
+    pub fn get_query_timeout_ms(&self) -> u64 {
+        self.query_timeout_ms.load(Ordering::SeqCst)
     }
 
     /// Get a reference to the busy handler.

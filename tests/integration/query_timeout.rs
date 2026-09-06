@@ -13,6 +13,21 @@ fn run_until_terminal(stmt: &mut turso_core::Statement) -> turso_core::Result<St
 }
 
 #[turso_macros::test]
+fn query_timeout_milliseconds(tmp_db: TempDatabase) {
+    let conn = tmp_db.connect_limbo();
+    assert_eq!(conn.get_query_timeout_ms(), 0u64);
+
+    conn.set_query_timeout(Duration::from_micros(123_456));
+    assert_eq!(conn.get_query_timeout_ms(), 123u64);
+
+    conn.set_query_timeout(Duration::MAX);
+    assert_eq!(conn.get_query_timeout_ms(), u64::MAX);
+
+    conn.set_query_timeout(Duration::ZERO);
+    assert_eq!(conn.get_query_timeout_ms(), 0u64);
+}
+
+#[turso_macros::test]
 fn query_timeout_interrupts_long_running_query(tmp_db: TempDatabase) -> anyhow::Result<()> {
     let conn = tmp_db.connect_limbo();
     conn.execute("CREATE TABLE t(x INTEGER);")?;
