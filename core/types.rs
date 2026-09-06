@@ -135,7 +135,7 @@ pub(crate) fn validate_utf8(data: &[u8]) -> Option<&str> {
 /// for the rest, so a value of any length takes at most `len / 8 + 3`
 /// loads. The loads are unaligned, so the slice's position on the page
 /// does not matter.
-#[inline]
+#[inline(always)]
 pub(crate) fn is_ascii(data: &[u8]) -> bool {
     let mut acc = 0u64;
     let mut rest = data;
