@@ -4836,6 +4836,16 @@ impl Connection {
         Duration::from_millis(self.query_timeout_ms.load(Ordering::SeqCst))
     }
 
+    /// The query timeout, None when none is set. Tests the stored
+    /// millisecond count itself: building the Duration divides, and every
+    /// statement asks at its first step.
+    pub(crate) fn query_timeout(&self) -> Option<Duration> {
+        match self.query_timeout_ms.load(Ordering::SeqCst) {
+            0 => None,
+            millis => Some(Duration::from_millis(millis)),
+        }
+    }
+
     /// Get a reference to the busy handler.
     pub fn get_busy_handler(&self) -> crate::sync::RwLockReadGuard<'_, BusyHandler> {
         self.busy_handler.read()
