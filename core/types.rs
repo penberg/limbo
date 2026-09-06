@@ -15,7 +15,7 @@ use crate::pseudo::PseudoCursor;
 use crate::schema::Index;
 use crate::storage::btree::{BTreeCursor, CursorTrait};
 use crate::storage::sqlite3_ondisk::{
-    read_integer, read_value, read_varint, varint_len, write_varint,
+    read_integer, read_value, read_value_serial_type, read_varint, varint_len, write_varint,
 };
 use crate::translate::collate::CollationSeq;
 use crate::translate::plan::IterationDirection;
@@ -2111,6 +2111,49 @@ impl<'a> Iterator for ValueIterator<'a> {
         acc
     }
 
+    #[inline(always)]
+    fn last(self) -> Option<Self::Item> {
+        let mut header = self.header_section.get();
+        if unlikely(header.is_empty()) {
+            return None;
+        }
+        let mut data_offset = 0;
+        let last_serial_type = loop {
+            let (serial_type, bytes_read) = match read_varint(header) {
+                Ok(v) => v,
+                Err(e) => {
+                    mark_unlikely();
+                    return Some(Err(e));
+                }
+            };
+            header = &header[bytes_read..];
+            if header.is_empty() {
+                break serial_type;
+            }
+            data_offset += match get_serial_type_size(serial_type) {
+                Ok(size) => size,
+                Err(e) => {
+                    mark_unlikely();
+                    return Some(Err(e));
+                }
+            };
+        };
+
+        let data = self.data_section.get();
+        if unlikely(data_offset > data.len()) {
+            return Some(Err(LimboError::Corrupt(
+                "Data section too small for indicated serial type size".into(),
+            )));
+        }
+        match read_value_serial_type(&data[data_offset..], last_serial_type) {
+            Ok((value, _)) => Some(Ok(value)),
+            Err(e) => {
+                mark_unlikely();
+                Some(Err(e))
+            }
+        }
+    }
+
     /// Returns the nth element of the iterator.
     #[inline(always)]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -2177,7 +2220,7 @@ impl<'a> Iterator for ValueIterator<'a> {
 
         let data_section = self.data_section.get();
 
-        match crate::storage::sqlite3_ondisk::read_value_serial_type(data_section, serial_type) {
+        match read_value_serial_type(data_section, serial_type) {
             Ok((value, n)) => {
                 self.data_section.set(&data_section[n..]);
                 Some(Ok(value))
@@ -3899,6 +3942,43 @@ mod tests {
         assert_eq!(values[4], ValueRef::Blob(&[1, 2, 3]));
         assert_eq!(values[5], ValueRef::from_i64(0));
         assert_eq!(values[6], ValueRef::from_i64(1));
+    }
+
+    #[test]
+    fn test_value_iterator_last_decodes_only_the_last_value() {
+        let mut buf = std::vec::Vec::new();
+        let record = Record::new(vec![
+            Value::Null,
+            Value::from_i64(100),
+            Value::from_f64(std::f64::consts::PI),
+            Value::Text(Text::new("test")),
+            Value::from_slice(&[1, 2, 3]).expect(crate::alloc::ALLOC_ERR_MSG),
+            Value::from_i64(0),
+            Value::from_i64(1),
+            Value::from_i64(-7_000_000_000),
+        ]);
+        record.serialize(&mut buf);
+
+        let iter = ValueIterator::new(&buf).unwrap();
+        assert_eq!(
+            iter.last().unwrap().unwrap(),
+            ValueRef::from_i64(-7_000_000_000)
+        );
+
+        let mut buf = std::vec::Vec::new();
+        let record = Record::new(vec![Value::Text(Text::new("only"))]);
+        record.serialize(&mut buf);
+        let iter = ValueIterator::new(&buf).unwrap();
+        assert_eq!(
+            iter.last().unwrap().unwrap(),
+            ValueRef::Text(TextRef::new("only", TextSubtype::Text))
+        );
+
+        let mut buf = std::vec::Vec::new();
+        let record = Record::new(vec![]);
+        record.serialize(&mut buf);
+        let iter = ValueIterator::new(&buf).unwrap();
+        assert!(iter.last().is_none());
     }
 
     #[test]
