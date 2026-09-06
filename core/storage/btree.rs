@@ -1167,7 +1167,16 @@ impl BTreeNodeState {
 }
 
 impl BTreeCursor {
-    pub fn new(pager: Arc<Pager>, root_page: i64, _num_columns: usize) -> Self {
+    pub fn new(pager: Arc<Pager>, root_page: i64, num_columns: usize) -> Self {
+        Self::new_with_index_info(pager, root_page, num_columns, None)
+    }
+
+    fn new_with_index_info(
+        pager: Arc<Pager>,
+        root_page: i64,
+        _num_columns: usize,
+        index_info: Option<Arc<IndexInfo>>,
+    ) -> Self {
         let valid_state = if root_page == 1 && !pager.db_initialized() {
             CursorValidState::Invalid
         } else {
@@ -1192,7 +1201,7 @@ impl BTreeCursor {
             },
             reusable_immutable_record: None,
             noted_payload: NotedPayload::NONE,
-            index_info: None,
+            index_info,
             count: 0,
             context: None,
             valid_state,
@@ -1247,7 +1256,6 @@ impl BTreeCursor {
         table: &BTreeTable,
         num_columns: usize,
     ) -> Self {
-        let mut cursor = Self::new(pager, root_page, num_columns);
         let key_info = table.primary_key_columns.iter().map(|(col_name, order)| {
             let (_, column) = table
                 .get_column(col_name)
@@ -1258,11 +1266,11 @@ impl BTreeCursor {
                 nulls_order: None,
             }
         });
-        cursor.index_info = Some(Arc::new(
+        let index_info = Arc::new(
             IndexInfo::new(key_info, false, table.primary_key_columns.len(), true)
                 .expect(crate::alloc::ALLOC_ERR_MSG),
-        ));
-        cursor
+        );
+        Self::new_with_index_info(pager, root_page, num_columns, Some(index_info))
     }
 
     pub fn new_index(
@@ -1271,9 +1279,23 @@ impl BTreeCursor {
         index: &Index,
         num_columns: usize,
     ) -> Result<Self> {
-        let mut cursor = Self::new(pager, root_page, num_columns);
-        cursor.index_info = Some(Arc::new(IndexInfo::new_from_index(index)?));
-        Ok(cursor)
+        let index_info = Arc::new(IndexInfo::new_from_index(index)?);
+        Ok(Self::new_with_index_info(
+            pager,
+            root_page,
+            num_columns,
+            Some(index_info),
+        ))
+    }
+
+    pub fn new_index_boxed(
+        pager: Arc<Pager>,
+        root_page: i64,
+        index: &Index,
+        num_columns: usize,
+    ) -> Result<Box<Self>> {
+        let index_info = Arc::new(IndexInfo::new_from_index(index)?);
+        Ok(Self::new_with_index_info(pager, root_page, num_columns, Some(index_info)).into_boxed())
     }
 
     /// Resets the cached count state so the next `count()` call re-traverses the

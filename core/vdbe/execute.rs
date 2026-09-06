@@ -1426,13 +1426,12 @@ pub fn op_open_read(
                 .replace(cursor.into_cursor());
         }
         CursorType::BTreeIndex(index) => {
-            let btree_cursor = BTreeCursor::new_index(
+            let btree_cursor = BTreeCursor::new_index_boxed(
                 pager,
                 maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                 index.as_ref(),
                 num_columns,
-            )?
-            .into_boxed();
+            )?;
             let index_info = Arc::new(if let Some(mv_store) = mv_store.as_ref() {
                 IndexInfo::new_from_index_in(index, mv_store.allocator())?
             } else {
@@ -13653,12 +13652,12 @@ pub fn op_open_write(
         if let Some(index) = maybe_index {
             let num_columns = index.columns.len();
             let btree_cursor = btree_cursor_with_yield_context(
-                Box::new(BTreeCursor::new_index(
+                BTreeCursor::new_index_boxed(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), root_page),
                     index.as_ref(),
                     num_columns,
-                )?),
+                )?,
                 &program.connection,
             );
             let index_info = Arc::new(if let Some(mv_store) = mv_store.as_ref() {
