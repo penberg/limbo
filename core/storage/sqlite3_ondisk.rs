@@ -1117,7 +1117,7 @@ pub fn read_value<'a>(buf: &'a [u8], serial_type: SerialType) -> Result<(ValueRe
                     content_size
                 ))
             })?;
-            let val = simdutf8::basic::from_utf8(data).map_err(|_| {
+            let val = crate::types::validate_utf8(data).ok_or_else(|| {
                 mark_unlikely();
                 LimboError::Corrupt("TEXT value contains invalid UTF-8".into())
             })?;
@@ -1247,7 +1247,7 @@ pub fn read_value_serial_type<'a>(
                         content_size
                     ))
                 })?;
-                let val = simdutf8::basic::from_utf8(data).map_err(|_| {
+                let val = crate::types::validate_utf8(data).ok_or_else(|| {
                     mark_unlikely();
                     LimboError::Corrupt("TEXT value contains invalid UTF-8".into())
                 })?;
@@ -1409,6 +1409,7 @@ pub fn varint_len(value: u64) -> usize {
     }
 }
 
+#[inline]
 pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     if value <= 0x7f {
         buf[0] = (value & 0x7f) as u8;

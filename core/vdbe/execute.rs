@@ -511,13 +511,14 @@ pub fn op_divide(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(Divide { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_divide(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    // A zero divisor (NULL) and i64::MIN / -1 (a float quotient) stay on
+    // the slow path, which handles them like every other operand mix.
+    if let Some(result) = integer_operands(state, *lhs, *rhs).and_then(|(l, r)| l.checked_div(r)) {
+        state.registers[*dest].set_int(result);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_divide)
 }
 
 pub fn op_drop_index(
@@ -549,13 +550,14 @@ pub fn op_remainder(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(Remainder { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_remainder(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    // A zero divisor gives NULL and i64::MIN % -1 overflows: both stay on
+    // the slow path, which handles them like every other operand mix.
+    if let Some(result) = integer_operands(state, *lhs, *rhs).and_then(|(l, r)| l.checked_rem(r)) {
+        state.registers[*dest].set_int(result);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_remainder)
 }
 
 pub fn op_bit_and(
@@ -565,13 +567,12 @@ pub fn op_bit_and(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(BitAnd { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_bit_and(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    if let Some((l, r)) = integer_operands(state, *lhs, *rhs) {
+        state.registers[*dest].set_int(l & r);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_bit_and)
 }
 
 pub fn op_bit_or(
@@ -581,13 +582,12 @@ pub fn op_bit_or(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(BitOr { lhs, rhs, dest }, insn);
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_bit_or(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    if let Some((l, r)) = integer_operands(state, *lhs, *rhs) {
+        state.registers[*dest].set_int(l | r);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_bit_or)
 }
 
 pub fn op_bit_not(
@@ -830,6 +830,20 @@ pub fn op_compare(
 
     if unlikely(start_reg_a + count > start_reg_b) {
         return Err(LimboError::InternalError("Compare registers overlap".to_string()).into());
+    }
+
+    // One integer against another needs no collation and no NULL order:
+    // the case of every GROUP BY on an integer key.
+    if key_info.len() == 1 {
+        if let Some((a, b)) = integer_operands(state, start_reg_a, start_reg_b) {
+            let cmp = a.cmp(&b);
+            state.last_compare = Some(match key_info[0].sort_order {
+                turso_parser::ast::SortOrder::Asc => cmp,
+                turso_parser::ast::SortOrder::Desc => cmp.reverse(),
+            });
+            state.pc += 1;
+            return Ok(InsnFunctionStepResult::Step);
+        }
     }
 
     // (https://github.com/tursodatabase/turso/issues/2304): reusing logic from compare_immutable().
@@ -1321,11 +1335,12 @@ pub fn op_open_read(
             // This is a materialized view with storage
             // Create btree cursor for reading the persistent data
 
-            let btree_cursor = Box::new(BTreeCursor::new_table(
+            let btree_cursor = BTreeCursor::new_table(
                 pager.clone(),
                 maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                 num_columns,
-            ));
+            )
+            .into_boxed();
             let cursor = maybe_promote_to_mvcc_cursor(btree_cursor, MvccCursorType::Table)?;
 
             // Get the view name and look up or create its transaction state
@@ -1357,18 +1372,20 @@ pub fn op_open_read(
                 .into());
             }
             let btree_cursor: Box<dyn CursorTrait> = if table.has_rowid {
-                Box::new(BTreeCursor::new_table(
+                BTreeCursor::new_table(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                     num_columns,
-                ))
+                )
+                .into_boxed()
             } else {
-                Box::new(BTreeCursor::new_without_rowid_table(
+                BTreeCursor::new_without_rowid_table(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                     table.as_ref(),
                     num_columns,
-                ))
+                )
+                .into_boxed()
             };
             let cursor = maybe_promote_to_mvcc_cursor(btree_cursor, MvccCursorType::Table)?;
             cursors
@@ -1377,12 +1394,13 @@ pub fn op_open_read(
                 .replace(Cursor::new_btree(cursor));
         }
         CursorType::BTreeIndex(index) => {
-            let btree_cursor = Box::new(BTreeCursor::new_index(
+            let btree_cursor = BTreeCursor::new_index(
                 pager,
                 maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
                 index.as_ref(),
                 num_columns,
-            )?);
+            )?
+            .into_boxed();
             let index_info = Arc::new(if let Some(mv_store) = mv_store.as_ref() {
                 IndexInfo::new_from_index_in(index, mv_store.allocator())?
             } else {
@@ -2079,34 +2097,73 @@ fn op_column_fetch(
     dest: usize,
     default: &Option<Value>,
 ) -> InsnResult {
-    let Some(Cursor::BTree(cursor)) = state
+    let cursor = match state
         .cursors
         .get_mut(cursor_id)
         .unwrap_or_else(|| panic!("cursor id {cursor_id} out of bounds"))
-    else {
-        return op_column_fetch_other(program, state, cursor_id, column, dest, default);
-    };
-    if cursor.get_null_flag() {
-        tracing::trace!("op_column(null_flag)");
-        state.registers[dest].set_null();
-        return Ok(InsnFunctionStepResult::Step);
-    }
-    let Some(record) = return_if_io!(cursor.record()) else {
-        // Cursor is not positioned on a valid row (e.g., empty table).
-        // Return NULL, not the column's default value.
-        state.registers[dest].set_null();
-        return Ok(InsnFunctionStepResult::Step);
-    };
-    match record
-        .iter()?
-        .nth_into_register(column, &mut state.registers[dest])
     {
+        Some(Cursor::BTree(cursor)) => cursor,
+        Some(Cursor::Pseudo(pseudo)) => {
+            let content_reg = pseudo.content_reg();
+            return op_column_fetch_pseudo(state, content_reg, column, dest);
+        }
+        _ => return op_column_fetch_other(program, state, cursor_id, column, dest, default),
+    };
+    let Some(payload) = return_if_io!(cursor.record_payload()) else {
+        // A null-row cursor, or one that is not positioned on a valid row
+        // (e.g., empty table). Return NULL, not the column's default value.
+        state.registers[dest].set_null();
+        return Ok(InsnFunctionStepResult::Step);
+    };
+    match ValueIterator::new(payload)?.nth_into_register(column, &mut state.registers[dest]) {
         Some(result) => result?,
         None => {
             branches::mark_unlikely();
             // The record has fewer columns than expected.
             apply_column_default(default, &mut state.registers[dest])?;
         }
+    }
+    Ok(InsnFunctionStepResult::Step)
+}
+
+/// Column for a pseudo cursor: decodes the record in its content register.
+fn op_column_fetch_pseudo(
+    state: &mut ProgramState,
+    content_reg: usize,
+    column: usize,
+    dest: usize,
+) -> InsnResult {
+    // The record is read while decoding into the destination register,
+    // so the two registers must be distinct.
+    let [content, dest_reg] = state
+        .registers
+        .get_disjoint_mut([content_reg, dest])
+        .map_err(|_| {
+            LimboError::InternalError(format!(
+                "Column: pseudo-cursor content register {content_reg} and destination register {dest} must be distinct"
+            ))
+        })?;
+    match content {
+        Register::Record(record) => {
+            // Decode straight into the register; going through an owned
+            // Value would allocate for every TEXT/BLOB column on every row.
+            let mut payload_iterator = record.iter()?;
+            match payload_iterator.nth_into_register(column, dest_reg) {
+                Some(result) => result?,
+                // A pseudo cursor is opened with num_fields matching the
+                // record built for it, so every emitted Column index is in
+                // range. NULL on a missing column matches the b-tree arm.
+                None => {
+                    turso_debug_assert!(
+                        false,
+                        "pseudo-cursor column out of range for record",
+                        { "column": column }
+                    );
+                    dest_reg.set_null();
+                }
+            }
+        }
+        _ => dest_reg.set_null(),
     }
     Ok(InsnFunctionStepResult::Step)
 }
@@ -2207,38 +2264,7 @@ fn op_column_fetch_other(
             let content_reg = crate::get_cursor!(state, cursor_id)
                 .as_pseudo_mut()
                 .content_reg();
-            // The record is read while decoding into the destination register,
-            // so the two registers must be distinct.
-            let [content, dest_reg] = state
-                .registers
-                .get_disjoint_mut([content_reg, dest])
-                .map_err(|_| {
-                    LimboError::InternalError(format!(
-                        "Column: pseudo-cursor content register {content_reg} and destination register {dest} must be distinct"
-                    ))
-                })?;
-            match content {
-                Register::Record(record) => {
-                    // Decode straight into the register; going through an owned
-                    // Value would allocate for every TEXT/BLOB column on every row.
-                    let mut payload_iterator = record.iter()?;
-                    match payload_iterator.nth_into_register(column, dest_reg) {
-                        Some(result) => result?,
-                        // A pseudo cursor is opened with num_fields matching the
-                        // record built for it, so every emitted Column index is in
-                        // range. NULL on a missing column matches the b-tree arm.
-                        None => {
-                            turso_debug_assert!(
-                                false,
-                                "pseudo-cursor column out of range for record",
-                                { "column": column }
-                            );
-                            dest_reg.set_null();
-                        }
-                    }
-                }
-                _ => dest_reg.set_null(),
-            }
+            return op_column_fetch_pseudo(state, content_reg, column, dest);
         }
         CursorType::IndexMethod(..) => {
             let cursor = state.cursors[cursor_id]
@@ -2297,21 +2323,13 @@ fn op_column_range_fetch(
             defaults,
         );
     };
-    if cursor.get_null_flag() {
-        tracing::trace!("op_column_range(null_flag)");
-        for reg in &mut state.registers[dest..dest + count] {
-            reg.set_null();
-        }
-        return Ok(InsnFunctionStepResult::Step);
-    }
-    let Some(record) = return_if_io!(cursor.record()) else {
+    let Some(payload) = return_if_io!(cursor.record_payload()) else {
         for reg in &mut state.registers[dest..dest + count] {
             reg.set_null();
         }
         return Ok(InsnFunctionStepResult::Step);
     };
-    let filled = record
-        .iter()?
+    let filled = ValueIterator::new(payload)?
         .decode_into_registers_after(start_column, &mut state.registers[dest..dest + count])?;
     if filled < count {
         branches::mark_unlikely();
@@ -3280,7 +3298,7 @@ pub fn op_make_record(
     let buf = state.registers[dest_reg].take_buf();
     let regs = &state.registers[start_reg..start_reg + count];
     let record = ImmutableRecord::build_from_registers(regs, buf)?;
-    state.registers[dest_reg] = Register::Record(record);
+    state.registers[dest_reg].put_record_into_null_register(record);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
@@ -4137,7 +4155,7 @@ pub fn op_halt_if_null(
         },
         insn
     );
-    if state.registers[*target_reg].get_value() == &Value::Null {
+    if matches!(state.registers[*target_reg].get_value(), Value::Null) {
         halt(program, state, pager, *err_code, description, None)
     } else {
         state.pc += 1;
@@ -5966,10 +5984,7 @@ pub fn op_row_data(
 
         ImmutableRecord::copy_payload(record.get_payload(), buf)?
     };
-
-    let reg = &mut state.registers[*dest];
-    *reg = Register::Record(record);
-
+    state.registers[*dest].put_record_into_null_register(record);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
@@ -9152,7 +9167,7 @@ pub fn op_sorter_data(
             .take_current(buf)
             .expect("sorter record checked above")
     };
-    state.registers[*dest_reg] = Register::Record(record);
+    state.registers[*dest_reg].put_record_into_null_register(record);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
@@ -9830,7 +9845,7 @@ pub fn op_function(
                 let pattern_value = pattern_reg.get_value();
                 let match_value = match_reg.get_value();
 
-                if pattern_value == &Value::Null || match_value == &Value::Null {
+                if matches!(pattern_value, Value::Null) || matches!(match_value, Value::Null) {
                     state.registers[*dest].set_null();
                 } else {
                     let pattern_cow = match pattern_value {
@@ -9874,7 +9889,7 @@ pub fn op_function(
                 let match_value = match_reg.get_value();
 
                 // 1. Check for NULL inputs
-                if pattern_value == &Value::Null || match_value == &Value::Null {
+                if matches!(pattern_value, Value::Null) || matches!(match_value, Value::Null) {
                     state.registers[*dest].set_null();
                 } else {
                     // 2. Resolve Escape Character (if 3rd arg exists)

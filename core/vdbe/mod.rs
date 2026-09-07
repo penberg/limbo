@@ -327,6 +327,23 @@ impl Register {
         }
     }
 
+    /// Puts `record` into a register and leaks the register's previous value. We do this, because
+    /// the drop glue could not be inlined and was too costly.
+    ///
+    /// Precondition: The register must contain [Value::Null]. It would also be safe to use on any
+    /// [Value] that doesn't own heap memory, but enforcing [Value::Null] is simpler for now.
+    #[aristo::intent(
+        "The function is only called on a register that contains Value::Null.",
+        verify = "full",
+        id = "register_previously_contained_null"
+    )]
+    #[inline]
+    pub fn put_record_into_null_register(&mut self, record: ImmutableRecord) {
+        let emptied = std::mem::replace(self, Register::Record(record));
+        turso_debug_assert!(matches!(emptied, Register::Value(Value::Null)));
+        std::mem::forget(emptied);
+    }
+
     /// Fallibly sets the register to a copy of `val`, reusing the register's
     /// existing allocation when possible; see [Value::try_clone_from].
     #[inline]
@@ -1098,7 +1115,9 @@ impl ProgramState {
             {
                 cursor.close(context);
             }
-            let _ = cursor.take();
+            if let Some(Cursor::BTree(cursor)) = cursor.take() {
+                cursor.recycle();
+            }
             *context = None;
         }
         for (mut cursor, context) in self.closed_index_method_cursors.drain(..) {
@@ -1598,9 +1617,21 @@ pub enum EndStatement {
 }
 
 impl Register {
+    #[inline]
     pub fn get_value(&self) -> &Value {
         match self {
             Register::Value(v) => v,
+            _ => self.get_value_of_other(),
+        }
+    }
+
+    /// The value of a register that holds no plain value: a record reads as
+    /// its blob, anything else is a bug. Kept out of line so that
+    /// `get_value` inlines as a tag check.
+    #[cold]
+    #[inline(never)]
+    fn get_value_of_other(&self) -> &Value {
+        match self {
             Register::Record(r) => {
                 turso_assert!(!r.is_invalidated());
                 r.as_blob_value()
@@ -3679,7 +3710,7 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
                 }
                 self.set_data_section(&data[content_size..]);
                 let text_data = &data[..content_size];
-                let Some(text_str) = validate_utf8(text_data) else {
+                let Some(text_str) = crate::types::validate_utf8(text_data) else {
                     mark_unlikely();
                     return Some(Err(LimboError::Corrupt(
                         "TEXT value contains invalid UTF-8".into(),
@@ -3725,41 +3756,6 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
         }
         Ok(dests.len())
     }
-}
-
-/// UTF-8 validation tuned for record decoding. TEXT values are usually short
-/// ASCII read at arbitrary offsets inside a b-tree page: simdutf8 only uses
-/// SIMD from 64 bytes up, and core's `from_utf8` word-at-a-time path is
-/// alignment-sensitive, so both are slow here. OR-ing every byte together is
-/// alignment-independent and branch-light; if no byte had the high bit set
-/// the value is pure ASCII and needs no further validation. Non-ASCII and
-/// values longer than the cutoff fall back to full simdutf8 validation —
-/// above the cutoff the scalar OR loop loses to real SIMD.
-///
-/// Measured by `core/benches/text_validate_benchmark.rs` (varying slice
-/// alignment, ASCII content) on an Apple M2, macOS 15.7, vs
-/// `simdutf8::basic::from_utf8` alone:
-///
-///   1-128 B:  1.4-4x faster (peak 4.1x at 16 B)
-///   256-512 B: 1.1-1.2x faster
-///   1-2 KB:   parity
-///   4 KB:     ~25% slower without the cutoff; equal with it
-///   multibyte fallback: pays the wasted OR scan (~15% at 64 B)
-///   length branch: ~+0.1ns/call, visible only on 1-2 B values
-#[inline]
-fn validate_utf8(data: &[u8]) -> Option<&str> {
-    const ASCII_SCAN_CUTOFF: usize = 512;
-    if data.len() <= ASCII_SCAN_CUTOFF {
-        let mut acc = 0u8;
-        for &byte in data {
-            acc |= byte;
-        }
-        if acc.is_ascii() {
-            // SAFETY: all bytes are ASCII, which is valid UTF-8.
-            return Some(unsafe { core::str::from_utf8_unchecked(data) });
-        }
-    }
-    simdutf8::basic::from_utf8(data).ok()
 }
 
 #[cfg(test)]
