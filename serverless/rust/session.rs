@@ -65,8 +65,14 @@ pub struct Session {
 
 /// Reads newline-separated JSON values from a cursor response body
 /// (section 7.2).
+#[cfg(not(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"))))]
+type ResponseStream = Pin<Box<dyn futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>;
+
+#[cfg(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none")))]
+type ResponseStream = Pin<Box<dyn futures::Stream<Item = reqwest::Result<bytes::Bytes>>>>;
+
 struct LineReader {
-    stream: Pin<Box<dyn futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>,
+    stream: ResponseStream,
     buf: Vec<u8>,
     eof: bool,
 }
