@@ -335,7 +335,11 @@ fn do_fuzz(Ops(ops): Ops) -> Result<Corpus, Box<dyn Error>> {
     let rusqlite_conn = rusqlite::Connection::open_in_memory()?;
 
     let io = Arc::new(turso_core::MemoryIO::new());
-    let db = turso_core::Database::open_file(io.clone(), ":memory:", false)?;
+    let db = turso_core::Database::open_file(
+        io.clone(),
+        ":memory:",
+        Arc::new(turso_core::SqliteDialect),
+    )?;
     let limbo_conn = db.connect()?;
 
     for op in ops {
