@@ -6081,6 +6081,29 @@ impl BTreeCursor {
         self.has_record() && self.stack.current_cell_index() > 0
     }
 
+    /// True iff the cursor has run off the last cell of the table's rightmost
+    /// leaf: `next()` left it on that leaf with the cell index one past the
+    /// last cell and no record, and no ancestor has a child to the right.
+    ///
+    /// That is the append slot. A key larger than every key in the table
+    /// belongs there, and there is no right-hand divider that could put it
+    /// anywhere else, so the MVCC checkpoint's sequential-write optimization
+    /// can insert here without re-seeking from the root. Without this check
+    /// every append pays a full root-to-leaf seek: `next()` after inserting
+    /// the last cell always runs off the end.
+    pub fn is_at_end_of_rightmost_leaf(&self) -> bool {
+        if self.has_record()
+            || self.valid_state != CursorValidState::Valid
+            || self.stack.current_page < 0
+        {
+            return false;
+        }
+        let contents = self.stack.top_ref().get_contents();
+        contents.is_leaf()
+            && self.stack.current_cell_index() == contents.cell_count() as i32
+            && !self.ancestor_pages_have_more_children()
+    }
+
     /// Rowid of the table-leaf cell the cursor currently sits on, or `None` when the
     /// cursor is not cleanly positioned on a table leaf (index cursors, sentinel
     /// stacks, mid-operation states). Callers that use `None` must treat it as
@@ -14716,5 +14739,63 @@ mod tests {
                 defragment_page(contents, PAGE_SIZE, 4).is_err()
             }
         }
+    }
+
+    /// `next()` past the last row must leave the cursor exactly on the
+    /// append slot the MVCC checkpoint's sequential-write optimization
+    /// inserts into: end of the rightmost leaf, one past the last cell,
+    /// with no ancestor holding a child to the right. The tree is grown
+    /// past one leaf so the predicate has ancestors to check.
+    #[test]
+    fn next_past_the_last_row_lands_on_the_rightmost_leaf_append_slot() {
+        let (pager, root_page, _db, _conn) = empty_btree();
+        let mut cursor = BTreeCursor::new_table(pager.clone(), root_page, 1);
+        let cursor = &mut cursor;
+
+        let payload = crate::alloc::vec![b'X'; 512];
+        let regs = &[Register::Value(Value::Blob(payload))];
+        let record = ImmutableRecord::from_registers(regs, regs.len()).unwrap();
+
+        for rowid in 1..=64 {
+            run_until_done(
+                || cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE { eq_only: true }),
+                pager.deref(),
+            )
+            .unwrap();
+            let key = BTreeKey::new_table_rowid(rowid, Some(&record));
+            run_until_done(|| cursor.insert(&key), pager.deref()).unwrap();
+        }
+
+        run_until_done(|| cursor.rewind(), pager.deref()).unwrap();
+        assert!(
+            !cursor.is_at_end_of_rightmost_leaf(),
+            "a cursor on the first row is not at the append slot"
+        );
+
+        let mut rows = 0;
+        while cursor.has_record {
+            rows += 1;
+            run_until_done(|| cursor.next(), pager.deref()).unwrap();
+        }
+        assert_eq!(rows, 64);
+        assert!(
+            cursor.is_at_end_of_rightmost_leaf(),
+            "next() past the last row must land on the append slot"
+        );
+
+        // Inserting the next consecutive rowid at that position must append.
+        let key = BTreeKey::new_table_rowid(65, Some(&record));
+        run_until_done(|| cursor.insert(&key), pager.deref()).unwrap();
+
+        run_until_done(|| cursor.rewind(), pager.deref()).unwrap();
+        let mut rowids = crate::alloc::vec![];
+        while cursor.has_record {
+            let rowid = run_until_done(|| cursor.rowid(), pager.deref())
+                .unwrap()
+                .unwrap();
+            rowids.push(rowid);
+            run_until_done(|| cursor.next(), pager.deref()).unwrap();
+        }
+        assert_eq!(rowids, (1..=65).collect::<Vec<i64>>());
     }
 }
