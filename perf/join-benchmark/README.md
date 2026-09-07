@@ -8,6 +8,7 @@ Use release builds for runtime tests so the engine uses its production settings.
 `btree_seeks` is the total seek count. `btree_table_seeks` and
 `btree_index_seeks` split that total by cursor type. `btree_deferred_seeks`
 counts table seeks that started after an index returned a row.
+`hash_probe_calls` counts lookups that reach a hash table.
 
 Run the graph query set with analyzed statistics:
 

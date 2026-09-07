@@ -1956,6 +1956,7 @@ impl HashTable {
             Ok(None)
         } else {
             // Normal mode - search in hash buckets
+            self.record_probe_call(metrics);
             let bucket_idx = (hash as usize) % self.buckets.len();
             self.probe_bucket_idx = bucket_idx;
             let match_idx = {
@@ -3403,24 +3404,28 @@ mod hashtests {
         let _ = ht.insert(key2.clone(), 200, vec![], None).unwrap();
 
         let _ = ht.finalize_build(None);
+        let mut metrics = HashJoinMetrics::default();
 
         // Probe for key1
-        let result = ht.probe(key1, None).unwrap();
+        let result = ht.probe(key1, Some(&mut metrics)).unwrap();
         assert!(result.is_some());
         let entry1 = result.unwrap();
         assert_eq!(entry1.key_values[0].as_ref(), ValueRef::from_i64(1));
         assert_eq!(entry1.rowid, 100);
 
         // Probe for key2
-        let result = ht.probe(key2, None).unwrap();
+        let result = ht.probe(key2, Some(&mut metrics)).unwrap();
         assert!(result.is_some());
         let entry2 = result.unwrap();
         assert_eq!(entry2.key_values[0].as_ref(), ValueRef::from_i64(2));
         assert_eq!(entry2.rowid, 200);
 
         // Probe for non-existent key
-        let result = ht.probe(vec![Value::from_i64(999)], None).unwrap();
+        let result = ht
+            .probe(vec![Value::from_i64(999)], Some(&mut metrics))
+            .unwrap();
         assert!(result.is_none());
+        assert_eq!(metrics.probe_calls, 3);
     }
 
     #[test]
