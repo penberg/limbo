@@ -1220,12 +1220,12 @@ impl ProgramState {
 
     #[inline]
     pub fn record_rows_read(&mut self, count: u64) {
-        self.metrics.rows_read = self.metrics.rows_read.saturating_add(count);
+        self.metrics.rows_read = self.metrics.rows_read.wrapping_add(count);
     }
 
     #[inline]
     pub fn record_rows_written(&mut self, count: u64) {
-        self.metrics.rows_written = self.metrics.rows_written.saturating_add(count);
+        self.metrics.rows_written = self.metrics.rows_written.wrapping_add(count);
     }
 
     pub(crate) fn metrics(&self) -> StatementMetrics {
@@ -1751,16 +1751,15 @@ impl Program {
         waker: Option<&Waker>,
     ) -> Result<StepResult, Box<LimboError>> {
         state.execution_state = ProgramExecutionState::Running;
-        let result = match query_mode {
-            QueryMode::Normal => self.normal_step(state, pager, waker),
-            QueryMode::Explain => self.explain_step(state, pager),
-            QueryMode::ExplainQueryPlan {
-                format: EqpFormat::Text,
-            } => self.explain_query_plan_step(state, pager),
-            QueryMode::ExplainQueryPlan {
-                format: EqpFormat::Json,
-            } => self.explain_query_plan_json_step(state, pager),
+        let result = if let QueryMode::Normal = query_mode {
+            self.normal_step(state, pager, waker)
+        } else {
+            self.explain_step_for_mode(state, pager, query_mode)
         };
+        // Rows are the common result and leave the execution state untouched.
+        if let Ok(StepResult::Row) = &result {
+            return result;
+        }
         match &result {
             Ok(StepResult::Done) => {
                 state.execution_state = ProgramExecutionState::Done;
@@ -1774,6 +1773,25 @@ impl Program {
             _ => {}
         }
         result
+    }
+
+    #[inline(never)]
+    fn explain_step_for_mode(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+        query_mode: QueryMode,
+    ) -> Result<StepResult, Box<LimboError>> {
+        match query_mode {
+            QueryMode::Normal => unreachable!("normal queries do not step through explain"),
+            QueryMode::Explain => self.explain_step(state, pager),
+            QueryMode::ExplainQueryPlan {
+                format: EqpFormat::Text,
+            } => self.explain_query_plan_step(state, pager),
+            QueryMode::ExplainQueryPlan {
+                format: EqpFormat::Json,
+            } => self.explain_query_plan_json_step(state, pager),
+        }
     }
 
     fn explain_step(
@@ -1798,7 +1816,7 @@ impl Program {
             return Ok(StepResult::Interrupt);
         }
 
-        state.metrics.vm_steps = state.metrics.vm_steps.saturating_add(1);
+        state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
         let mut explain_state = state.explain_state.write();
 
@@ -1898,7 +1916,7 @@ impl Program {
             }
 
             // FIXME: do we need this?
-            state.metrics.vm_steps = state.metrics.vm_steps.saturating_add(1);
+            state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
             if state.pc as usize >= self.insns.len() {
                 return Ok(StepResult::Done);
@@ -1961,10 +1979,47 @@ impl Program {
         Ok(StepResult::Row)
     }
 
-    #[instrument(skip_all, level = Level::DEBUG)]
-    // inline(always): called once per returned row from step(); outlined it
-    // costs a call plus a 40-byte memory-returned Result per row.
-    #[inline(always)]
+    /// `PRAGMA vdbe_trace`: prints the registers the previous opcode changed
+    /// and the opcode about to run.
+    #[inline(never)]
+    fn trace_registers(&self, state: &mut ProgramState, insn: &Insn, vdbe_trace: bool) {
+        if !vdbe_trace {
+            return;
+        }
+        // Diff registers from PREVIOUS opcode
+        // The last opcode (Halt) won't have its diff printed, but Halt
+        // doesn't write to any registers
+        if let Some(ref old) = state.pre_op_registers {
+            for (i, (old_reg, new_reg)) in old.iter().zip(state.registers.iter()).enumerate() {
+                if old_reg != new_reg {
+                    match new_reg {
+                        Register::Value(v) => eprintln!("R[{i}] = {v}"),
+                        Register::Aggregate(_) => eprintln!("R[{i}] = <aggregate>"),
+                        Register::Record(_) => eprintln!("R[{i}] = <record>"),
+                    }
+                }
+            }
+            state.pre_op_registers = None;
+        }
+
+        // Print CURRENT opcode
+        if matches!(insn, Insn::Init { .. }) {
+            eprintln!("VDBE Trace:");
+        }
+        eprintln!(
+            "{}",
+            explain::insn_to_str(
+                self,
+                state.pc,
+                insn,
+                String::new(),
+                self.explain.comment_at(state.pc)
+            )
+        );
+        // Snapshot for next iteration
+        state.pre_op_registers = Some(state.registers.clone());
+    }
+
     fn normal_step(
         &self,
         state: &mut ProgramState,
@@ -1973,6 +2028,9 @@ impl Program {
     ) -> Result<StepResult, Box<LimboError>> {
         let enable_tracing = tracing::enabled!(tracing::Level::TRACE);
         let vdbe_trace = self.connection.get_vdbe_trace();
+        // One flag for the per-instruction test; the two kinds of tracing are
+        // told apart only once it is set.
+        let trace_insns = enable_tracing || vdbe_trace;
         // Reborrow the instruction list once: reloading it through `self`
         // every iteration defeats LLVM's hoisting because the opcode call
         // below is opaque to it.
@@ -2017,6 +2075,60 @@ impl Program {
                 }
                 state.io_completions = None;
             }
+            // A trigger can return FAIL before the parent program reaches
+            // Halt. FAIL keeps changes made by earlier rows, so their
+            // index-method writes must finish before abort() releases the
+            // statement savepoint and commits those partial changes. The
+            // error is stored by the dispatch loop below, which then comes
+            // back here, and by the IO arm of this block on resume.
+            if state.pending_fail_prepare_error.is_some() {
+                let fail_error = state
+                    .pending_fail_prepare_error
+                    .take()
+                    .expect("checked is_some above");
+                match execute::index_method_stage_statement_all(state) {
+                    Ok(IOResult::Done(())) => {
+                        if let Err(abort_err) = self.abort(pager, Some(&fail_error), state, true) {
+                            tracing::error!(
+                                "Abort failed after preparing FAIL index methods: {abort_err}"
+                            );
+                        }
+                        return Err(fail_error.into());
+                    }
+                    Ok(IOResult::IO(io)) => {
+                        state.pending_fail_prepare_error = Some(fail_error);
+                        io.set_waker(waker);
+                        if io.is_explicit_yield() {
+                            return Ok(StepResult::Yield);
+                        }
+                        let finished = io.finished();
+                        state.io_completions = Some(io);
+                        if !finished {
+                            return Ok(StepResult::IO);
+                        }
+                        continue 'io_check;
+                    }
+                    Err(prepare_error) => {
+                        // FAIL may keep earlier base-table rows only when every
+                        // matching index-method write was staged successfully.
+                        // Once preparation fails, committing those rows would
+                        // leave the table and index out of sync, so roll back the
+                        // whole transaction while returning the real preparation
+                        // error to the caller.
+                        let rollback_error =
+                            LimboError::Raise(ResolveType::Rollback, prepare_error.to_string());
+                        if let Err(abort_err) =
+                            self.abort(pager, Some(&rollback_error), state, true)
+                        {
+                            tracing::error!(
+                                "Abort also failed after FAIL index-method preparation: \
+                                 {abort_err}"
+                            );
+                        }
+                        return Err(prepare_error);
+                    }
+                }
+            }
             loop {
                 // Closed/interrupt/deadline/progress checks run once every
                 // CHECK_INTERVAL instructions instead of on each one (SQLite
@@ -2057,112 +2169,26 @@ impl Program {
                     }
                 }
 
-                // A trigger can return FAIL before the parent program reaches
-                // Halt. FAIL keeps changes made by earlier rows, so their
-                // index-method writes must finish before abort() releases the
-                // statement savepoint and commits those partial changes.
-                if state.pending_fail_prepare_error.is_some() {
-                    let fail_error = state
-                        .pending_fail_prepare_error
-                        .take()
-                        .expect("checked is_some above");
-                    match execute::index_method_stage_statement_all(state) {
-                        Ok(IOResult::Done(())) => {
-                            if let Err(abort_err) =
-                                self.abort(pager, Some(&fail_error), state, true)
-                            {
-                                tracing::error!(
-                                    "Abort failed after preparing FAIL index methods: {abort_err}"
-                                );
-                            }
-                            return Err(fail_error.into());
-                        }
-                        Ok(IOResult::IO(io)) => {
-                            state.pending_fail_prepare_error = Some(fail_error);
-                            io.set_waker(waker);
-                            if io.is_explicit_yield() {
-                                return Ok(StepResult::Yield);
-                            }
-                            let finished = io.finished();
-                            state.io_completions = Some(io);
-                            if !finished {
-                                return Ok(StepResult::IO);
-                            }
-                            continue 'io_check;
-                        }
-                        Err(prepare_error) => {
-                            // FAIL may keep earlier base-table rows only when every
-                            // matching index-method write was staged successfully.
-                            // Once preparation fails, committing those rows would
-                            // leave the table and index out of sync, so roll back the
-                            // whole transaction while returning the real preparation
-                            // error to the caller.
-                            let rollback_error =
-                                LimboError::Raise(ResolveType::Rollback, prepare_error.to_string());
-                            if let Err(abort_err) =
-                                self.abort(pager, Some(&rollback_error), state, true)
-                            {
-                                tracing::error!(
-                                    "Abort also failed after FAIL index-method preparation: \
-                                     {abort_err}"
-                                );
-                            }
-                            return Err(prepare_error);
-                        }
-                    }
-                }
                 let (insn, _) = &insns[state.pc as usize];
-                if enable_tracing {
-                    trace_insn(self, state.pc as InsnReference, insn);
-                    crate::stack::trace_remaining("program_step:opcode");
-                }
-                if vdbe_trace {
-                    // Diff registers from PREVIOUS opcode
-                    // The last opcode (Halt) won't have its diff printed, but Halt
-                    // doesn't write to any registers
-                    if let Some(ref old) = state.pre_op_registers {
-                        for (i, (old_reg, new_reg)) in
-                            old.iter().zip(state.registers.iter()).enumerate()
-                        {
-                            if old_reg != new_reg {
-                                match new_reg {
-                                    Register::Value(v) => eprintln!("R[{i}] = {v}"),
-                                    Register::Aggregate(_) => eprintln!("R[{i}] = <aggregate>"),
-                                    Register::Record(_) => eprintln!("R[{i}] = <record>"),
-                                }
-                            }
-                        }
-                        state.pre_op_registers = None;
+                if trace_insns {
+                    if enable_tracing {
+                        trace_insn(self, state.pc as InsnReference, insn);
+                        crate::stack::trace_remaining("program_step:opcode");
                     }
+                    self.trace_registers(state, insn, vdbe_trace);
+                }
 
-                    // Print CURRENT opcode
-                    if matches!(insn, Insn::Init { .. }) {
-                        eprintln!("VDBE Trace:");
-                    }
-                    eprintln!(
-                        "{}",
-                        explain::insn_to_str(
-                            self,
-                            state.pc,
-                            insn,
-                            String::new(),
-                            self.explain.comment_at(state.pc)
-                        )
-                    );
-                    // Snapshot for next iteration
-                    state.pre_op_registers = Some(state.registers.clone());
-                }
                 // Always increment VM steps for every loop iteration
-                state.metrics.vm_steps = state.metrics.vm_steps.saturating_add(1);
+                state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
                 match insn::dispatch_insn(self, state, insn, pager) {
                     Ok(InsnFunctionStepResult::Step) => {
                         // Instruction completed, moving to next
-                        state.metrics.insn_executed = state.metrics.insn_executed.saturating_add(1);
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                     }
                     Ok(InsnFunctionStepResult::Done) => {
                         // Instruction completed execution
-                        state.metrics.insn_executed = state.metrics.insn_executed.saturating_add(1);
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                         state.auto_txn_cleanup = TxnCleanup::None;
                         return Ok(StepResult::Done);
                     }
@@ -2189,7 +2215,7 @@ impl Program {
                     }
                     Ok(InsnFunctionStepResult::Row) => {
                         // Instruction completed (ResultRow already incremented PC)
-                        state.metrics.insn_executed = state.metrics.insn_executed.saturating_add(1);
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                         return Ok(StepResult::Row);
                     }
                     Err(boxed_err) => match *boxed_err {
@@ -2212,6 +2238,7 @@ impl Program {
                             || matches!(err, LimboError::Raise(ResolveType::Fail, _)) =>
                         {
                             state.pending_fail_prepare_error = Some(err);
+                            continue 'io_check;
                         }
                         err => {
                             if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {

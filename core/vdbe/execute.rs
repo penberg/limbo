@@ -1488,7 +1488,7 @@ pub fn op_vfilter(
         cursor.filter(*idx_num as i32, idx_str, *arg_count, args)?
     };
     // Increment filter_operations metric for virtual table filter
-    state.metrics.filter_operations = state.metrics.filter_operations.saturating_add(1);
+    state.metrics.filter_operations = state.metrics.filter_operations.wrapping_add(1);
     if !has_rows {
         state.pc = pc_if_empty.as_offset_int();
     } else {
@@ -2016,8 +2016,8 @@ fn op_column_impl(
                         }
                     }
                 }
-                state.metrics.btree_seeks = state.metrics.btree_seeks.saturating_add(1);
-                state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+                state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
+                state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
                 *state.active_op_state.column() = OpColumnState::GetColumn;
             }
             OpColumnState::GetColumn => {
@@ -3352,24 +3352,10 @@ pub fn op_next(
         },
         insn
     );
-    assert!(pc_if_next.is_offset());
     let is_empty = {
         let cursor = state.get_cursor(*cursor_id);
         match cursor {
-            Cursor::BTree(btree_cursor) => {
-                // If cursor is in NullRow state, don't advance - just return empty.
-                // This matches SQLite's OP_Next behavior: btreeNext() returns
-                // SQLITE_DONE when eState==CURSOR_INVALID (NullRow calls
-                // sqlite3BtreeClearCursor which sets CURSOR_INVALID).
-                let is_null_row = btree_cursor.get_null_flag();
-                btree_cursor.set_null_flag(false);
-                if is_null_row {
-                    true // is_empty = true
-                } else {
-                    return_if_io!(btree_cursor.next());
-                    btree_cursor.is_empty()
-                }
-            }
+            Cursor::BTree(btree_cursor) => !return_if_io!(btree_cursor.next_row()),
             Cursor::MaterializedView(mv_cursor) => {
                 let has_more = return_if_io!(mv_cursor.next());
                 !has_more
@@ -3385,16 +3371,16 @@ pub fn op_next(
     if !is_empty {
         // Increment metrics for row read
         state.record_rows_read(1);
-        state.metrics.btree_next = state.metrics.btree_next.saturating_add(1);
-        state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+        state.metrics.btree_next = state.metrics.btree_next.wrapping_add(1);
+        state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         // Only steps codegen marked as part of a full table scan count as
         // fullscan steps, matching SQLITE_STMTSTATUS_FULLSCAN_STEP.
         if *fullscan {
-            state.metrics.fullscan_steps = state.metrics.fullscan_steps.saturating_add(1);
+            state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(1);
         }
         if let Some((_, cursor_type)) = program.cursor_ref.get(*cursor_id) {
             if cursor_type.is_index() {
-                state.metrics.index_steps = state.metrics.index_steps.saturating_add(1);
+                state.metrics.index_steps = state.metrics.index_steps.wrapping_add(1);
             }
         }
         state.pc = pc_if_next.as_offset_int();
@@ -3418,34 +3404,23 @@ pub fn op_prev(
         },
         insn
     );
-    assert!(pc_if_prev.is_offset());
     let is_empty = {
         let cursor = must_be_btree_cursor!(*cursor_id, program.cursor_ref, state, "Prev");
-        let cursor = cursor.as_btree_mut();
-        // If cursor is in NullRow state, don't advance - just return empty.
-        // This matches SQLite's OP_Prev behavior which checks nullRow first.
-        let is_null_row = cursor.get_null_flag();
-        cursor.set_null_flag(false);
-        if is_null_row {
-            true // is_empty = true
-        } else {
-            return_if_io!(cursor.prev());
-            cursor.is_empty()
-        }
+        !return_if_io!(cursor.as_btree_mut().prev_row())
     };
     if !is_empty {
         // Increment metrics for row read
         state.record_rows_read(1);
-        state.metrics.btree_prev = state.metrics.btree_prev.saturating_add(1);
-        state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+        state.metrics.btree_prev = state.metrics.btree_prev.wrapping_add(1);
+        state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         // Only steps codegen marked as part of a full table scan count as
         // fullscan steps, matching SQLITE_STMTSTATUS_FULLSCAN_STEP.
         if *fullscan {
-            state.metrics.fullscan_steps = state.metrics.fullscan_steps.saturating_add(1);
+            state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(1);
         }
         if let Some((_, cursor_type)) = program.cursor_ref.get(*cursor_id) {
             if cursor_type.is_index() {
-                state.metrics.index_steps = state.metrics.index_steps.saturating_add(1);
+                state.metrics.index_steps = state.metrics.index_steps.wrapping_add(1);
             }
         }
         state.pc = pc_if_prev.as_offset_int();
@@ -6082,7 +6057,7 @@ pub fn op_seek_rowid(
     };
     // Increment btree_seeks metric for SeekRowid operation after cursor is dropped
     if did_seek {
-        state.metrics.btree_seeks = state.metrics.btree_seeks.saturating_add(1);
+        state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
     }
     state.pc = pc;
     Ok(InsnFunctionStepResult::Step)
@@ -6229,12 +6204,12 @@ pub fn op_seek(
         op,
     ) {
         Ok(SeekInternalResult::Found) => {
-            state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+            state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
             state.pc += 1;
             Ok(InsnFunctionStepResult::Step)
         }
         Ok(SeekInternalResult::NotFound) => {
-            state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+            state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
             state.pc = target_pc.as_offset_int();
             Ok(InsnFunctionStepResult::Step)
         }
@@ -6473,7 +6448,7 @@ pub fn seek_internal(
                         }
                     };
                     // Increment btree_seeks metric after seek operation and cursor is dropped
-                    state.metrics.btree_seeks = state.metrics.btree_seeks.saturating_add(1);
+                    state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
                     let found = match seek_result {
                         SeekResult::Found => true,
                         SeekResult::NotFound => false,
@@ -8976,7 +8951,7 @@ pub fn op_sorter_sort(
     };
     // Increment metrics for sort operation after cursor is dropped
     if did_sort {
-        state.metrics.sort_operations = state.metrics.sort_operations.saturating_add(1);
+        state.metrics.sort_operations = state.metrics.sort_operations.wrapping_add(1);
     }
     state.metrics.search_count = state.metrics.search_count.saturating_sub(1);
     if is_empty {
@@ -9008,7 +8983,7 @@ pub fn op_sorter_next(
         cursor.has_more()
     };
     if has_more {
-        state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+        state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         state.pc = pc_if_next.as_offset_int();
     } else {
         state.pc += 1;

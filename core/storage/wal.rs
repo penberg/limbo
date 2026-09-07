@@ -3656,7 +3656,7 @@ impl Wal for WalFile {
                     { "page_id": page.get().id }
                 );
                 turso_assert!(
-                    page.get().buffer.is_none(),
+                    page.get().buffer().is_none(),
                     "read_frames_batch target page must not already retain a buffer",
                     { "page_id": page.get().id }
                 );
@@ -4950,8 +4950,7 @@ impl WalFile {
                         {
                             let buffer = cached_page
                                 .get_contents()
-                                .buffer
-                                .as_ref()
+                                .buffer()
                                 .expect("buffer missing")
                                 .clone();
                             {
@@ -7114,7 +7113,7 @@ pub mod test {
                 page.get().id
             );
             assert!(
-                page.get().buffer.is_none(),
+                page.get().buffer().is_none(),
                 "page {} should not retain a buffer",
                 page.get().id
             );

@@ -668,6 +668,29 @@ pub trait CursorTrait: Any + Send + Sync {
     fn next(&mut self) -> IOResultOr<()>;
     /// Move cursor to previous entry.
     fn prev(&mut self) -> IOResultOr<()>;
+    /// The `Next` opcode in one virtual call: clears the null-row flag and,
+    /// unless it was set, moves to the next entry. Returns whether the cursor
+    /// points at a row afterwards. A NullRow cursor does not advance, like
+    /// SQLite's OP_Next when btreeNext() sees CURSOR_INVALID.
+    fn next_row(&mut self) -> IOResultOr<bool> {
+        let was_null_row = self.get_null_flag();
+        self.set_null_flag(false);
+        if was_null_row {
+            return Ok(IOResult::Done(false));
+        }
+        return_if_io!(self.next());
+        Ok(IOResult::Done(!self.is_empty()))
+    }
+    /// The `Prev` opcode counterpart of [`CursorTrait::next_row`].
+    fn prev_row(&mut self) -> IOResultOr<bool> {
+        let was_null_row = self.get_null_flag();
+        self.set_null_flag(false);
+        if was_null_row {
+            return Ok(IOResult::Done(false));
+        }
+        return_if_io!(self.prev());
+        Ok(IOResult::Done(!self.is_empty()))
+    }
     /// Get the rowid of the entry the cursor is poiting to if any
     fn rowid(&mut self) -> IOResultOr<Option<i64>>;
 
@@ -6382,6 +6405,29 @@ impl CursorTrait for BTreeCursor {
         }
     }
 
+    fn next_row(&mut self) -> IOResultOr<bool> {
+        if self.null_flag {
+            self.null_flag = false;
+            return Ok(IOResult::Done(false));
+        }
+        if self.can_advance_within_leaf() {
+            self.stack.advance();
+            self.invalidate_record();
+            return Ok(IOResult::Done(true));
+        }
+        return_if_io!(self.next());
+        Ok(IOResult::Done(self.has_record))
+    }
+
+    fn prev_row(&mut self) -> IOResultOr<bool> {
+        if self.null_flag {
+            self.null_flag = false;
+            return Ok(IOResult::Done(false));
+        }
+        return_if_io!(self.prev());
+        Ok(IOResult::Done(self.has_record))
+    }
+
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
     fn last(&mut self) -> IOResultOr<()> {
         self.set_null_flag(false);
@@ -7412,6 +7458,7 @@ impl BTreeCursor {
     /// which owns its handling: `skip_advance` (restore landed on the
     /// iteration target; advancing would skip a row), an abandoned
     /// overflow read, and an in-flight spill descent.
+    #[inline(always)]
     fn can_advance_within_leaf(&self) -> bool {
         if !matches!(self.advance_state, AdvanceState::Start)
             || !matches!(self.valid_state, CursorValidState::Valid)
@@ -8356,6 +8403,7 @@ impl PageStack {
         page
     }
 
+    #[inline(always)]
     fn top_ref(&self) -> &PageRef {
         let current = self.current();
         let page = self.stack[current].as_ref().unwrap();
@@ -8371,6 +8419,7 @@ impl PageStack {
     }
 
     /// Cell index of the current page
+    #[inline(always)]
     fn current_cell_index(&self) -> i32 {
         let current = self.current();
         self.node_states[current].cell_idx
@@ -10143,7 +10192,7 @@ mod tests {
 
         {
             let inner = page.get();
-            inner.buffer = Some(Arc::new(Buffer::new_temporary(4096)));
+            inner.set_buffer(Arc::new(Buffer::new_temporary(4096)));
         }
         page.set_loaded();
 
