@@ -34,7 +34,7 @@ use crate::{
         page_cache::PageCache,
         page_transform::PageTransform,
         pager::{self, AutoVacuumMode, HeaderRef, HeaderRefMut},
-        sqlite3_ondisk::{PageSize, RawVersion, TextEncoding, Version},
+        sqlite3_ondisk::{DatabaseHeader, PageSize, RawVersion, TextEncoding, Version},
     },
     sync::{
         self,
@@ -331,6 +331,37 @@ pub enum OpenDbAsyncPhase {
     LoadingSchema,
     BootstrapMvStore,
     Done,
+}
+
+/// Result of [`Database::read_db_header_buf`].
+pub(crate) enum DbHeaderRead {
+    /// The full 512-byte header was read.
+    Full(Arc<Buffer>),
+    /// The file is shorter than the header. Only the first `len` bytes of
+    /// `buf` came from the file, and `err` is the short-read error.
+    Short {
+        buf: Arc<Buffer>,
+        len: usize,
+        err: CompletionError,
+    },
+}
+
+impl DbHeaderRead {
+    /// The bytes that actually came from the file.
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Full(buf) => buf.as_slice(),
+            Self::Short { buf, len, .. } => &buf.as_slice()[..*len],
+        }
+    }
+
+    /// The short-read error, if the file is shorter than the header.
+    fn short_read(&self) -> Option<CompletionError> {
+        match self {
+            Self::Full(_) => None,
+            Self::Short { err, .. } => Some(*err),
+        }
+    }
 }
 
 /// Sub state machine for [`Database::read_db_header_buf`], the non-blocking
@@ -1671,7 +1702,8 @@ impl Database {
                     *st = InitState::InitPager(DbHeaderReadState::default());
                 }
                 InitState::InitPager(hdr_st) => {
-                    let pager = return_if_io!(self.init_pager(None, hdr_st, page_codec));
+                    let pager =
+                        return_if_io!(self.init_pager(None, hdr_st, encryption_key, page_codec));
                     pager.enable_encryption(self.opts.enable_encryption);
 
                     // Set up encryption context BEFORE reading the header page.
@@ -2455,8 +2487,9 @@ impl Database {
 
     /// Non-blocking read of the 512-byte database file header (page 1's
     /// header region). Yields the read completion via the supplied state until
-    /// it finishes, then returns the filled buffer.
-    fn read_db_header_buf(&self, st: &mut DbHeaderReadState) -> IOResultOr<Arc<Buffer>> {
+    /// it finishes. The header may not be complete, in which case a
+    /// [`DbHeaderRead::Short`] is returned.
+    fn read_db_header_buf(&self, st: &mut DbHeaderReadState) -> IOResultOr<DbHeaderRead> {
         loop {
             match st {
                 DbHeaderReadState::Start => {
@@ -2469,16 +2502,26 @@ impl Database {
                     let c = self.db_file.read_header(c)?;
                     *st = DbHeaderReadState::Reading { buf, completion: c };
                 }
-                DbHeaderReadState::Reading { buf, completion } => {
-                    if let Some(err) = completion.get_error() {
-                        *st = DbHeaderReadState::Start;
-                        return Err(err.into());
-                    }
-                    if !completion.succeeded() {
+                DbHeaderReadState::Reading { completion, .. } => {
+                    let err = completion.get_error();
+                    if err.is_none() && !completion.succeeded() {
                         let c = completion.clone();
                         io_yield_one!(c);
                     }
-                    return Ok(IOResult::Done(buf.clone()));
+                    let DbHeaderReadState::Reading { buf, .. } = std::mem::take(st) else {
+                        unreachable!("header read state must be Reading here");
+                    };
+                    return match err {
+                        None => Ok(IOResult::Done(DbHeaderRead::Full(buf))),
+                        Some(err @ CompletionError::ShortRead { actual, .. }) => {
+                            Ok(IOResult::Done(DbHeaderRead::Short {
+                                buf,
+                                len: actual,
+                                err,
+                            }))
+                        }
+                        Some(err) => Err(err.into()),
+                    };
                 }
             }
         }
@@ -2926,17 +2969,24 @@ impl Database {
         &self,
         requested_page_size: Option<usize>,
         hdr_st: &mut DbHeaderReadState,
+        encryption_key: Option<&EncryptionKey>,
         page_codec: Option<&Arc<dyn PageCodec>>,
     ) -> IOResultOr<Pager> {
         let cipher = self.encryption_cipher_mode.get();
+        let encrypted = encryption_key.is_some() || !matches!(cipher, CipherMode::None);
 
         // For an existing (initialized) database, read the 512-byte header
         // once (non-blocking) and recover both the reserved-space byte and the
         // on-disk page size from it.
         let (header_reserved_bytes, header_page_size) = if self.initialized() {
-            let buf = return_if_io!(self.read_db_header_buf(hdr_st));
+            let header = return_if_io!(self.read_db_header_buf(hdr_st));
             if let Some(codec) = page_codec {
-                let header_info = codec.bootstrap_page_info(buf.as_slice())?;
+                // A codec may transform the magic bytes, so a short codec
+                // file cannot be judged here.
+                if let Some(err) = header.short_read() {
+                    return Err(err.into());
+                }
+                let header_info = codec.bootstrap_page_info(header.bytes())?;
                 let page_size_u32 = u32::try_from(header_info.page_size).map_err(|_| {
                     LimboError::InvalidArgument(format!(
                         "page codec reported invalid page size {}",
@@ -2960,9 +3010,7 @@ impl Database {
                 }
                 (Some(header_info.reserved_space), Some(page_size))
             } else {
-                let reserved = u8::from_be_bytes(buf.as_slice()[20..21].try_into().unwrap());
-                let ps_raw = u16::from_be_bytes(buf.as_slice()[16..18].try_into().unwrap());
-                let page_size = PageSize::new_from_header_u16(ps_raw)?;
+                let (reserved, page_size) = Self::plain_header_page_info(&header, encrypted)?;
                 (Some(reserved), Some(page_size))
             }
         } else {
@@ -3029,6 +3077,37 @@ impl Database {
         }
 
         Ok(IOResult::Done(pager))
+    }
+
+    /// Recovers the page size and reserved-space byte from a database header
+    /// that is not handled by a page codec.
+    ///
+    /// The magic bytes are not judged here: an encrypted database carries the
+    /// Turso prefix instead, and its key may arrive only after connect (PRAGMA
+    /// key). The magic is checked at open validation, where the key is known.
+    fn plain_header_page_info(header: &DbHeaderRead, encrypted: bool) -> Result<(u8, PageSize)> {
+        // SQLite zero-fills a file shorter than a page before judging its
+        // header (btree.c lockBtree), so a short file is judged the same way.
+        let mut bytes = [0u8; DatabaseHeader::SIZE];
+        let read = header.bytes();
+        let len = read.len().min(bytes.len());
+        bytes[..len].copy_from_slice(&read[..len]);
+
+        let reserved = bytes[20];
+        let page_size = PageSize::new_from_header_u16(u16::from_be_bytes([bytes[16], bytes[17]]));
+
+        let judge_as_sqlite = !encrypted && !bytes.starts_with(TURSO_HEADER_PREFIX);
+        if judge_as_sqlite
+            && !page_size
+                .as_ref()
+                .is_ok_and(|page_size| page_size.has_valid_reserved_space(reserved))
+        {
+            return Err(LimboError::NotADB);
+        }
+        if let Some(err) = header.short_read() {
+            return Err(err.into());
+        }
+        Ok((reserved, page_size?))
     }
 
     #[cfg(feature = "fs")]
