@@ -2068,6 +2068,9 @@ fn op_column_deferred(
                     }
                 }
                 state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
+                state.metrics.btree_table_seeks = state.metrics.btree_table_seeks.wrapping_add(1);
+                state.metrics.btree_deferred_seeks =
+                    state.metrics.btree_deferred_seeks.wrapping_add(1);
                 state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
                 *state.active_op_state.column() = OpColumnState::GetColumn;
             }
@@ -6268,6 +6271,7 @@ pub fn op_seek_rowid(
     // Increment btree_seeks metric for SeekRowid operation after cursor is dropped
     if did_seek {
         state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
+        state.metrics.btree_table_seeks = state.metrics.btree_table_seeks.wrapping_add(1);
     }
     state.pc = pc;
     Ok(InsnFunctionStepResult::Step)
@@ -6659,6 +6663,13 @@ pub fn seek_internal(
                     };
                     // Increment btree_seeks metric after seek operation and cursor is dropped
                     state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
+                    if is_index {
+                        state.metrics.btree_index_seeks =
+                            state.metrics.btree_index_seeks.wrapping_add(1);
+                    } else {
+                        state.metrics.btree_table_seeks =
+                            state.metrics.btree_table_seeks.wrapping_add(1);
+                    }
                     let found = match seek_result {
                         SeekResult::Found => true,
                         SeekResult::NotFound => false,

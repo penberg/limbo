@@ -1858,6 +1858,24 @@ mod tests {
     }
 
     #[test]
+    fn test_seek_metrics_separate_index_and_table_work() {
+        let conn = open_test_connection().unwrap();
+        conn.execute("CREATE TABLE t(a, b)").unwrap();
+        conn.execute("CREATE INDEX t_a ON t(a)").unwrap();
+        conn.execute("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
+            .unwrap();
+
+        let mut stmt = conn.prepare("SELECT b FROM t WHERE a = 2").unwrap();
+        stmt.run_collect_rows().unwrap();
+        let metrics = stmt.metrics();
+
+        assert_eq!(metrics.btree_seeks, 2);
+        assert_eq!(metrics.btree_table_seeks, 1);
+        assert_eq!(metrics.btree_index_seeks, 1);
+        assert_eq!(metrics.btree_deferred_seeks, 1);
+    }
+
+    #[test]
     fn test_run_with_row_callback_nonblock_collects_all_rows() {
         let conn = open_test_connection().unwrap();
         conn.execute("CREATE TABLE t(x)").unwrap();

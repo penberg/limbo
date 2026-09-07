@@ -87,6 +87,9 @@ pub struct StatementMetrics {
 
     // B-tree operations
     pub btree_seeks: u64,
+    pub btree_table_seeks: u64,
+    pub btree_index_seeks: u64,
+    pub btree_deferred_seeks: u64,
     pub btree_next: u64,
     pub btree_prev: u64,
 
@@ -120,6 +123,11 @@ impl StatementMetrics {
         self.sort_operations = self.sort_operations.wrapping_add(other.sort_operations);
         self.filter_operations = self.filter_operations.wrapping_add(other.filter_operations);
         self.btree_seeks = self.btree_seeks.wrapping_add(other.btree_seeks);
+        self.btree_table_seeks = self.btree_table_seeks.wrapping_add(other.btree_table_seeks);
+        self.btree_index_seeks = self.btree_index_seeks.wrapping_add(other.btree_index_seeks);
+        self.btree_deferred_seeks = self
+            .btree_deferred_seeks
+            .wrapping_add(other.btree_deferred_seeks);
         self.btree_next = self.btree_next.wrapping_add(other.btree_next);
         self.btree_prev = self.btree_prev.wrapping_add(other.btree_prev);
         self.search_count = self.search_count.wrapping_add(other.search_count);
@@ -150,6 +158,9 @@ impl fmt::Display for StatementMetrics {
         writeln!(f, "    Filter operations:{}", self.filter_operations)?;
         writeln!(f, "  B-tree Operations:")?;
         writeln!(f, "    Seeks:            {}", self.btree_seeks)?;
+        writeln!(f, "    Table seeks:      {}", self.btree_table_seeks)?;
+        writeln!(f, "    Index seeks:      {}", self.btree_index_seeks)?;
+        writeln!(f, "    Deferred seeks:   {}", self.btree_deferred_seeks)?;
         writeln!(f, "    Next:             {}", self.btree_next)?;
         writeln!(f, "    Prev:             {}", self.btree_prev)?;
         writeln!(f, "  Hash Join:")?;
@@ -273,17 +284,26 @@ mod tests {
         let mut m1 = StatementMetrics::new();
         m1.rows_read = 100;
         m1.vm_steps = 50;
+        m1.btree_table_seeks = 3;
+        m1.btree_index_seeks = 4;
+        m1.btree_deferred_seeks = 2;
         m1.hash_join.spill_bytes_written = 42;
 
         let mut m2 = StatementMetrics::new();
         m2.rows_read = 200;
         m2.vm_steps = 75;
+        m2.btree_table_seeks = 5;
+        m2.btree_index_seeks = 6;
+        m2.btree_deferred_seeks = 1;
         m2.hash_join.spill_bytes_written = 8;
         m2.hash_join.spill_max_partition_bytes = 1024;
 
         m1.merge(&m2);
         assert_eq!(m1.rows_read, 300);
         assert_eq!(m1.vm_steps, 125);
+        assert_eq!(m1.btree_table_seeks, 8);
+        assert_eq!(m1.btree_index_seeks, 10);
+        assert_eq!(m1.btree_deferred_seeks, 3);
         assert_eq!(m1.hash_join.spill_bytes_written, 50);
         assert_eq!(m1.hash_join.spill_max_partition_bytes, 1024);
     }
