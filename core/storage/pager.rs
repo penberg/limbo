@@ -717,6 +717,14 @@ impl PageInner {
         self.read_u8(BTREE_PAGE_TYPE) > PageType::TableInterior as u8
     }
 
+    /// True for table pages (interior or leaf). A corrupt page type byte
+    /// answers false; the record reader reports it when it parses the cell.
+    #[inline(always)]
+    pub fn is_table(&self) -> bool {
+        let page_type = self.read_u8(BTREE_PAGE_TYPE);
+        page_type == PageType::TableLeaf as u8 || page_type == PageType::TableInterior as u8
+    }
+
     pub fn write_database_header(&self, header: &DatabaseHeader) {
         let buf = self.as_ptr();
         buf[0..DatabaseHeader::SIZE].copy_from_slice(bytemuck::bytes_of(header));
@@ -1459,7 +1467,14 @@ pub struct Pager {
     /// Counterpart of SQLite's BtShared.pCursor list; bucketing per root
     /// supplies the BTCF_Multiple fast path (btree.c:9348).
     pub(crate) cursor_registry: Mutex<rustc_hash::FxHashMap<i64, Vec<RegisteredCursor>>>,
+    /// Record buffers retired by closed cursors, kept for the next cursor so
+    /// each statement execution does not allocate and free a page-sized
+    /// buffer per cursor.
+    record_pool: Mutex<Vec<crate::types::RecordBuf>>,
 }
+
+/// Retired record buffers kept per pager. Each holds a page-sized allocation.
+const RECORD_POOL_SIZE: usize = 8;
 
 /// Raw fat pointer to a registered cursor.
 ///
@@ -1748,7 +1763,22 @@ impl Pager {
             #[cfg(target_vendor = "apple")]
             sync_type: AtomicFileSyncType::new(FileSyncType::Fsync),
             cursor_registry: Mutex::new(rustc_hash::FxHashMap::default()),
+            record_pool: Mutex::new(Vec::new()),
         })
+    }
+
+    /// A record buffer retired by an earlier cursor on this pager, if any.
+    pub(crate) fn take_record_buf(&self) -> Option<crate::types::RecordBuf> {
+        self.record_pool.lock().pop()
+    }
+
+    /// Keep a retired record buffer for the next cursor on this pager. Extra
+    /// buffers beyond the pool size are freed.
+    pub(crate) fn recycle_record_buf(&self, buf: crate::types::RecordBuf) {
+        let mut pool = self.record_pool.lock();
+        if pool.len() < RECORD_POOL_SIZE {
+            pool.push(buf);
+        }
     }
 
     /// Add a cursor to the registry. Called from Cursor::new_btree once the
@@ -1782,9 +1812,10 @@ impl Pager {
                 // SAFETY: see RegisteredCursor's invariant.
                 unsafe { surviving.as_mut().set_has_peers_for_external_writes(false) };
             }
-            if bucket.is_empty() {
-                registry.remove(&root);
-            }
+            // An empty bucket stays in the map with its capacity: the next
+            // cursor on this root reuses it instead of inserting a new map
+            // entry and growing a new Vec. Roots are few and bounded by the
+            // schema of the pager, so the map does not grow without limit.
         }
     }
 

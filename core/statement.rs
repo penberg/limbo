@@ -611,7 +611,7 @@ impl Statement {
         if matches!(self.state.execution_state, ProgramExecutionState::Init)
             && self.origin != StatementOrigin::InternalHelper
         {
-            if self.program.connection.mvcc_enabled() {
+            if self.state.db_mv_store(&self.program.connection).is_some() {
                 // MVCC checkpoints can publish internal schema roots without changing
                 // SQLite's schema cookie, so refresh before deciding whether to reprepare.
                 self.program.connection.maybe_update_schema();

@@ -6043,17 +6043,29 @@ impl BTreeCursor {
         Ok(())
     }
 
+    #[inline]
     fn get_immutable_record_or_create(&mut self) -> Result<Option<&mut ImmutableRecord>> {
-        let reusable_immutable_record = &mut self.reusable_immutable_record;
-        if reusable_immutable_record.is_none() {
-            let page_size = self.pager.get_page_size_unchecked().get();
-            let record = crate::with_btree_allocation_site!(
-                RecordPayload,
-                ImmutableRecord::new(page_size as usize)
-            )?;
-            reusable_immutable_record.replace(record);
+        if self.reusable_immutable_record.is_none() {
+            self.allocate_reusable_record()?;
         }
-        Ok(reusable_immutable_record.as_mut())
+        Ok(self.reusable_immutable_record.as_mut())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn allocate_reusable_record(&mut self) -> Result<()> {
+        let record = match self.pager.take_record_buf() {
+            Some(buf) => ImmutableRecord::from_buf(buf),
+            None => {
+                let page_size = self.pager.get_page_size_unchecked().get();
+                crate::with_btree_allocation_site!(
+                    RecordPayload,
+                    ImmutableRecord::new(page_size as usize)
+                )?
+            }
+        };
+        self.reusable_immutable_record.replace(record);
+        Ok(())
     }
 
     fn get_immutable_record(&self) -> Option<&ImmutableRecord> {
@@ -6352,6 +6364,9 @@ impl BTreeCursor {
 impl Drop for BTreeCursor {
     fn drop(&mut self) {
         self.clear_transient_overflow_cells();
+        if let Some(record) = self.reusable_immutable_record.take() {
+            self.pager.recycle_record_buf(record.retire());
+        }
         if !self
             .did_register
             .load(crate::sync::atomic::Ordering::Relaxed)
@@ -6491,8 +6506,7 @@ impl CursorTrait for BTreeCursor {
         if self.has_record() {
             let page = self.stack.top_ref();
             let contents = page.get_contents();
-            let page_type = contents.page_type()?;
-            if page_type.is_table() {
+            if contents.is_table() {
                 let cell_idx = self.stack.current_cell_index();
                 let rowid = contents.cell_table_leaf_read_rowid(cell_idx as usize)?;
                 Ok(IOResult::Done(Some(rowid)))
@@ -6567,17 +6581,11 @@ impl CursorTrait for BTreeCursor {
         if let Some(next_page) = first_overflow_page {
             return_if_io!(self.process_overflow_read(payload, next_page, payload_size))
         } else {
-            self.get_immutable_record_or_create()?
-                .as_mut()
-                .unwrap()
-                .invalidate();
-            crate::with_btree_allocation_site!(
-                RecordPayload,
-                self.get_immutable_record_or_create()?
-                    .as_mut()
-                    .unwrap()
-                    .start_serialization(payload)
-            )?;
+            let record = self
+                .get_immutable_record_or_create()?
+                .expect("record was allocated above");
+            record.invalidate();
+            crate::with_btree_allocation_site!(RecordPayload, record.start_serialization(payload))?;
         };
 
         Ok(IOResult::Done(self.reusable_immutable_record.as_ref()))
@@ -8504,12 +8512,19 @@ impl PageStack {
     /// unpinned again on the next reset, decrementing the pin count of a
     /// page another cursor's stack still relies on.
     fn unpin_all_and_clear_slots(&mut self) {
-        for slot in self.stack.iter_mut() {
+        // Only the slots up to the current page hold pages and states: push
+        // fills the slot above the top and pop clears the top slot.
+        let used = (self.current_page + 1).max(0) as usize;
+        debug_assert!(
+            self.stack[used..].iter().all(|slot| slot.is_none()),
+            "page stack holds a page above its top"
+        );
+        for slot in self.stack[..used].iter_mut() {
             if let Some(page) = slot.take() {
                 let _ = page.try_unpin();
             }
         }
-        for state in self.node_states.iter_mut() {
+        for state in self.node_states[..used].iter_mut() {
             *state = BTreeNodeState::default();
         }
     }
