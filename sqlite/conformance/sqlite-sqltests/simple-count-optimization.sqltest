@@ -109,3 +109,15 @@ expect {
     1
     1
 }
+
+test simple-count-correlated-outer-join-null-extension {
+    CREATE TABLE t0(z);
+    CREATE TABLE t1(a INTEGER NOT NULL);
+    CREATE TABLE t2(b);
+    INSERT INTO t0 VALUES (1);
+    INSERT INTO t2 VALUES (1),(2);
+    SELECT (SELECT count(t2.rowid + t1.a) FROM t2) FROM t0 LEFT JOIN t1 ON t1.a = t0.z;
+}
+expect {
+    0
+}
