@@ -27,6 +27,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 target_dir=${CARGO_TARGET_DIR:-target}
+# The bench job runs on a fresh checkout with no cargo cache, so the target
+# directory the bookkeeping files below are written to does not exist yet.
+mkdir -p "$target_dir"
 
 # Same target list as `make bench-exclude-tpc-h`.
 bench_targets() {
