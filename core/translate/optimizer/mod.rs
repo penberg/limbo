@@ -824,6 +824,7 @@ fn detect_simple_aggregate(plan: &SelectPlan) -> Option<SimpleAggregate> {
     }
 
     let is_unfiltered_btree_count = matches!(table_ref.table, Table::BTree(..))
+        && plan.table_references.outer_query_refs().is_empty()
         && plan.where_clause.is_empty()
         && plan.offset.is_none();
 
