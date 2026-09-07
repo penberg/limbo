@@ -1890,105 +1890,105 @@ impl BTreeCursor {
         cell_count: usize,
         state: &mut InteriorPageBinarySearchState,
     ) -> Result<ControlFlow<IOResult<()>>> {
-        let min = state.min_cell_idx;
-        let max = state.max_cell_idx;
-        if min > max {
-            if let Some(nearest_matching_cell) = state.nearest_matching_cell {
-                let left_child_page = self
-                    .stack
-                    .get_page_contents_at_level(old_top_idx)
-                    .unwrap()
-                    .cell_interior_read_left_child_page(nearest_matching_cell)?;
-                // On `IO(spill_c)` we keep `seek_state` at
-                // `InteriorPageBinarySearch` (the caller persists `state` to
-                // it after we return), so re-entry retries this same step
-                // with no double-push and no cell-index drift.
-                match self.read_page(left_child_page as i64)? {
-                    IOResult::Done((mem_page, c)) => {
-                        self.stack.set_cell_index(nearest_matching_cell as i32);
-                        self.stack.push(mem_page);
-                        self.seek_state = CursorSeekState::MovingBetweenPages {
-                            eq_seen: state.eq_seen,
-                        };
-                        if let Some(c) = c {
-                            return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
-                        }
-                        return Ok(ControlFlow::Continue(()));
-                    }
-                    IOResult::IO(IOCompletions(spill_c)) => {
-                        return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))));
-                    }
+        // The compares need no I/O, so narrow the range on this page in one
+        // go. The caller persists the state once afterwards, before the child
+        // page read below, which is the only step here that can yield.
+        {
+            let contents = self.stack.get_page_contents_at_level(old_top_idx).unwrap();
+            while state.min_cell_idx <= state.max_cell_idx {
+                let cur_cell_idx = (state.min_cell_idx + state.max_cell_idx) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
+                let cell_rowid = contents.cell_table_interior_read_rowid(cur_cell_idx as usize)?;
+                // in sqlite btrees left child pages have <= keys.
+                // table btrees can have a duplicate rowid in the interior cell, so for example if we are looking for rowid=10,
+                // and we find an interior cell with rowid=10, we need to move to the left page since (due to the <= rule of sqlite btrees)
+                // the left page may have a rowid=10.
+                // Logic table for determining if target leaf page is in left subtree
+                //
+                // Forwards iteration (looking for first match in tree):
+                // OP  | Current Cell vs Seek Key   | Action?  | Explanation
+                // GT  | >                          | go left  | First > key is in left subtree
+                // GT  | = or <                     | go right | First > key is in right subtree
+                // GE  | > or =                     | go left  | First >= key is in left subtree
+                // GE  | <                          | go right | First >= key is in right subtree
+                //
+                // Backwards iteration (looking for last match in tree):
+                // OP  | Current Cell vs Seek Key   | Action?  | Explanation
+                // LE  | > or =                     | go left  | Last <= key is in left subtree
+                // LE  | <                          | go right | Last <= key is in right subtree
+                // LT  | > or =                     | go left  | Last < key is in left subtree
+                // LT  | <                          | go right?| Last < key is in right subtree, except if cell rowid is exactly 1 less
+                //
+                // No iteration (point query):
+                // EQ  | > or =                     | go left  | Last = key is in left subtree
+                // EQ  | <                          | go right | Last = key is in right subtree
+                let is_on_left = match seek_op {
+                    SeekOp::GT => cell_rowid > rowid,
+                    SeekOp::GE { .. } => cell_rowid >= rowid,
+                    SeekOp::LE { .. } => cell_rowid >= rowid,
+                    SeekOp::LT => cell_rowid + 1 >= rowid,
+                };
+                if is_on_left {
+                    state.nearest_matching_cell.replace(cur_cell_idx as usize);
+                    state.max_cell_idx = cur_cell_idx - 1;
+                } else {
+                    state.min_cell_idx = cur_cell_idx + 1;
                 }
             }
-            match self
+        }
+
+        if let Some(nearest_matching_cell) = state.nearest_matching_cell {
+            let left_child_page = self
                 .stack
                 .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .rightmost_pointer()?
-            {
-                Some(right_most_pointer) => match self.read_page(right_most_pointer as i64)? {
-                    IOResult::Done((mem_page, c)) => {
-                        self.stack.set_cell_index(cell_count as i32 + 1);
-                        self.stack.push(mem_page);
-                        self.seek_state = CursorSeekState::MovingBetweenPages {
-                            eq_seen: state.eq_seen,
-                        };
-                        if let Some(c) = c {
-                            return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
-                        }
-                        return Ok(ControlFlow::Continue(()));
+                .cell_interior_read_left_child_page(nearest_matching_cell)?;
+            // On `IO(spill_c)` we keep `seek_state` at
+            // `InteriorPageBinarySearch` (the caller persists `state` to
+            // it after we return), so re-entry retries this same step
+            // with no double-push and no cell-index drift.
+            match self.read_page(left_child_page as i64)? {
+                IOResult::Done((mem_page, c)) => {
+                    self.stack.set_cell_index(nearest_matching_cell as i32);
+                    self.stack.push(mem_page);
+                    self.seek_state = CursorSeekState::MovingBetweenPages {
+                        eq_seen: state.eq_seen,
+                    };
+                    if let Some(c) = c {
+                        return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
                     }
-                    IOResult::IO(IOCompletions(spill_c)) => {
-                        return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))));
-                    }
-                },
-                None => {
-                    unreachable!("we shall not go back up! The only way is down the slope");
+                    return Ok(ControlFlow::Continue(()));
+                }
+                IOResult::IO(IOCompletions(spill_c)) => {
+                    return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))));
                 }
             }
         }
-        let cur_cell_idx = (min + max) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
-        let cell_rowid = self
+        match self
             .stack
             .get_page_contents_at_level(old_top_idx)
             .unwrap()
-            .cell_table_interior_read_rowid(cur_cell_idx as usize)?;
-        // in sqlite btrees left child pages have <= keys.
-        // table btrees can have a duplicate rowid in the interior cell, so for example if we are looking for rowid=10,
-        // and we find an interior cell with rowid=10, we need to move to the left page since (due to the <= rule of sqlite btrees)
-        // the left page may have a rowid=10.
-        // Logic table for determining if target leaf page is in left subtree
-        //
-        // Forwards iteration (looking for first match in tree):
-        // OP  | Current Cell vs Seek Key   | Action?  | Explanation
-        // GT  | >                          | go left  | First > key is in left subtree
-        // GT  | = or <                     | go right | First > key is in right subtree
-        // GE  | > or =                     | go left  | First >= key is in left subtree
-        // GE  | <                          | go right | First >= key is in right subtree
-        //
-        // Backwards iteration (looking for last match in tree):
-        // OP  | Current Cell vs Seek Key   | Action?  | Explanation
-        // LE  | > or =                     | go left  | Last <= key is in left subtree
-        // LE  | <                          | go right | Last <= key is in right subtree
-        // LT  | > or =                     | go left  | Last < key is in left subtree
-        // LT  | <                          | go right?| Last < key is in right subtree, except if cell rowid is exactly 1 less
-        //
-        // No iteration (point query):
-        // EQ  | > or =                     | go left  | Last = key is in left subtree
-        // EQ  | <                          | go right | Last = key is in right subtree
-        let is_on_left = match seek_op {
-            SeekOp::GT => cell_rowid > rowid,
-            SeekOp::GE { .. } => cell_rowid >= rowid,
-            SeekOp::LE { .. } => cell_rowid >= rowid,
-            SeekOp::LT => cell_rowid + 1 >= rowid,
-        };
-        if is_on_left {
-            state.nearest_matching_cell.replace(cur_cell_idx as usize);
-            state.max_cell_idx = cur_cell_idx - 1;
-        } else {
-            state.min_cell_idx = cur_cell_idx + 1;
+            .rightmost_pointer()?
+        {
+            Some(right_most_pointer) => match self.read_page(right_most_pointer as i64)? {
+                IOResult::Done((mem_page, c)) => {
+                    self.stack.set_cell_index(cell_count as i32 + 1);
+                    self.stack.push(mem_page);
+                    self.seek_state = CursorSeekState::MovingBetweenPages {
+                        eq_seen: state.eq_seen,
+                    };
+                    if let Some(c) = c {
+                        return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
+                    }
+                    Ok(ControlFlow::Continue(()))
+                }
+                IOResult::IO(IOCompletions(spill_c)) => {
+                    Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))))
+                }
+            },
+            None => {
+                unreachable!("we shall not go back up! The only way is down the slope");
+            }
         }
-        Ok(ControlFlow::Continue(()))
     }
 
     /// Specialized version of move_to() for index btrees.
@@ -2140,189 +2140,188 @@ impl BTreeCursor {
         state: &mut InteriorPageBinarySearchState,
     ) -> Result<ControlFlow<IOResult<()>>> {
         let iter_dir = cmp.iteration_direction();
-        let min = state.min_cell_idx;
-        let max = state.max_cell_idx;
-        if min > max {
-            let Some(leftmost_matching_cell) = state.nearest_matching_cell else {
-                match self
-                    .stack
-                    .get_page_contents_at_level(old_top_idx)
-                    .unwrap()
-                    .rightmost_pointer()?
-                {
-                    Some(right_most_pointer) => {
-                        // On `IO(spill_c)` keep seek_state at the binary
-                        // search so re-entry retries this same step. None
-                        // of the cursor mutations have happened yet.
-                        match self.read_page(right_most_pointer as i64)? {
-                            IOResult::Done((mem_page, c)) => {
-                                self.stack.set_cell_index(cell_count as i32 + 1);
-                                self.stack.push(mem_page);
-                                self.seek_state = CursorSeekState::MovingBetweenPages {
-                                    eq_seen: state.eq_seen,
-                                };
-                                if let Some(c) = c {
-                                    return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
-                                }
-                                return Ok(ControlFlow::Continue(()));
-                            }
-                            IOResult::IO(IOCompletions(spill_c)) => {
-                                return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(
-                                    spill_c,
-                                ))));
-                            }
-                        }
-                    }
-                    None => {
-                        unreachable!("we shall not go back up! The only way is down the slope");
-                    }
-                }
-            };
-            let matching_cell = self
+        // Compare cells until the range is exhausted: only an overflow key
+        // read can yield here, and it returns before the range changes, so
+        // re-entry retries the same cell. The caller persists the state once
+        // per call instead of once per compare.
+        while state.min_cell_idx <= state.max_cell_idx {
+            let cur_cell_idx = (state.min_cell_idx + state.max_cell_idx) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
+            self.stack.set_cell_index(cur_cell_idx as i32);
+
+            let (payload, payload_size, first_overflow_page) = self
                 .stack
                 .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .cell_get(leftmost_matching_cell, self.usable_space())?;
-            // We don't advance in case of forward iteration and index tree
-            // internal nodes because we will visit this node going up.
-            // In backwards iteration, we must retreat because otherwise we
-            // would unnecessarily visit this node again. Example:
-            //   parent:     key 666 (target found in left child)
-            //   left child: key 663, key 664, key 665
-            // we need to move to the previous parent (e.g. key 662) when
-            // iterating backwards so that we don't end up back here again.
-            //
-            // On `IO(spill_c)` we MUST NOT mutate `cell_idx` (set or
-            // retreat) — see the Done branch.
-            let BTreeCell::IndexInteriorCell(IndexInteriorCell {
-                left_child_page, ..
-            }) = &matching_cell
-            else {
-                unreachable!("unexpected cell type: {:?}", matching_cell);
-            };
+                .cell_read_payload_ptr(cur_cell_idx as usize, self.usable_space())?;
 
-            {
-                let page = self.stack.get_page_at_level(old_top_idx).unwrap();
-                turso_assert!(
-                    page.get().id != *left_child_page as usize,
-                    "corrupt: current page and left child page are the same",
-                    { "cell": leftmost_matching_cell, "page_id": page.get().id }
-                );
-            }
-
-            match self.read_page(*left_child_page as i64)? {
-                IOResult::Done((mem_page, c)) => {
-                    self.stack.set_cell_index(leftmost_matching_cell as i32);
-                    if iter_dir == IterationDirection::Backwards {
-                        self.stack.retreat();
-                    }
-                    self.stack.push(mem_page);
-                    self.seek_state = CursorSeekState::MovingBetweenPages {
-                        eq_seen: state.eq_seen,
-                    };
-                    if let Some(c) = c {
-                        return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
-                    }
+            if let Some(next_page) = first_overflow_page {
+                let res = self.process_overflow_read(payload, next_page, payload_size)?;
+                if res.is_io() {
+                    return Ok(ControlFlow::Break(res));
                 }
-                IOResult::IO(IOCompletions(spill_c)) => {
-                    return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))));
-                }
-            }
-            return Ok(ControlFlow::Continue(()));
-        }
-
-        let cur_cell_idx = (min + max) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
-        self.stack.set_cell_index(cur_cell_idx as i32);
-
-        let (payload, payload_size, first_overflow_page) = self
-            .stack
-            .get_page_contents_at_level(old_top_idx)
-            .unwrap()
-            .cell_read_payload_ptr(cur_cell_idx as usize, self.usable_space())?;
-
-        if let Some(next_page) = first_overflow_page {
-            let res = self.process_overflow_read(payload, next_page, payload_size)?;
-            if res.is_io() {
-                return Ok(ControlFlow::Break(res));
-            }
-        } else {
-            self.get_immutable_record_or_create()?
-                .as_mut()
-                .unwrap()
-                .invalidate();
-            crate::with_btree_allocation_site!(
-                RecordPayload,
+            } else {
                 self.get_immutable_record_or_create()?
                     .as_mut()
                     .unwrap()
-                    .start_serialization(payload)
-            )?;
-        };
+                    .invalidate();
+                crate::with_btree_allocation_site!(
+                    RecordPayload,
+                    self.get_immutable_record_or_create()?
+                        .as_mut()
+                        .unwrap()
+                        .start_serialization(payload)
+                )?;
+            };
 
-        let (target_leaf_page_is_in_left_subtree, is_eq) = {
-            let record = self.get_immutable_record();
-            let record = record.as_ref().unwrap();
+            let (target_leaf_page_is_in_left_subtree, is_eq) = {
+                let record = self.get_immutable_record();
+                let record = record.as_ref().unwrap();
 
-            let interior_cell_vs_index_key = record_comparer.compare(
-                record,
-                key_values,
-                self.index_info
-                    .as_ref()
-                    .expect("indexbtree_move_to: index_info required"),
-                0,
-                tie_breaker,
-            )?;
+                let interior_cell_vs_index_key = record_comparer.compare(
+                    record,
+                    key_values,
+                    self.index_info
+                        .as_ref()
+                        .expect("indexbtree_move_to: index_info required"),
+                    0,
+                    tie_breaker,
+                )?;
 
-            // in sqlite btrees left child pages have <= keys.
-            // in general, in forwards iteration we want to find the first key that matches the seek condition.
-            // in backwards iteration we want to find the last key that matches the seek condition.
-            //
-            // Logic table for determining if target leaf page is in left subtree.
-            // For index b-trees this is a bit more complicated since the interior cells contain payloads (the key is the payload).
-            // and for non-unique indexes there might be several cells with the same key.
-            //
-            // Forwards iteration (looking for first match in tree):
-            // OP  | Current Cell vs Seek Key  | Action?  | Explanation
-            // GT  | >                         | go left  | First > key could be exactly this one, or in left subtree
-            // GT  | = or <                    | go right | First > key must be in right subtree
-            // GE  | >                         | go left  | First >= key could be exactly this one, or in left subtree
-            // GE  | =                         | go left  | First >= key could be exactly this one, or in left subtree
-            // GE  | <                         | go right | First >= key must be in right subtree
-            //
-            // Backwards iteration (looking for last match in tree):
-            // OP  | Current Cell vs Seek Key  | Action?  | Explanation
-            // LE  | >                         | go left  | Last <= key must be in left subtree
-            // LE  | =                         | go right | Last <= key is either this one, or somewhere to the right of this one. So we need to go right to make sure
-            // LE  | <                         | go right | Last <= key must be in right subtree
-            // LT  | >                         | go left  | Last < key must be in left subtree
-            // LT  | =                         | go left  | Last < key must be in left subtree since we want strictly less than
-            // LT  | <                         | go right | Last < key could be exactly this one, or in right subtree
-            //
-            // No iteration (point query):
-            // EQ  | >                         | go left  | First = key must be in left subtree
-            // EQ  | =                         | go left  | First = key could be exactly this one, or in left subtree
-            // EQ  | <                         | go right | First = key must be in right subtree
+                // in sqlite btrees left child pages have <= keys.
+                // in general, in forwards iteration we want to find the first key that matches the seek condition.
+                // in backwards iteration we want to find the last key that matches the seek condition.
+                //
+                // Logic table for determining if target leaf page is in left subtree.
+                // For index b-trees this is a bit more complicated since the interior cells contain payloads (the key is the payload).
+                // and for non-unique indexes there might be several cells with the same key.
+                //
+                // Forwards iteration (looking for first match in tree):
+                // OP  | Current Cell vs Seek Key  | Action?  | Explanation
+                // GT  | >                         | go left  | First > key could be exactly this one, or in left subtree
+                // GT  | = or <                    | go right | First > key must be in right subtree
+                // GE  | >                         | go left  | First >= key could be exactly this one, or in left subtree
+                // GE  | =                         | go left  | First >= key could be exactly this one, or in left subtree
+                // GE  | <                         | go right | First >= key must be in right subtree
+                //
+                // Backwards iteration (looking for last match in tree):
+                // OP  | Current Cell vs Seek Key  | Action?  | Explanation
+                // LE  | >                         | go left  | Last <= key must be in left subtree
+                // LE  | =                         | go right | Last <= key is either this one, or somewhere to the right of this one. So we need to go right to make sure
+                // LE  | <                         | go right | Last <= key must be in right subtree
+                // LT  | >                         | go left  | Last < key must be in left subtree
+                // LT  | =                         | go left  | Last < key must be in left subtree since we want strictly less than
+                // LT  | <                         | go right | Last < key could be exactly this one, or in right subtree
+                //
+                // No iteration (point query):
+                // EQ  | >                         | go left  | First = key must be in left subtree
+                // EQ  | =                         | go left  | First = key could be exactly this one, or in left subtree
+                // EQ  | <                         | go right | First = key must be in right subtree
 
-            (
-                match cmp {
-                    SeekOp::GT => interior_cell_vs_index_key.is_gt(),
-                    SeekOp::GE { .. } => interior_cell_vs_index_key.is_ge(),
-                    SeekOp::LE { .. } => interior_cell_vs_index_key.is_gt(),
-                    SeekOp::LT => interior_cell_vs_index_key.is_ge(),
-                },
-                interior_cell_vs_index_key.is_eq(),
-            )
-        };
+                (
+                    match cmp {
+                        SeekOp::GT => interior_cell_vs_index_key.is_gt(),
+                        SeekOp::GE { .. } => interior_cell_vs_index_key.is_ge(),
+                        SeekOp::LE { .. } => interior_cell_vs_index_key.is_gt(),
+                        SeekOp::LT => interior_cell_vs_index_key.is_ge(),
+                    },
+                    interior_cell_vs_index_key.is_eq(),
+                )
+            };
 
-        if is_eq {
-            state.eq_seen = true;
+            if is_eq {
+                state.eq_seen = true;
+            }
+
+            if target_leaf_page_is_in_left_subtree {
+                state.nearest_matching_cell = Some(cur_cell_idx as usize);
+                state.max_cell_idx = cur_cell_idx - 1;
+            } else {
+                state.min_cell_idx = cur_cell_idx + 1;
+            }
         }
 
-        if target_leaf_page_is_in_left_subtree {
-            state.nearest_matching_cell = Some(cur_cell_idx as usize);
-            state.max_cell_idx = cur_cell_idx - 1;
-        } else {
-            state.min_cell_idx = cur_cell_idx + 1;
+        let Some(leftmost_matching_cell) = state.nearest_matching_cell else {
+            match self
+                .stack
+                .get_page_contents_at_level(old_top_idx)
+                .unwrap()
+                .rightmost_pointer()?
+            {
+                Some(right_most_pointer) => {
+                    // On `IO(spill_c)` keep seek_state at the binary
+                    // search so re-entry retries this same step. None
+                    // of the cursor mutations have happened yet.
+                    match self.read_page(right_most_pointer as i64)? {
+                        IOResult::Done((mem_page, c)) => {
+                            self.stack.set_cell_index(cell_count as i32 + 1);
+                            self.stack.push(mem_page);
+                            self.seek_state = CursorSeekState::MovingBetweenPages {
+                                eq_seen: state.eq_seen,
+                            };
+                            if let Some(c) = c {
+                                return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
+                            }
+                            return Ok(ControlFlow::Continue(()));
+                        }
+                        IOResult::IO(IOCompletions(spill_c)) => {
+                            return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))));
+                        }
+                    }
+                }
+                None => {
+                    unreachable!("we shall not go back up! The only way is down the slope");
+                }
+            }
+        };
+        let matching_cell = self
+            .stack
+            .get_page_contents_at_level(old_top_idx)
+            .unwrap()
+            .cell_get(leftmost_matching_cell, self.usable_space())?;
+        // We don't advance in case of forward iteration and index tree
+        // internal nodes because we will visit this node going up.
+        // In backwards iteration, we must retreat because otherwise we
+        // would unnecessarily visit this node again. Example:
+        //   parent:     key 666 (target found in left child)
+        //   left child: key 663, key 664, key 665
+        // we need to move to the previous parent (e.g. key 662) when
+        // iterating backwards so that we don't end up back here again.
+        //
+        // On `IO(spill_c)` we MUST NOT mutate `cell_idx` (set or
+        // retreat) — see the Done branch.
+        let BTreeCell::IndexInteriorCell(IndexInteriorCell {
+            left_child_page, ..
+        }) = &matching_cell
+        else {
+            unreachable!("unexpected cell type: {:?}", matching_cell);
+        };
+
+        {
+            let page = self.stack.get_page_at_level(old_top_idx).unwrap();
+            turso_assert!(
+                page.get().id != *left_child_page as usize,
+                "corrupt: current page and left child page are the same",
+                { "cell": leftmost_matching_cell, "page_id": page.get().id }
+            );
+        }
+
+        match self.read_page(*left_child_page as i64)? {
+            IOResult::Done((mem_page, c)) => {
+                self.stack.set_cell_index(leftmost_matching_cell as i32);
+                if iter_dir == IterationDirection::Backwards {
+                    self.stack.retreat();
+                }
+                self.stack.push(mem_page);
+                self.seek_state = CursorSeekState::MovingBetweenPages {
+                    eq_seen: state.eq_seen,
+                };
+                if let Some(c) = c {
+                    return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(c))));
+                }
+            }
+            IOResult::IO(IOCompletions(spill_c)) => {
+                return Ok(ControlFlow::Break(IOResult::IO(IOCompletions(spill_c))));
+            }
         }
         Ok(ControlFlow::Continue(()))
     }
@@ -2406,87 +2405,85 @@ impl BTreeCursor {
         state: &mut LeafPageBinarySearchState,
     ) -> Result<ControlFlow<IOResult<SeekResult>>> {
         let iter_dir = seek_op.iteration_direction();
-        let min = state.min_cell_idx;
-        let max = state.max_cell_idx;
-        let target_cell_when_not_found = state.target_cell_when_not_found;
-        if min > max {
-            if let Some(nearest_matching_cell) = state.nearest_matching_cell {
-                self.stack.set_cell_index(nearest_matching_cell as i32);
+        // The compares need no I/O, so narrow the range on this leaf in one
+        // go; the caller persists the state once afterwards.
+        while state.min_cell_idx <= state.max_cell_idx {
+            let cur_cell_idx = (state.min_cell_idx + state.max_cell_idx) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
+            let cell_rowid = contents.cell_table_leaf_read_rowid(cur_cell_idx as usize)?;
+
+            let cmp = cell_rowid.cmp(&rowid);
+
+            let found = match seek_op {
+                SeekOp::GT => cmp.is_gt(),
+                SeekOp::GE { eq_only: true } => cmp.is_eq(),
+                SeekOp::GE { eq_only: false } => cmp.is_ge(),
+                SeekOp::LE { eq_only: true } => cmp.is_eq(),
+                SeekOp::LE { eq_only: false } => cmp.is_le(),
+                SeekOp::LT => cmp.is_lt(),
+            };
+
+            // rowids are unique, so we can return the rowid immediately
+            if found && seek_op.eq_only() {
+                self.stack.set_cell_index(cur_cell_idx as i32);
                 self.set_has_record(true);
                 return Ok(ControlFlow::Break(IOResult::Done(SeekResult::Found)));
+            }
+
+            if found {
+                state.nearest_matching_cell = Some(cur_cell_idx as usize);
+                match iter_dir {
+                    IterationDirection::Forwards => {
+                        state.max_cell_idx = cur_cell_idx - 1;
+                    }
+                    IterationDirection::Backwards => {
+                        state.min_cell_idx = cur_cell_idx + 1;
+                    }
+                }
+            } else if cmp.is_gt() {
+                if matches!(seek_op, SeekOp::GE { eq_only: true }) {
+                    state.target_cell_when_not_found =
+                        state.target_cell_when_not_found.min(cur_cell_idx as i32);
+                }
+                state.max_cell_idx = cur_cell_idx - 1;
+            } else if cmp.is_lt() {
+                if matches!(seek_op, SeekOp::LE { eq_only: true }) {
+                    state.target_cell_when_not_found =
+                        state.target_cell_when_not_found.max(cur_cell_idx as i32);
+                }
+                state.min_cell_idx = cur_cell_idx + 1;
             } else {
-                // if !eq_only - matching entry can exist in neighbour leaf page
-                // this can happen if key in the interiour page was deleted - but divider kept untouched
-                // in such case BTree can navigate to the leaf which no longer has matching key for seek_op
-                // in this case, caller must advance cursor if necessary
-                return Ok(ControlFlow::Break(IOResult::Done(if seek_op.eq_only() {
-                    let has_record = target_cell_when_not_found >= 0
-                        && target_cell_when_not_found < contents.cell_count() as i32;
-                    self.has_record = has_record;
-                    self.stack.set_cell_index(target_cell_when_not_found);
-                    SeekResult::NotFound
-                } else {
-                    // set cursor to the position where which would hold the op-boundary if it were present
-                    self.stack.set_cell_index(target_cell_when_not_found);
-                    SeekResult::TryAdvance
-                })));
-            };
+                match iter_dir {
+                    IterationDirection::Forwards => {
+                        state.min_cell_idx = cur_cell_idx + 1;
+                    }
+                    IterationDirection::Backwards => {
+                        state.max_cell_idx = cur_cell_idx - 1;
+                    }
+                }
+            }
         }
 
-        let cur_cell_idx = (min + max) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
-        let cell_rowid = contents.cell_table_leaf_read_rowid(cur_cell_idx as usize)?;
-
-        let cmp = cell_rowid.cmp(&rowid);
-
-        let found = match seek_op {
-            SeekOp::GT => cmp.is_gt(),
-            SeekOp::GE { eq_only: true } => cmp.is_eq(),
-            SeekOp::GE { eq_only: false } => cmp.is_ge(),
-            SeekOp::LE { eq_only: true } => cmp.is_eq(),
-            SeekOp::LE { eq_only: false } => cmp.is_le(),
-            SeekOp::LT => cmp.is_lt(),
-        };
-
-        // rowids are unique, so we can return the rowid immediately
-        if found && seek_op.eq_only() {
-            self.stack.set_cell_index(cur_cell_idx as i32);
+        let target_cell_when_not_found = state.target_cell_when_not_found;
+        if let Some(nearest_matching_cell) = state.nearest_matching_cell {
+            self.stack.set_cell_index(nearest_matching_cell as i32);
             self.set_has_record(true);
             return Ok(ControlFlow::Break(IOResult::Done(SeekResult::Found)));
         }
-
-        if found {
-            state.nearest_matching_cell = Some(cur_cell_idx as usize);
-            match iter_dir {
-                IterationDirection::Forwards => {
-                    state.max_cell_idx = cur_cell_idx - 1;
-                }
-                IterationDirection::Backwards => {
-                    state.min_cell_idx = cur_cell_idx + 1;
-                }
-            }
-        } else if cmp.is_gt() {
-            if matches!(seek_op, SeekOp::GE { eq_only: true }) {
-                state.target_cell_when_not_found =
-                    target_cell_when_not_found.min(cur_cell_idx as i32);
-            }
-            state.max_cell_idx = cur_cell_idx - 1;
-        } else if cmp.is_lt() {
-            if matches!(seek_op, SeekOp::LE { eq_only: true }) {
-                state.target_cell_when_not_found =
-                    target_cell_when_not_found.max(cur_cell_idx as i32);
-            }
-            state.min_cell_idx = cur_cell_idx + 1;
+        // if !eq_only - matching entry can exist in neighbour leaf page
+        // this can happen if key in the interiour page was deleted - but divider kept untouched
+        // in such case BTree can navigate to the leaf which no longer has matching key for seek_op
+        // in this case, caller must advance cursor if necessary
+        Ok(ControlFlow::Break(IOResult::Done(if seek_op.eq_only() {
+            let has_record = target_cell_when_not_found >= 0
+                && target_cell_when_not_found < contents.cell_count() as i32;
+            self.has_record = has_record;
+            self.stack.set_cell_index(target_cell_when_not_found);
+            SeekResult::NotFound
         } else {
-            match iter_dir {
-                IterationDirection::Forwards => {
-                    state.min_cell_idx = cur_cell_idx + 1;
-                }
-                IterationDirection::Backwards => {
-                    state.max_cell_idx = cur_cell_idx - 1;
-                }
-            }
-        }
-        Ok(ControlFlow::Continue(()))
+            // set cursor to the position where which would hold the op-boundary if it were present
+            self.stack.set_cell_index(target_cell_when_not_found);
+            SeekResult::TryAdvance
+        })))
     }
 
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]

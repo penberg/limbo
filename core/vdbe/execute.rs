@@ -1261,7 +1261,7 @@ pub fn op_open_read(
         .cursor_ref
         .get(*cursor_id)
         .expect("cursor_id should exist in cursor_ref");
-    if program.connection.get_mv_tx_id_for_db(*db).is_none() {
+    if mv_store.is_none() || program.connection.get_mv_tx_id_for_db(*db).is_none() {
         assert!(
             *root_page >= 0,
             "root page should be non negative when we are not in a MVCC transaction"
@@ -1278,13 +1278,13 @@ pub fn op_open_read(
     let maybe_promote_to_mvcc_cursor = |btree_cursor: Box<dyn CursorTrait>,
                                         mv_cursor_type: MvccCursorType|
      -> Result<Box<dyn CursorTrait>> {
+        // Without an MvStore there is no MVCC transaction to look up.
+        let Some(mv_store) = mv_store.as_ref() else {
+            return Ok(btree_cursor);
+        };
         if let Some(tx_id) = program.connection.get_mv_tx_id_for_db(*db) {
-            let mv_store = mv_store
-                .as_ref()
-                .expect("mv_store should be Some when MVCC transaction is active")
-                .clone();
             Ok(Box::new(MvCursor::new(
-                mv_store,
+                mv_store.clone(),
                 &program.connection,
                 tx_id,
                 *root_page,

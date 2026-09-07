@@ -588,7 +588,12 @@ macro_rules! active_state_accessor {
     ($name:ident, $variant:ident, $ty:ty, $init:expr) => {
         fn $name(&mut self) -> &mut $ty {
             if matches!(self.state, ActiveOpState::None) {
-                self.state = ActiveOpState::$variant($init);
+                // None owns nothing, so skip the drop glue of the enum that
+                // a plain assignment would run on the old value.
+                std::mem::forget(std::mem::replace(
+                    &mut self.state,
+                    ActiveOpState::$variant($init),
+                ));
             }
             match &mut self.state {
                 ActiveOpState::$variant(state) => state,
@@ -610,7 +615,9 @@ impl Default for ActiveOpState {
 
 impl ActiveOpStateSlot {
     fn clear(&mut self) {
-        self.state = ActiveOpState::None;
+        if !matches!(self.state, ActiveOpState::None) {
+            self.state = ActiveOpState::None;
+        }
     }
 
     /// True when no multi-step opcode is suspended. Hot opcodes use this to
@@ -1115,10 +1122,8 @@ impl ProgramState {
         self.op_vacuum_state = VacuumOpState::None;
         self.view_delta_state = ViewDeltaCommitState::NotStarted;
         self.auto_txn_cleanup = TxnCleanup::None;
-        self.fk_immediate_violations_during_stmt
-            .store(0, Ordering::SeqCst);
-        self.fk_deferred_violations_when_stmt_started
-            .store(0, Ordering::SeqCst);
+        *self.fk_immediate_violations_during_stmt.get_mut() = 0;
+        *self.fk_deferred_violations_when_stmt_started.get_mut() = 0;
         self.rowsets.clear();
         self.bloom_filters.clear();
         self.hash_tables.clear();
@@ -1128,9 +1133,10 @@ impl ProgramState {
         self.has_stmt_transaction = false;
         self.distinct_key_values.clear();
         self.attached_savepoint_pagers.clear();
-        self.n_change.store(0, Ordering::SeqCst);
-        self.n_total_change.store(0, Ordering::SeqCst);
-        *self.explain_state.write() = ExplainState::default();
+        *self.n_change.get_mut() = 0;
+        *self.n_total_change.get_mut() = 0;
+        // reset has exclusive access, so no lock or atomic store is needed.
+        *self.explain_state.get_mut() = ExplainState::default();
         self.pending_fail_error = None;
         self.pending_fail_prepare_error = None;
         self.halt_in_progress = false;
@@ -1226,6 +1232,20 @@ impl ProgramState {
     #[inline]
     pub fn record_rows_written(&mut self, count: u64) {
         self.metrics.rows_written = self.metrics.rows_written.wrapping_add(count);
+    }
+
+    /// Runs `f` on the metrics of this statement including its active and
+    /// cached subprograms, without copying them when there is no subprogram.
+    pub(crate) fn with_metrics<R>(&self, f: impl FnOnce(&StatementMetrics) -> R) -> R {
+        let has_subprograms = matches!(
+            self.active_op_state.program_ref(),
+            Some(OpProgramState::Step { .. })
+        ) || !self.subprogram_stmt_cache.is_empty();
+        if has_subprograms {
+            f(&self.metrics())
+        } else {
+            f(&self.metrics)
+        }
     }
 
     pub(crate) fn metrics(&self) -> StatementMetrics {
@@ -1613,6 +1633,10 @@ pub struct PreparedProgram {
     pub result_columns: Vec<ResultSetColumn>,
     pub table_references: TableReferences,
     pub sql: String,
+    /// The statement is ANALYZE, so its completion refreshes the in-memory
+    /// planner statistics. Decided once here instead of by scanning the SQL
+    /// text on every completion.
+    pub refreshes_analyze_stats: bool,
     /// Whether the statement needs to be wrapped in a statement subtransaction
     /// when run as part of an interactive (non-autocommit) transaction.
     /// See [crate::vdbe::builder::ProgramBuilder::is_multi_write] and [crate::vdbe::builder::ProgramBuilder::may_abort] for more details.

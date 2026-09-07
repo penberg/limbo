@@ -1405,6 +1405,11 @@ pub struct Pager {
     /// `read_page_nonblock(idx)` reuses the stored `(page, disk_read)` pair
     /// instead of issuing a duplicate disk read.
     pending_reads: RwLock<HashMap<i64, PendingRead>>,
+    /// True while `pending_reads` may hold an entry. Set before an entry is
+    /// added and cleared after the last one is removed, both under the write
+    /// lock, so a reader that sees false can skip the lock: every page read
+    /// checks for a pending entry first.
+    has_pending_reads: AtomicBool,
     #[cfg(test)]
     spill_yield: SpillYieldHook,
     /// Dirty pages as a bitmap, naturally sorted by page number.
@@ -1700,6 +1705,7 @@ impl Pager {
             page_cache: Arc::new(RwLock::new(page_cache)),
             io,
             pending_reads: RwLock::new(HashMap::new()),
+            has_pending_reads: AtomicBool::new(false),
             #[cfg(test)]
             spill_yield: SpillYieldHook::new(),
             dirty_pages: Arc::new(RwLock::new(RoaringBitmap::new())),
@@ -3393,7 +3399,11 @@ impl Pager {
         if self.spill_yield.should_yield_for(page_idx) {
             io_yield_one!(crate::Completion::new_yield());
         }
-        let pending = self.pending_reads.read().get(&page_idx).cloned();
+        let pending = if self.has_pending_reads.load(Ordering::Acquire) {
+            self.pending_reads.read().get(&page_idx).cloned()
+        } else {
+            None
+        };
         let (page, c_disk) = if let Some(pending) = pending {
             // Re-entry: previous call yielded on spill before completing
             // `cache_insert`. Reuse the same PageRef and in-flight disk read
@@ -3431,7 +3441,7 @@ impl Pager {
 
             tracing::debug!("read_page(page_idx = {page_idx}) = reading page from disk");
             let (page, c) = self.read_page_no_cache(page_idx, None, false, group)?;
-            self.pending_reads.write().insert(
+            self.insert_pending_read(
                 page_idx,
                 PendingRead {
                     page: page.clone(),
@@ -3443,7 +3453,7 @@ impl Pager {
 
         match self.cache_insert(page_idx as usize, page.clone())? {
             IOResult::Done(()) => {
-                self.pending_reads.write().remove(&page_idx);
+                self.remove_pending_read(page_idx);
                 Ok(IOResult::Done((page, c_disk)))
             }
             IOResult::IO(IOCompletions(spill_c)) => {
@@ -3452,6 +3462,21 @@ impl Pager {
                 // `cache_insert` without re-issuing the disk read.
                 io_yield_one!(spill_c);
             }
+        }
+    }
+
+    /// Records a page read that is still in flight so a re-entry finds it.
+    fn insert_pending_read(&self, page_idx: i64, pending: PendingRead) {
+        let mut pending_reads = self.pending_reads.write();
+        self.has_pending_reads.store(true, Ordering::Release);
+        pending_reads.insert(page_idx, pending);
+    }
+
+    fn remove_pending_read(&self, page_idx: i64) {
+        let mut pending_reads = self.pending_reads.write();
+        pending_reads.remove(&page_idx);
+        if pending_reads.is_empty() {
+            self.has_pending_reads.store(false, Ordering::Release);
         }
     }
 
@@ -6674,7 +6699,7 @@ mod ptrmap_tests {
         // contents don't matter for this test.
         synthetic_page.set_loaded();
         let stub_disk_read = Completion::new_yield();
-        pager.pending_reads.write().insert(
+        pager.insert_pending_read(
             target_idx,
             PendingRead {
                 page: synthetic_page.clone(),
