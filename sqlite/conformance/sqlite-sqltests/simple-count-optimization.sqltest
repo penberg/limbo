@@ -110,6 +110,16 @@ expect {
     1
 }
 
+test simple-count-unusable-partial-index-column-correctness {
+    CREATE TABLE t(x NOT NULL);
+    CREATE INDEX pi ON t(x) WHERE x > 5;
+    INSERT INTO t VALUES (9), (1), (2);
+    SELECT count(x) FROM t INDEXED BY pi;
+}
+expect {
+    3
+}
+
 test simple-count-correlated-outer-join-null-extension {
     CREATE TABLE t0(z);
     CREATE TABLE t1(a INTEGER NOT NULL);
