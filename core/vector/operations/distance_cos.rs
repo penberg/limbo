@@ -2,10 +2,13 @@ use crate::{
     vector::vector_types::{Vector, VectorSparse, VectorType},
     LimboError, Result,
 };
-#[cfg(not(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-)))]
+#[cfg(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+))]
 use simsimd::SpatialSimilarity;
 
 pub fn vector_distance_cos(v1: &Vector, v2: &Vector) -> Result<f64> {
@@ -78,10 +81,13 @@ fn vector_f8_distance_cos(v1: &Vector, v2: &Vector) -> f64 {
 }
 
 #[allow(dead_code)]
-#[cfg(not(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-)))]
+#[cfg(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+))]
 fn vector_f32_distance_cos_simsimd(v1: &[f32], v2: &[f32]) -> f64 {
     f32::cosine(v1, v2).unwrap_or(f64::NAN)
 }
@@ -95,26 +101,38 @@ fn vector_f32_distance_cos_rust(v1: &[f32], v2: &[f32]) -> f64 {
         norm1 += a * a;
         norm2 += b * b;
     }
-    if norm1 == 0.0 || norm2 == 0.0 {
+    // simsimd calls two zero vectors identical, and a zero vector maximally
+    // distant from any other vector. Match it so the fallback and the SIMD
+    // path agree.
+    if norm1 == 0.0 && norm2 == 0.0 {
         return 0.0;
+    }
+    if dot == 0.0 {
+        return 1.0;
     }
     (1.0 - dot / (norm1 * norm2).sqrt()) as f64
 }
 
 #[allow(dead_code)]
-#[cfg(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-))]
+#[cfg(not(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+)))]
 fn vector_f32_distance_cos_simsimd(v1: &[f32], v2: &[f32]) -> f64 {
     vector_f32_distance_cos_rust(v1, v2)
 }
 
 #[allow(dead_code)]
-#[cfg(not(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-)))]
+#[cfg(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+))]
 fn vector_f64_distance_cos_simsimd(v1: &[f64], v2: &[f64]) -> f64 {
     f64::cosine(v1, v2).unwrap_or(f64::NAN)
 }
@@ -128,17 +146,26 @@ fn vector_f64_distance_cos_rust(v1: &[f64], v2: &[f64]) -> f64 {
         norm1 += a * a;
         norm2 += b * b;
     }
-    if norm1 == 0.0 || norm2 == 0.0 {
+    // simsimd calls two zero vectors identical, and a zero vector maximally
+    // distant from any other vector. Match it so the fallback and the SIMD
+    // path agree.
+    if norm1 == 0.0 && norm2 == 0.0 {
         return 0.0;
+    }
+    if dot == 0.0 {
+        return 1.0;
     }
     1.0 - dot / (norm1 * norm2).sqrt()
 }
 
 #[allow(dead_code)]
-#[cfg(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-))]
+#[cfg(not(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+)))]
 fn vector_f64_distance_cos_simsimd(v1: &[f64], v2: &[f64]) -> f64 {
     vector_f64_distance_cos_rust(v1, v2)
 }
@@ -213,6 +240,18 @@ mod tests {
         assert!(vector_f64_distance_cos_simsimd(&[1.0, 2.0], &[1.0, 2.0]).abs() < 1e-6);
         assert!((vector_f64_distance_cos_simsimd(&[1.0, 2.0], &[-1.0, -2.0]) - 2.0).abs() < 1e-6);
         assert!((vector_f64_distance_cos_simsimd(&[1.0, 2.0], &[-2.0, 1.0]) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_vector_distance_cos_f32_rust_zero_vectors() {
+        assert_eq!(vector_f32_distance_cos_rust(&[], &[]), 0.0);
+        assert_eq!(vector_f32_distance_cos_rust(&[1.0, 2.0], &[0.0, 0.0]), 1.0);
+    }
+
+    #[test]
+    fn test_vector_distance_cos_f64_rust_zero_vectors() {
+        assert_eq!(vector_f64_distance_cos_rust(&[], &[]), 0.0);
+        assert_eq!(vector_f64_distance_cos_rust(&[1.0, 2.0], &[0.0, 0.0]), 1.0);
     }
 
     #[test]
