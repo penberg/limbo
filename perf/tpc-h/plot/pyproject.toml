@@ -1,9 +1,0 @@
-[project]
-name = "tpc-h-plot"
-version = "0.1.0"
-description = "TPC-H benchmark result plotting"
-requires-python = ">=3.13"
-dependencies = [
-    "matplotlib>=3.10.5",
-    "pandas>=2.3.2",
-]
