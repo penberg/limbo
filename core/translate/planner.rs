@@ -1823,6 +1823,7 @@ fn parse_table(
                     expression_index_usages: Vec::new(),
                     database_id,
                     indexed: None,
+                    plan_estimate: None,
                 });
             }
             return Ok(());
@@ -1859,6 +1860,7 @@ fn parse_table(
             expression_index_usages: Vec::new(),
             database_id,
             indexed,
+            plan_estimate: None,
         });
         return Ok(());
     };
@@ -1969,6 +1971,7 @@ fn parse_table(
             expression_index_usages: Vec::new(),
             database_id,
             indexed: None,
+            plan_estimate: None,
         });
         return Ok(());
     }
@@ -1993,6 +1996,7 @@ fn parse_table(
                     expression_index_usages: Vec::new(),
                     database_id,
                     indexed: None,
+                    plan_estimate: None,
                 });
                 return Ok(());
             }

@@ -287,6 +287,7 @@ fn prepare_update_plan(
         expression_index_usages: Vec::new(),
         database_id,
         indexed,
+        plan_estimate: None,
     };
     let mut from_tables = TableReferences::new_empty();
     let mut where_clause = vec![];

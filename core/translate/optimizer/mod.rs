@@ -4,8 +4,8 @@ use super::{
     plan::{
         DeletePlan, GroupBy, InSeekSource, IterationDirection, JoinInfo, JoinOrderMember, JoinType,
         JoinedTable, MinMaxDef, MultiIndexBranch, MultiIndexScanOp, Operation, Plan, Search,
-        SeekDef, SeekKey, SelectPlan, SetOperation, SimpleAggregate, TableReferences, UpdatePlan,
-        WhereTerm,
+        SeekDef, SeekKey, SelectPlan, SetOperation, SimpleAggregate, TablePlanEstimate,
+        TableReferences, UpdatePlan, WhereTerm,
     },
 };
 use crate::alloc::TursoIteratorExt;
@@ -871,6 +871,7 @@ struct TableAccessPlan {
     subquery_calls: SmallVec<[(TableInternalId, f64); 2]>,
     order_target: Option<OrderTarget>,
     sort_eliminated: bool,
+    initial_input_rows: f64,
 }
 
 #[derive(Default)]
@@ -2587,6 +2588,7 @@ fn find_table_access_plan(
         subquery_calls,
         order_target: maybe_order_target,
         sort_eliminated,
+        initial_input_rows: initial_input_cardinality,
     }))
 }
 
@@ -2610,6 +2612,7 @@ fn apply_table_access_plan(
         subquery_calls: _,
         order_target: maybe_order_target,
         sort_eliminated,
+        initial_input_rows,
     } = plan;
 
     if sort_eliminated {
@@ -2639,6 +2642,33 @@ fn apply_table_access_plan(
         best_plan.best_access_methods().collect::<Vec<_>>(),
         best_plan.table_numbers().collect::<Vec<_>>(),
     );
+
+    for table in table_references.joined_tables_mut() {
+        table.plan_estimate = None;
+    }
+    let mut input_rows = initial_input_rows;
+    let mut total_cost = 0.0;
+    for (position, (&table_idx, &access_method_idx)) in best_table_numbers
+        .iter()
+        .zip(&best_access_methods)
+        .enumerate()
+    {
+        let access_method = &access_methods_arena[access_method_idx];
+        total_cost += access_method.cost.0;
+        let output_rows = best_plan.prefix_cardinalities[position];
+        table_references.joined_tables_mut()[table_idx].plan_estimate = Some(TablePlanEstimate {
+            input_rows,
+            rows_per_input: if input_rows == 0.0 {
+                0.0
+            } else {
+                output_rows / input_rows
+            },
+            output_rows,
+            access_cost: access_method.cost.0,
+            total_cost,
+        });
+        input_rows = output_rows;
+    }
 
     // Collect hash join build/probe table indices. Build tables are excluded from the main
     // join order because they are consumed during hash build. A table may appear as both

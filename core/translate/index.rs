@@ -356,6 +356,7 @@ pub(crate) fn emit_refill_index(
             expression_index_usages: Vec::new(),
             database_id,
             indexed: None,
+            plan_estimate: None,
         }],
         vec![],
     );
