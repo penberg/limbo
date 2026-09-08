@@ -63,14 +63,15 @@ pub struct Session {
     pub shared: Arc<SharedState>,
 }
 
-/// Reads newline-separated JSON values from a cursor response body
-/// (section 7.2).
-#[cfg(not(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"))))]
+#[cfg(not(target_arch = "wasm32"))]
 type ResponseStream = Pin<Box<dyn futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>;
 
-#[cfg(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none")))]
+/// On wasm32 the response body is a JavaScript `ReadableStream`, which is not `Send`.
+#[cfg(target_arch = "wasm32")]
 type ResponseStream = Pin<Box<dyn futures::Stream<Item = reqwest::Result<bytes::Bytes>>>>;
 
+/// Reads newline-separated JSON values from a cursor response body
+/// (section 7.2).
 struct LineReader {
     stream: ResponseStream,
     buf: Vec<u8>,
