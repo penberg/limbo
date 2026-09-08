@@ -11,19 +11,26 @@ public partial class SqliteConnection
 
     private void RegisterCollation(string name, Func<string, string, int>? comparison)
     {
+        ThrowIfDirectRemote("Custom collations");
         ArgumentNullException.ThrowIfNull(name);
         if (comparison is null)
         {
             _collations.Remove(name);
-            if (_database is not null)
+            if (HasNativeCallbackHandle)
+            {
+                using var syncOperation = _managedConnection?.EnterSyncOperation();
                 TursoBindings.UnregisterCollation(DatabaseHandle, name);
+            }
             return;
         }
 
         var registration = new CollationRegistration(name, comparison);
         _collations[name] = registration;
-        if (_database is not null)
+        if (HasNativeCallbackHandle)
+        {
+            using var syncOperation = _managedConnection?.EnterSyncOperation();
             _nativeFunctionContexts.Add(registration.Register(DatabaseHandle));
+        }
     }
 
     private void RegisterCollations()

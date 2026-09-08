@@ -2275,6 +2275,11 @@ impl ProgramBuilder {
             result_columns: self.result_columns,
             table_references: self.table_references,
             sql: sql.to_string(),
+            refreshes_analyze_stats: sql
+                .trim_start()
+                .as_bytes()
+                .get(..7)
+                .is_some_and(|head| head.eq_ignore_ascii_case(b"ANALYZE")),
             needs_stmt_subtransactions: crate::Arc::new(crate::AtomicBool::new(
                 needs_stmt_subtransactions,
             )),

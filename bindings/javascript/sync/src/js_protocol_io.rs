@@ -23,7 +23,7 @@ pub enum JsProtocolRequest {
         url: Option<String>,
         method: String,
         path: String,
-        body: Option<Vec<u8>>,
+        body: Option<Uint8Array>,
         headers: Vec<(String, String)>,
     },
     FullRead {
@@ -31,7 +31,7 @@ pub enum JsProtocolRequest {
     },
     FullWrite {
         path: String,
-        content: Vec<u8>,
+        content: Uint8Array,
     },
     Transform {
         mutations: Vec<DatabaseRowMutationJs>,
@@ -200,7 +200,7 @@ impl SyncEngineIo for JsProtocolIo {
             url: url.map(|x| x.to_string()),
             method: method.to_string(),
             path: path.to_string(),
-            body,
+            body: body.map(Uint8Array::from),
             headers: headers
                 .iter()
                 .map(|x| (x.0.to_string(), x.1.to_string()))
@@ -221,7 +221,7 @@ impl SyncEngineIo for JsProtocolIo {
     ) -> turso_sync_engine::Result<Self::DataCompletionBytes> {
         Ok(self.add_request(JsProtocolRequest::FullWrite {
             path: path.to_string(),
-            content,
+            content: Uint8Array::from(content),
         }))
     }
 

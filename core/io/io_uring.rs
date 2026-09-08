@@ -537,9 +537,14 @@ impl IO for UringIO {
 
             let wants = std::cmp::min(pending, MAX_WAIT);
             tracing::trace!("submit_and_wait for {wants} pending operations to complete");
-            self.ring
-                .submit_and_wait(wants)
-                .map_err(|e| io_error(e, "io_uring_submit_and_wait"))?;
+            match self.ring.submit_and_wait(wants) {
+                Ok(_) => {}
+                // A signal (a profiler, a debugger attaching, a timer) cuts
+                // the wait short without completing anything. That is not
+                // an I/O error: go round again and keep waiting.
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(io_error(e, "io_uring_submit_and_wait")),
+            }
 
             // Drain while still holding `_wait_guard`.
             self.drain_cq()?;

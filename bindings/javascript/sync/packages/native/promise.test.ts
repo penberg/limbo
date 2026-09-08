@@ -1259,3 +1259,31 @@ test('push failure leaves server state on transaction boundary', async ({ server
     const rows = await (await db2.prepare('SELECT x FROM q ORDER BY x')).all();
     expect(rows).toEqual([{ x: 0 }, { x: 1 }, { x: 2 }, { x: 3 }, { x: 4 }]);
 })
+
+test('push hands the request body to fetch as bytes without inflating memory', async ({ server }) => {
+    let bodyBytes = 0;
+    let bodyIsBytes = false;
+    const inspectingFetch: typeof fetch = (input, init) => {
+        if (init?.method === 'POST' && init.body != null) {
+            bodyIsBytes = init.body instanceof Uint8Array;
+            bodyBytes = Math.max(bodyBytes, (init.body as Uint8Array).byteLength);
+        }
+        return fetch(input, init);
+    };
+    const db = await connect({ path: ':memory:', url: server.dbUrl(), fetch: inspectingFetch });
+    await db.exec("CREATE TABLE IF NOT EXISTS big(x INTEGER PRIMARY KEY, y BLOB)");
+    const blobBytes = 16 * 1024 * 1024;
+    await db.exec(`INSERT INTO big VALUES (1, randomblob(${blobBytes}))`);
+
+    const rssBefore = process.memoryUsage().rss;
+    await db.push();
+    const rssGrowth = process.memoryUsage().rss - rssBefore;
+
+    expect(bodyIsBytes).toBe(true);
+    expect(bodyBytes).toBeGreaterThan(blobBytes);
+    // Before the body crossed the napi boundary as a Uint8Array it was marshalled as
+    // a JS Array<number>, one element per byte, which alone costs 8 bytes per
+    // body byte in V8 and put push at roughly 20x the change-set size.
+    expect(rssGrowth).toBeLessThan(6 * bodyBytes);
+    console.log(`push body=${(bodyBytes / 1024 / 1024).toFixed(1)}MiB rssGrowth=${(rssGrowth / 1024 / 1024).toFixed(0)}MiB (${(rssGrowth / bodyBytes).toFixed(1)}x)`);
+}, 120000)

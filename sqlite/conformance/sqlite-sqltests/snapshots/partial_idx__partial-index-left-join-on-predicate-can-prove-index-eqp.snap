@@ -17,5 +17,5 @@ info:
 ---
 QUERY PLAN
 |--SCAN left_items
-|--SCAN right_items USING INDEX right_marker_null_idx
+|--SCAN right_items USING INDEX right_marker_null_idx LEFT-JOIN
 `--USE SORTER FOR ORDER BY

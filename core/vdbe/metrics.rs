@@ -28,32 +28,32 @@ impl HashJoinMetrics {
     pub fn merge(&mut self, other: &HashJoinMetrics) {
         self.spill_bytes_written = self
             .spill_bytes_written
-            .saturating_add(other.spill_bytes_written);
-        self.spill_chunks = self.spill_chunks.saturating_add(other.spill_chunks);
+            .wrapping_add(other.spill_bytes_written);
+        self.spill_chunks = self.spill_chunks.wrapping_add(other.spill_chunks);
         self.spill_max_chunks_per_partition = self
             .spill_max_chunks_per_partition
             .max(other.spill_max_chunks_per_partition);
         self.spill_max_partition_bytes = self
             .spill_max_partition_bytes
             .max(other.spill_max_partition_bytes);
-        self.load_bytes_read = self.load_bytes_read.saturating_add(other.load_bytes_read);
-        self.probe_calls = self.probe_calls.saturating_add(other.probe_calls);
+        self.load_bytes_read = self.load_bytes_read.wrapping_add(other.load_bytes_read);
+        self.probe_calls = self.probe_calls.wrapping_add(other.probe_calls);
         self.probe_spill_bytes_written = self
             .probe_spill_bytes_written
-            .saturating_add(other.probe_spill_bytes_written);
+            .wrapping_add(other.probe_spill_bytes_written);
         self.probe_spill_chunks = self
             .probe_spill_chunks
-            .saturating_add(other.probe_spill_chunks);
+            .wrapping_add(other.probe_spill_chunks);
         self.grace_partitions_processed = self
             .grace_partitions_processed
-            .saturating_add(other.grace_partitions_processed);
+            .wrapping_add(other.grace_partitions_processed);
         self.grace_probe_rows_streamed = self
             .grace_probe_rows_streamed
-            .saturating_add(other.grace_probe_rows_streamed);
+            .wrapping_add(other.grace_probe_rows_streamed);
         self.grace_probe_rows_buffered = self
             .grace_probe_rows_buffered
-            .saturating_add(other.grace_probe_rows_buffered);
-        self.grace_matches = self.grace_matches.saturating_add(other.grace_matches);
+            .wrapping_add(other.grace_probe_rows_buffered);
+        self.grace_matches = self.grace_matches.wrapping_add(other.grace_matches);
     }
 
     pub fn reset(&mut self) {
@@ -110,21 +110,19 @@ impl StatementMetrics {
 
     /// Merge another metrics instance into this one (for aggregation)
     pub fn merge(&mut self, other: &StatementMetrics) {
-        self.rows_read = self.rows_read.saturating_add(other.rows_read);
-        self.rows_written = self.rows_written.saturating_add(other.rows_written);
-        self.vm_steps = self.vm_steps.saturating_add(other.vm_steps);
-        self.insn_executed = self.insn_executed.saturating_add(other.insn_executed);
-        self.reprepares = self.reprepares.saturating_add(other.reprepares);
-        self.fullscan_steps = self.fullscan_steps.saturating_add(other.fullscan_steps);
-        self.index_steps = self.index_steps.saturating_add(other.index_steps);
-        self.sort_operations = self.sort_operations.saturating_add(other.sort_operations);
-        self.filter_operations = self
-            .filter_operations
-            .saturating_add(other.filter_operations);
-        self.btree_seeks = self.btree_seeks.saturating_add(other.btree_seeks);
-        self.btree_next = self.btree_next.saturating_add(other.btree_next);
-        self.btree_prev = self.btree_prev.saturating_add(other.btree_prev);
-        self.search_count = self.search_count.saturating_add(other.search_count);
+        self.rows_read = self.rows_read.wrapping_add(other.rows_read);
+        self.rows_written = self.rows_written.wrapping_add(other.rows_written);
+        self.vm_steps = self.vm_steps.wrapping_add(other.vm_steps);
+        self.insn_executed = self.insn_executed.wrapping_add(other.insn_executed);
+        self.reprepares = self.reprepares.wrapping_add(other.reprepares);
+        self.fullscan_steps = self.fullscan_steps.wrapping_add(other.fullscan_steps);
+        self.index_steps = self.index_steps.wrapping_add(other.index_steps);
+        self.sort_operations = self.sort_operations.wrapping_add(other.sort_operations);
+        self.filter_operations = self.filter_operations.wrapping_add(other.filter_operations);
+        self.btree_seeks = self.btree_seeks.wrapping_add(other.btree_seeks);
+        self.btree_next = self.btree_next.wrapping_add(other.btree_next);
+        self.btree_prev = self.btree_prev.wrapping_add(other.btree_prev);
+        self.search_count = self.search_count.wrapping_add(other.search_count);
         self.hash_join.merge(&other.hash_join);
     }
 
@@ -228,7 +226,7 @@ impl ConnectionMetrics {
 
     /// Record a completed statement's metrics (borrows, no clone).
     pub fn record_statement(&mut self, metrics: &StatementMetrics) {
-        self.total_statements = self.total_statements.saturating_add(1);
+        self.total_statements = self.total_statements.wrapping_add(1);
 
         // Update high-water marks
         self.max_vm_steps_per_statement = self.max_vm_steps_per_statement.max(metrics.vm_steps);

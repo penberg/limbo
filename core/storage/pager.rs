@@ -109,6 +109,16 @@ impl HeaderRefMut {
     }
 }
 
+/// The header of a table leaf cell: its rowid and where its payload starts.
+#[derive(Clone, Copy, Debug)]
+pub struct TableLeafCellHeader {
+    pub rowid: i64,
+    /// Offset of the first payload byte on the page.
+    pub payload_start: usize,
+    /// Size of the whole payload, overflow pages included.
+    pub payload_size: u64,
+}
+
 pub struct PageInner {
     pub flags: AtomicUsize,
     pub id: usize,
@@ -125,49 +135,86 @@ pub struct PageInner {
     /// This tracks which version of the page we have in memory
     pub wal_tag: AtomicU64,
     /// The actual page data buffer. None if not loaded.
-    pub buffer: Option<Arc<Buffer>>,
+    buffer: Option<Arc<Buffer>>,
+    /// Start and length of the bytes of `buffer`, kept next to it so a page
+    /// read does not go through the `Option`, the `Arc` and the `Buffer`
+    /// variant on every access. Null and 0 while `buffer` is `None`.
+    data_ptr: *mut u8,
+    data_len: usize,
     /// Overflow cells during btree operations
     pub overflow_cells: crate::alloc::Vec<OverflowCell>,
 }
+
+// SAFETY: data_ptr and data_len only cache the address and length of the
+// bytes owned by `buffer`, an `Arc<Buffer>` that is itself Send and Sync, so
+// PageInner can cross threads exactly as it could before the cache existed.
+unsafe impl Send for PageInner {}
+unsafe impl Sync for PageInner {}
 
 // Methods moved from PageContent - these provide btree page access
 impl PageInner {
     /// Creates a new PageInner from an Arc<Buffer>.
     pub fn new(buffer: Arc<Buffer>) -> Self {
-        Self {
-            flags: AtomicUsize::new(0),
-            id: 0,
-            pin_count: AtomicUsize::new(0),
-            wal_tag: AtomicU64::new(TAG_UNSET),
-            buffer: Some(buffer),
-            overflow_cells: crate::alloc::vec![],
-        }
+        let mut inner = Self::unloaded(0);
+        inner.set_buffer(buffer);
+        inner
     }
 
     /// Creates a new PageInner with an owned buffer.
     pub fn from_buffer(buffer: Buffer) -> Self {
+        Self::new(Arc::new(buffer))
+    }
+
+    /// Creates a PageInner with no buffer loaded.
+    pub fn unloaded(id: usize) -> Self {
         Self {
             flags: AtomicUsize::new(0),
-            id: 0,
+            id,
             pin_count: AtomicUsize::new(0),
             wal_tag: AtomicU64::new(TAG_UNSET),
-            buffer: Some(Arc::new(buffer)),
+            buffer: None,
+            data_ptr: std::ptr::null_mut(),
+            data_len: 0,
             overflow_cells: crate::alloc::vec![],
         }
     }
-    /// Get the page buffer as a mutable slice. Panics if buffer not loaded.
+
+    /// The page data buffer, if loaded.
     #[inline]
+    pub fn buffer(&self) -> Option<&Arc<Buffer>> {
+        self.buffer.as_ref()
+    }
+
+    /// Installs the page data buffer.
+    pub fn set_buffer(&mut self, buffer: Arc<Buffer>) {
+        self.data_ptr = buffer.as_mut_ptr();
+        self.data_len = buffer.len();
+        self.buffer = Some(buffer);
+    }
+
+    /// Removes the page data buffer, leaving the page unloaded.
+    pub fn take_buffer(&mut self) -> Option<Arc<Buffer>> {
+        self.data_ptr = std::ptr::null_mut();
+        self.data_len = 0;
+        self.buffer.take()
+    }
+
+    /// Get the page buffer as a mutable slice. Panics if buffer not loaded.
+    #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     pub fn as_ptr(&self) -> &mut [u8] {
-        self.buffer
-            .as_ref()
-            .expect("buffer not loaded")
-            .as_mut_slice()
+        turso_assert!(!self.data_ptr.is_null(), "buffer not loaded");
+        // SAFETY: `data_ptr`/`data_len` describe the bytes of the `Arc<Buffer>`
+        // held in `self.buffer`, which stays alive and does not move while it is
+        // installed. Handing out `&mut [u8]` from `&self` mirrors
+        // `Buffer::as_mut_slice`; the page byte range is mutated only under the
+        // pager's own exclusion rules, as before.
+        unsafe { std::slice::from_raw_parts_mut(self.data_ptr, self.data_len) }
     }
 
     /// The position where page content starts. It's 100 for page 1 (database file header is 100 bytes),
     /// 0 for all other pages.
-    #[inline]
+    #[inline(always)]
     pub fn offset(&self) -> usize {
         if self.id == 1 {
             DatabaseHeader::SIZE
@@ -177,18 +224,18 @@ impl PageInner {
     }
 
     /// Read a u8 from the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn read_u8(&self, pos: usize) -> u8 {
         let buf = self.as_ptr();
         buf[self.offset() + pos]
     }
 
     /// Read a u16 from the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn read_u16(&self, pos: usize) -> u16 {
-        let buf = self.as_ptr();
-        let offset = self.offset();
-        u16::from_be_bytes([buf[offset + pos], buf[offset + pos + 1]])
+        let pos = self.offset() + pos;
+        let bytes = &self.as_ptr()[pos..pos + 2];
+        u16::from_be_bytes([bytes[0], bytes[1]])
     }
 
     /// Read a u32 from the page content at the given offset, taking account the possible db header on page 1.
@@ -308,7 +355,7 @@ impl PageInner {
         self.read_u16(BTREE_FIRST_FREEBLOCK)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn cell_count(&self) -> usize {
         self.read_u16(BTREE_CELL_COUNT) as usize
     }
@@ -432,16 +479,44 @@ impl PageInner {
 
     #[inline(always)]
     pub fn cell_table_leaf_read_rowid(&self, idx: usize) -> crate::Result<i64> {
+        Ok(self.cell_table_leaf_read_header(idx)?.rowid)
+    }
+
+    /// The bytes at `start..start + size` of this page, None when the range
+    /// is not inside it. The slice is valid as long as the page is alive.
+    #[inline(always)]
+    pub fn payload_on_page(&self, start: usize, size: usize) -> Option<&'static [u8]> {
+        let payload = self.as_ptr().get(start..start + size)?;
+        // SAFETY: valid as long as page is alive
+        Some(unsafe { std::mem::transmute::<&[u8], &'static [u8]>(payload) })
+    }
+
+    /// Reads the two varints that start a table leaf cell: the payload size
+    /// and the rowid. The payload starts right after them.
+    #[inline(always)]
+    pub fn cell_table_leaf_read_header(&self, idx: usize) -> crate::Result<TableLeafCellHeader> {
         turso_debug_assert!(matches!(self.page_type(), Ok(PageType::TableLeaf)));
         let buf = self.as_ptr();
         let cell_pointer_array_start = self.header_size();
         let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
+        // Bound-check the array entry: `idx` is the untrusted on-disk cell count.
+        crate::assert_or_bail_corrupt!(
+            self.offset() + cell_pointer + CELL_PTR_SIZE_BYTES <= buf.len(),
+            "cell pointer array index {} out of bounds for page size {}",
+            idx,
+            buf.len()
+        );
         let cell_pointer = self.read_u16(cell_pointer) as usize;
         let mut pos = cell_pointer;
-        let (_, nr) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
+        let (payload_size, nr) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
         pos += nr;
-        let (rowid, _) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
-        Ok(rowid as i64)
+        let (rowid, nr) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
+        pos += nr;
+        Ok(TableLeafCellHeader {
+            rowid: rowid as i64,
+            payload_start: pos,
+            payload_size,
+        })
     }
 
     /// Returns a cell's record payload and overflow info without constructing
@@ -458,6 +533,19 @@ impl PageInner {
         idx: usize,
         usable_size: usize,
     ) -> crate::Result<(&'static [u8], u64, Option<u32>)> {
+        let (payload, _, payload_size, first_overflow) =
+            self.cell_read_payload_at(idx, usable_size)?;
+        Ok((payload, payload_size, first_overflow))
+    }
+
+    /// [`Self::cell_read_payload_ptr`] with the offset of the payload on
+    /// the page in second place.
+    #[inline(always)]
+    pub fn cell_read_payload_at(
+        &self,
+        idx: usize,
+        usable_size: usize,
+    ) -> crate::Result<(&'static [u8], usize, u64, Option<u32>)> {
         let buf = self.as_ptr();
         let cell_pointer_array_start = self.header_size();
         let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
@@ -540,7 +628,7 @@ impl PageInner {
             (slice, None)
         };
 
-        Ok((payload_slice, payload_size, first_overflow))
+        Ok((payload_slice, payload_start, payload_size, first_overflow))
     }
 
     #[inline]
@@ -668,8 +756,17 @@ impl PageInner {
         Ok((start, len))
     }
 
+    #[inline(always)]
     pub fn is_leaf(&self) -> bool {
         self.read_u8(BTREE_PAGE_TYPE) > PageType::TableInterior as u8
+    }
+
+    /// True for table pages (interior or leaf). A corrupt page type byte
+    /// answers false; the record reader reports it when it parses the cell.
+    #[inline(always)]
+    pub fn is_table(&self) -> bool {
+        let page_type = self.read_u8(BTREE_PAGE_TYPE);
+        page_type == PageType::TableLeaf as u8 || page_type == PageType::TableInterior as u8
     }
 
     pub fn write_database_header(&self, header: &DatabaseHeader) {
@@ -755,14 +852,7 @@ impl Page {
     pub fn new(id: i64) -> Self {
         turso_assert_greater_than_or_equal!(id, 0);
         Self {
-            inner: UnsafeCell::new(PageInner {
-                flags: AtomicUsize::new(0),
-                id: id as usize,
-                pin_count: AtomicUsize::new(0),
-                wal_tag: AtomicU64::new(TAG_UNSET),
-                buffer: None,
-                overflow_cells: crate::alloc::vec![],
-            }),
+            inner: UnsafeCell::new(PageInner::unloaded(id as usize)),
         }
     }
 
@@ -776,7 +866,7 @@ impl Page {
     pub fn get_contents(&self) -> &mut PageInner {
         let inner = self.get();
         turso_debug_assert!(
-            inner.buffer.is_some(),
+            inner.buffer().is_some(),
             "page buffer not loaded",
             { "page_id": inner.id }
         );
@@ -851,6 +941,15 @@ impl Page {
     #[inline]
     pub fn is_loaded(&self) -> bool {
         self.get().flags.load(Ordering::Acquire) & PAGE_LOADED != 0
+    }
+
+    /// `is_loaded` for a check that needs no ordering: the caller already
+    /// synchronized with the load of the page, so a relaxed read cannot
+    /// see the flag unset. Unlike the acquire read, it lets the compiler
+    /// keep values it read before the check in registers across it.
+    #[inline]
+    pub fn is_loaded_relaxed(&self) -> bool {
+        self.get().flags.load(Ordering::Relaxed) & PAGE_LOADED != 0
     }
 
     #[inline]
@@ -1367,6 +1466,11 @@ pub struct Pager {
     /// `read_page_nonblock(idx)` reuses the stored `(page, disk_read)` pair
     /// instead of issuing a duplicate disk read.
     pending_reads: RwLock<HashMap<i64, PendingRead>>,
+    /// True while `pending_reads` may hold an entry. Set before an entry is
+    /// added and cleared after the last one is removed, both under the write
+    /// lock, so a reader that sees false can skip the lock: every page read
+    /// checks for a pending entry first.
+    has_pending_reads: AtomicBool,
     #[cfg(test)]
     spill_yield: SpillYieldHook,
     /// Dirty pages as a bitmap, naturally sorted by page number.
@@ -1416,7 +1520,22 @@ pub struct Pager {
     /// Counterpart of SQLite's BtShared.pCursor list; bucketing per root
     /// supplies the BTCF_Multiple fast path (btree.c:9348).
     pub(crate) cursor_registry: Mutex<rustc_hash::FxHashMap<i64, Vec<RegisteredCursor>>>,
+    /// Record buffers retired by closed cursors, kept for the next cursor so
+    /// each statement execution does not allocate and free a page-sized
+    /// buffer per cursor.
+    record_pool: Mutex<Vec<crate::types::RecordBuf>>,
+    /// Heap allocations of closed b-tree cursors, kept for the next cursor so
+    /// each statement execution does not allocate and free one per cursor.
+    /// The boxes are the point: each one is a cursor-sized allocation.
+    #[allow(clippy::vec_box)]
+    cursor_allocations: Mutex<Vec<Box<std::mem::MaybeUninit<crate::storage::btree::BTreeCursor>>>>,
 }
+
+/// Retired record buffers kept per pager. Each holds a page-sized allocation.
+const RECORD_POOL_SIZE: usize = 8;
+
+/// Retired cursor allocations kept per pager.
+const CURSOR_POOL_SIZE: usize = 8;
 
 /// Raw fat pointer to a registered cursor.
 ///
@@ -1662,6 +1781,7 @@ impl Pager {
             page_cache: Arc::new(RwLock::new(page_cache)),
             io,
             pending_reads: RwLock::new(HashMap::new()),
+            has_pending_reads: AtomicBool::new(false),
             #[cfg(test)]
             spill_yield: SpillYieldHook::new(),
             dirty_pages: Arc::new(RwLock::new(RoaringBitmap::new())),
@@ -1704,7 +1824,42 @@ impl Pager {
             #[cfg(target_vendor = "apple")]
             sync_type: AtomicFileSyncType::new(FileSyncType::Fsync),
             cursor_registry: Mutex::new(rustc_hash::FxHashMap::default()),
+            record_pool: Mutex::new(Vec::new()),
+            cursor_allocations: Mutex::new(Vec::new()),
         })
+    }
+
+    /// An allocation retired by an earlier b-tree cursor on this pager, if any.
+    pub(crate) fn take_cursor_allocation(
+        &self,
+    ) -> Option<Box<std::mem::MaybeUninit<crate::storage::btree::BTreeCursor>>> {
+        self.cursor_allocations.lock().pop()
+    }
+
+    /// Keep the allocation of a closed b-tree cursor for the next cursor on
+    /// this pager. Extra allocations beyond the pool size are freed.
+    pub(crate) fn recycle_cursor_allocation(
+        &self,
+        allocation: Box<std::mem::MaybeUninit<crate::storage::btree::BTreeCursor>>,
+    ) {
+        let mut pool = self.cursor_allocations.lock();
+        if pool.len() < CURSOR_POOL_SIZE {
+            pool.push(allocation);
+        }
+    }
+
+    /// A record buffer retired by an earlier cursor on this pager, if any.
+    pub(crate) fn take_record_buf(&self) -> Option<crate::types::RecordBuf> {
+        self.record_pool.lock().pop()
+    }
+
+    /// Keep a retired record buffer for the next cursor on this pager. Extra
+    /// buffers beyond the pool size are freed.
+    pub(crate) fn recycle_record_buf(&self, buf: crate::types::RecordBuf) {
+        let mut pool = self.record_pool.lock();
+        if pool.len() < RECORD_POOL_SIZE {
+            pool.push(buf);
+        }
     }
 
     /// Add a cursor to the registry. Called from Cursor::new_btree once the
@@ -1738,9 +1893,10 @@ impl Pager {
                 // SAFETY: see RegisteredCursor's invariant.
                 unsafe { surviving.as_mut().set_has_peers_for_external_writes(false) };
             }
-            if bucket.is_empty() {
-                registry.remove(&root);
-            }
+            // An empty bucket stays in the map with its capacity: the next
+            // cursor on this root reuses it instead of inserting a new map
+            // entry and growing a new Vec. Roots are few and bounded by the
+            // schema of the pager, so the map does not grow without limit.
         }
     }
 
@@ -2814,7 +2970,7 @@ impl Pager {
         let page = Arc::new(Page::new(DatabaseHeader::PAGE_ID as i64));
         {
             let inner = page.get();
-            inner.buffer = Some(Arc::new(Buffer::new_temporary(size.get() as usize)));
+            inner.set_buffer(Arc::new(Buffer::new_temporary(size.get() as usize)));
         }
 
         page.get_contents().write_database_header(&header);
@@ -3355,7 +3511,11 @@ impl Pager {
         if self.spill_yield.should_yield_for(page_idx) {
             io_yield_one!(crate::Completion::new_yield());
         }
-        let pending = self.pending_reads.read().get(&page_idx).cloned();
+        let pending = if self.has_pending_reads.load(Ordering::Acquire) {
+            self.pending_reads.read().get(&page_idx).cloned()
+        } else {
+            None
+        };
         let (page, c_disk) = if let Some(pending) = pending {
             // Re-entry: previous call yielded on spill before completing
             // `cache_insert`. Reuse the same PageRef and in-flight disk read
@@ -3393,7 +3553,7 @@ impl Pager {
 
             tracing::debug!("read_page(page_idx = {page_idx}) = reading page from disk");
             let (page, c) = self.read_page_no_cache(page_idx, None, false, group)?;
-            self.pending_reads.write().insert(
+            self.insert_pending_read(
                 page_idx,
                 PendingRead {
                     page: page.clone(),
@@ -3405,7 +3565,7 @@ impl Pager {
 
         match self.cache_insert(page_idx as usize, page.clone())? {
             IOResult::Done(()) => {
-                self.pending_reads.write().remove(&page_idx);
+                self.remove_pending_read(page_idx);
                 Ok(IOResult::Done((page, c_disk)))
             }
             IOResult::IO(IOCompletions(spill_c)) => {
@@ -3414,6 +3574,21 @@ impl Pager {
                 // `cache_insert` without re-issuing the disk read.
                 io_yield_one!(spill_c);
             }
+        }
+    }
+
+    /// Records a page read that is still in flight so a re-entry finds it.
+    fn insert_pending_read(&self, page_idx: i64, pending: PendingRead) {
+        let mut pending_reads = self.pending_reads.write();
+        self.has_pending_reads.store(true, Ordering::Release);
+        pending_reads.insert(page_idx, pending);
+    }
+
+    fn remove_pending_read(&self, page_idx: i64) {
+        let mut pending_reads = self.pending_reads.write();
+        pending_reads.remove(&page_idx);
+        if pending_reads.is_empty() {
+            self.has_pending_reads.store(false, Ordering::Release);
         }
     }
 
@@ -5901,7 +6076,7 @@ pub fn allocate_new_page(page_id: i64, buffer_pool: &Arc<BufferPool>) -> PageRef
     {
         let buffer = buffer_pool.get_page();
         let inner = page.get();
-        inner.buffer = Some(Arc::new(buffer));
+        inner.set_buffer(Arc::new(buffer));
         page.set_loaded();
         page.clear_wal_tag();
     }
@@ -5922,7 +6097,7 @@ pub fn default_page1(cipher: Option<&CipherMode>) -> PageRef {
 
     {
         let inner = page.get();
-        inner.buffer = Some(Arc::new(Buffer::new_temporary(
+        inner.set_buffer(Arc::new(Buffer::new_temporary(
             default_header.page_size.get() as usize,
         )));
     }
@@ -6636,7 +6811,7 @@ mod ptrmap_tests {
         // contents don't matter for this test.
         synthetic_page.set_loaded();
         let stub_disk_read = Completion::new_yield();
-        pager.pending_reads.write().insert(
+        pager.insert_pending_read(
             target_idx,
             PendingRead {
                 page: synthetic_page.clone(),

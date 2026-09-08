@@ -2,6 +2,8 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
+using Turso;
 using Turso.Raw.Public;
 using Turso.Raw.Public.Handles;
 
@@ -15,6 +17,9 @@ public partial class SqliteConnection : DbConnection
     private static readonly Dictionary<string, int> SharedMemoryReferences = new(StringComparer.OrdinalIgnoreCase);
 
     private TursoDatabaseHandle? _database;
+    private TursoConnection? _managedConnection;
+    private bool _ownsManagedConnection;
+    private bool _wrapsManagedConnection;
     private SqliteConnectionStringBuilder _connectionOptions = new();
     private bool _disposed;
     private int? _defaultTimeout;
@@ -36,6 +41,24 @@ public partial class SqliteConnection : DbConnection
         ConnectionString = connectionString;
     }
 
+    public SqliteConnection(TursoConnection connection, bool ownsConnection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var options = new SqliteConnectionStringBuilder(connection.ConnectionString);
+        if (options.IsLocal)
+        {
+            throw new ArgumentException(
+                "Only direct remote and embedded replica Turso connections can be wrapped.",
+                nameof(connection));
+        }
+
+        _connectionOptions = options;
+        _managedConnection = connection;
+        _ownsManagedConnection = ownsConnection;
+        _wrapsManagedConnection = true;
+        _readOnly = options.Mode == SqliteOpenMode.ReadOnly;
+    }
+
     [AllowNull]
     public override string ConnectionString
     {
@@ -45,14 +68,22 @@ public partial class SqliteConnection : DbConnection
             if (State == ConnectionState.Open)
                 throw new InvalidOperationException(Properties.Resources.ConnectionStringRequiresClosedConnection);
 
-            _connectionOptions = new SqliteConnectionStringBuilder(value);
+            var options = new SqliteConnectionStringBuilder(value);
+            if (_wrapsManagedConnection && options.IsLocal)
+            {
+                throw new InvalidOperationException(
+                    "A SqliteConnection wrapping a TursoConnection must remain a direct remote or embedded replica connection.");
+            }
+
+            ConfigureManagedConnection(options);
+            _connectionOptions = options;
             _defaultTimeout = null;
         }
     }
 
-    public override string Database => "main";
+    public override string Database => _managedConnection?.Database ?? "main";
 
-    public override string DataSource => _dataSource ?? _connectionOptions.DataSource;
+    public override string DataSource => _managedConnection?.DataSource ?? _dataSource ?? _connectionOptions.DataSource;
 
     public int DefaultTimeout
     {
@@ -71,7 +102,27 @@ public partial class SqliteConnection : DbConnection
 
     public SqliteTransaction? Transaction { get; internal set; }
 
+    public bool IsLocal => _connectionOptions.IsLocal;
+
+    public bool IsDirectRemote => _connectionOptions.IsDirectRemote;
+
+    public bool IsRemote => _connectionOptions.IsRemote;
+
+    public bool IsReplica => _connectionOptions.IsReplica;
+
+    public bool IsManaged => IsRemote;
+
+    public TursoSyncDatabase? SyncDatabase => _managedConnection?.SyncDatabase;
+
     internal bool IsSharedCache => _connectionOptions.Cache == SqliteCacheMode.Shared;
+
+    internal bool IsManagedConnection => _managedConnection is not null;
+
+    private bool HasNativeCallbackHandle =>
+        _database is not null || IsReplica && State == ConnectionState.Open;
+
+    internal TursoConnection ManagedConnection => _managedConnection
+        ?? throw new InvalidOperationException("The connection does not use the managed Turso backend.");
 
     internal bool ReadUncommitted
     {
@@ -82,13 +133,32 @@ public partial class SqliteConnection : DbConnection
     // The SQLite version Turso tracks (SQLITE_VERSION in core/dialect/sqlite.rs).
     public override string ServerVersion => "3.50.4";
 
-    public override ConnectionState State => _database is null ? ConnectionState.Closed : ConnectionState.Open;
+    public override ConnectionState State => _managedConnection?.State
+        ?? (_database is null ? ConnectionState.Closed : ConnectionState.Open);
+
+    public override bool CanCreateBatch => _managedConnection?.CanCreateBatch == true;
 
     protected override DbProviderFactory DbProviderFactory => SqliteFactory.Instance;
 
     public override void Open()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_managedConnection is not null)
+        {
+            var managedOriginalState = State;
+            try
+            {
+                _managedConnection.Open();
+                RegisterManagedReplicaCallbacks();
+            }
+            finally
+            {
+                NotifyManagedStateChange(managedOriginalState);
+            }
+
+            return;
+        }
+
         if (_database is not null)
             throw new InvalidOperationException("The connection is already open.");
         if (!string.IsNullOrEmpty(_connectionOptions.Password))
@@ -126,6 +196,9 @@ public partial class SqliteConnection : DbConnection
 
     public override Task OpenAsync(CancellationToken cancellationToken)
     {
+        if (_managedConnection is not null)
+            return OpenManagedAsync(cancellationToken);
+
         cancellationToken.ThrowIfCancellationRequested();
         Open();
         return Task.CompletedTask;
@@ -133,6 +206,36 @@ public partial class SqliteConnection : DbConnection
 
     public override void Close()
     {
+        if (_managedConnection is not null)
+        {
+            var managedOriginalState = State;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo? transactionFailure = null;
+            try
+            {
+                if (Transaction is { IsCompleted: false } transaction)
+                {
+                    try
+                    {
+                        transaction.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        transactionFailure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
+                    }
+                }
+
+                FreeNativeFunctionContexts();
+                _managedConnection.Close();
+            }
+            finally
+            {
+                NotifyManagedStateChange(managedOriginalState);
+            }
+
+            transactionFailure?.Throw();
+            return;
+        }
+
         if (_database is null)
             return;
 
@@ -154,7 +257,23 @@ public partial class SqliteConnection : DbConnection
 
     public override void ChangeDatabase(string databaseName)
     {
+        if (_managedConnection is not null)
+        {
+            _managedConnection.ChangeDatabase(databaseName);
+            return;
+        }
+
         throw new NotSupportedException("Changing databases is not supported.");
+    }
+
+    public void Sync()
+    {
+        GetManagedConnectionForSync().Sync();
+    }
+
+    public Task SyncAsync(CancellationToken cancellationToken = default)
+    {
+        return GetManagedConnectionForSync().SyncAsync(cancellationToken);
     }
 
     public override DataTable GetSchema()
@@ -165,6 +284,8 @@ public partial class SqliteConnection : DbConnection
 
     public override DataTable GetSchema(string collectionName, string?[]? restrictionValues)
     {
+        ThrowIfManagedLocalOnly(nameof(GetSchema));
+
         if (string.Equals(collectionName, DbMetaDataCollectionNames.MetaDataCollections, StringComparison.OrdinalIgnoreCase))
         {
             ValidateRestrictions(collectionName, restrictionValues, 0);
@@ -330,6 +451,7 @@ public partial class SqliteConnection : DbConnection
 
     public virtual void EnableExtensions(bool enable = true)
     {
+        ThrowIfManagedLocalOnly(nameof(EnableExtensions));
         _extensionsEnabled = enable;
         if (_database is not null)
             TursoBindings.EnableLoadExtension(DatabaseHandle, enable);
@@ -337,6 +459,7 @@ public partial class SqliteConnection : DbConnection
 
     public virtual void LoadExtension(string file, string? proc = null)
     {
+        ThrowIfManagedLocalOnly(nameof(LoadExtension));
         ArgumentNullException.ThrowIfNull(file);
         if (proc is not null)
             throw new NotSupportedException("Custom extension entry points are not yet supported by the Turso SQLite-compatible provider.");
@@ -355,6 +478,7 @@ public partial class SqliteConnection : DbConnection
 
     public virtual void BackupDatabase(SqliteConnection destination, string destinationName, string sourceName)
     {
+        ThrowIfManagedLocalOnly(nameof(BackupDatabase));
         if (_database is null)
             throw new InvalidOperationException(Properties.Resources.CallRequiresOpenConnection("BackupDatabase"));
         ArgumentNullException.ThrowIfNull(destination);
@@ -374,11 +498,76 @@ public partial class SqliteConnection : DbConnection
 
     protected override DbCommand CreateDbCommand() => CreateCommand();
 
+    protected override DbBatch CreateDbBatch()
+    {
+        if (_managedConnection is null)
+        {
+            throw new NotSupportedException(
+                "SQLite facade batches are available only for direct remote or embedded replica connections.");
+        }
+
+        return new SqliteBatch(this);
+    }
+
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
         => BeginTransaction(isolationLevel);
 
+    protected override ValueTask<DbTransaction> BeginDbTransactionAsync(
+        IsolationLevel isolationLevel,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<DbTransaction>(BeginTransaction(isolationLevel));
+    }
+
     protected override void Dispose(bool disposing)
     {
+        if (_managedConnection is not null)
+        {
+            ExceptionDispatchInfo? failure = null;
+            if (disposing
+                && !_disposed
+                && Transaction is { IsCompleted: false } transaction)
+            {
+                try
+                {
+                    transaction.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    failure = ExceptionDispatchInfo.Capture(exception);
+                }
+            }
+
+            if (disposing && !_disposed && _ownsManagedConnection)
+            {
+                var originalState = State;
+                try
+                {
+                    FreeNativeFunctionContexts();
+                    _managedConnection.Dispose();
+                }
+                catch (Exception exception) when (failure is not null)
+                {
+                    // Preserve the transaction cleanup failure.
+                    _ = exception;
+                }
+                catch (Exception exception)
+                {
+                    failure = ExceptionDispatchInfo.Capture(exception);
+                }
+                finally
+                {
+                    NotifyManagedStateChange(originalState);
+                }
+            }
+
+            _disposed = true;
+            base.Dispose(disposing);
+            failure?.Throw();
+            return;
+        }
+
         if (disposing)
             Close();
 
@@ -386,13 +575,80 @@ public partial class SqliteConnection : DbConnection
         base.Dispose(disposing);
     }
 
-    internal TursoDatabaseHandle DatabaseHandle => _database ?? throw new InvalidOperationException("The connection is not open.");
+    public override ValueTask DisposeAsync()
+    {
+        if (_managedConnection is null)
+            return base.DisposeAsync();
+
+        return DisposeManagedAsync();
+    }
+
+    private async ValueTask DisposeManagedAsync()
+    {
+        ExceptionDispatchInfo? failure = null;
+        if (!_disposed && Transaction is { IsCompleted: false } transaction)
+        {
+            try
+            {
+                await transaction.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                failure = ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        if (!_disposed && _ownsManagedConnection)
+        {
+            var originalState = State;
+            try
+            {
+                FreeNativeFunctionContexts();
+                await ManagedConnection.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception) when (failure is not null)
+            {
+                // Preserve the transaction cleanup failure.
+                _ = exception;
+            }
+            catch (Exception exception)
+            {
+                failure = ExceptionDispatchInfo.Capture(exception);
+            }
+            finally
+            {
+                NotifyManagedStateChange(originalState);
+            }
+        }
+
+        _disposed = true;
+        await base.DisposeAsync().ConfigureAwait(false);
+        failure?.Throw();
+    }
+
+    internal TursoDatabaseHandle DatabaseHandle
+    {
+        get
+        {
+            if (_managedConnection is not null)
+            {
+                if (IsReplica)
+                    return ManagedConnection.Turso;
+                throw new NotSupportedException(
+                    "SQLite native handles are not available for direct remote connections.");
+            }
+
+            return _database ?? throw new InvalidOperationException("The connection is not open.");
+        }
+    }
 
     internal bool HasOpenReader => _openReaderCount > 0;
 
     internal bool IsReadOnly => _readOnly;
 
     internal bool RecursiveTriggers => _recursiveTriggers;
+
+    internal bool ManagedReadYourWrites => _connectionOptions.ReadYourWrites;
 
     internal void ReaderOpened() => _openReaderCount++;
 
@@ -526,8 +782,92 @@ public partial class SqliteConnection : DbConnection
 
     internal void EnsureOpen()
     {
-        if (_database is null)
+        if (State != ConnectionState.Open)
             throw new InvalidOperationException("The connection is not open.");
+    }
+
+    private void ConfigureManagedConnection(SqliteConnectionStringBuilder options)
+    {
+        if (options.IsLocal)
+        {
+            if (_managedConnection is not null && _ownsManagedConnection)
+                _managedConnection.Dispose();
+
+            _managedConnection = null;
+            _ownsManagedConnection = false;
+            _readOnly = false;
+            return;
+        }
+
+        var connectionString = options.GetTursoConnectionString();
+        _readOnly = options.Mode == SqliteOpenMode.ReadOnly;
+        if (_managedConnection is null)
+        {
+            _managedConnection = new TursoConnection(connectionString);
+            _ownsManagedConnection = true;
+            return;
+        }
+
+        _managedConnection.ConnectionString = connectionString;
+    }
+
+    private async Task OpenManagedAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var originalState = State;
+        try
+        {
+            await ManagedConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            RegisterManagedReplicaCallbacks();
+        }
+        finally
+        {
+            NotifyManagedStateChange(originalState);
+        }
+    }
+
+    private TursoConnection GetManagedConnectionForSync()
+    {
+        if (_managedConnection is null)
+            throw new NotSupportedException("Sync requires an embedded replica connection.");
+
+        return _managedConnection;
+    }
+
+    private void NotifyManagedStateChange(ConnectionState originalState)
+    {
+        var currentState = State;
+        if (currentState != originalState)
+            OnStateChange(new StateChangeEventArgs(originalState, currentState));
+    }
+
+    private void ThrowIfManagedLocalOnly(string operation)
+    {
+        if (_managedConnection is not null)
+        {
+            throw new NotSupportedException(
+                $"{operation} is not available for direct remote or embedded replica connections.");
+        }
+    }
+
+    private void ThrowIfDirectRemote(string operation)
+    {
+        if (IsDirectRemote)
+        {
+            throw new NotSupportedException(
+                $"{operation} is not available for direct remote connections.");
+        }
+    }
+
+    private void RegisterManagedReplicaCallbacks()
+    {
+        if (!IsReplica)
+            return;
+
+        using var syncOperation = ManagedConnection.EnterSyncOperation();
+        RegisterScalarFunctions();
+        RegisterAggregateFunctions();
+        RegisterCollations();
     }
 
     private void ApplyConnectionOptions()

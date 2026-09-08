@@ -102,6 +102,61 @@ impl Text {
     }
 }
 
+/// UTF-8 validation tuned for record decoding. TEXT values are usually short
+/// ASCII read at arbitrary offsets inside a b-tree page: simdutf8 only uses
+/// SIMD from 64 bytes up, and core's `from_utf8` word-at-a-time path is
+/// alignment-sensitive, so both are slow here. OR-ing every byte together is
+/// alignment-independent and branch-light; if no byte had the high bit set
+/// the value is pure ASCII and needs no further validation. Non-ASCII and
+/// values longer than the cutoff fall back to full simdutf8 validation —
+/// above the cutoff the scalar OR loop loses to real SIMD.
+///
+/// Measured by `core/benches/text_validate_benchmark.rs` (varying slice
+/// alignment, ASCII content) on an Apple M2, macOS 15.7, vs
+/// `simdutf8::basic::from_utf8` alone:
+///
+///   1-128 B:  1.4-4x faster (peak 4.1x at 16 B)
+///   256-512 B: 1.1-1.2x faster
+///   1-2 KB:   parity
+///   4 KB:     ~25% slower without the cutoff; equal with it
+///   multibyte fallback: pays the wasted OR scan (~15% at 64 B)
+///   length branch: ~+0.1ns/call, visible only on 1-2 B values
+#[inline]
+pub(crate) fn validate_utf8(data: &[u8]) -> Option<&str> {
+    const ASCII_SCAN_CUTOFF: usize = 512;
+    if data.len() <= ASCII_SCAN_CUTOFF && is_ascii(data) {
+        // SAFETY: all bytes are ASCII, which is valid UTF-8.
+        return Some(unsafe { core::str::from_utf8_unchecked(data) });
+    }
+    simdutf8::basic::from_utf8(data).ok()
+}
+
+/// ORs the bytes together a word at a time: eight, then four, two and one
+/// for the rest, so a value of any length takes at most `len / 8 + 3`
+/// loads. The loads are unaligned, so the slice's position on the page
+/// does not matter.
+#[inline]
+pub(crate) fn is_ascii(data: &[u8]) -> bool {
+    let mut acc = 0u64;
+    let mut rest = data;
+    while let Some((word, tail)) = rest.split_first_chunk::<8>() {
+        acc |= u64::from_ne_bytes(*word);
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<4>() {
+        acc |= u64::from(u32::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<2>() {
+        acc |= u64::from(u16::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some(&byte) = rest.first() {
+        acc |= u64::from(byte);
+    }
+    acc & 0x8080_8080_8080_8080 == 0
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TextRef<'a> {
     pub value: &'a str,
@@ -1274,36 +1329,33 @@ mod immutable_record {
         }
     }
 
-    struct AppendWriter<'a> {
-        buf: &'a mut ValueBlob,
-        pos: usize,
-        buf_capacity_start: usize,
-        buf_ptr_start: *const u8,
-    }
-
-    impl<'a> AppendWriter<'a> {
-        fn new(buf: &'a mut ValueBlob, pos: usize) -> Self {
-            let buf_ptr_start = buf.as_ptr();
-            let buf_capacity_start = buf.capacity();
-            Self {
-                buf,
-                pos,
-                buf_capacity_start,
-                buf_ptr_start,
+    /// Writes the bytes of `value` for `serial_type` at the start of `out`
+    /// and returns how many it wrote.
+    #[inline(always)]
+    fn write_value(out: &mut [u8], value: ValueRef<'_>, serial_type: SerialType) -> usize {
+        let bytes: &[u8] = match value {
+            ValueRef::Null => return 0,
+            ValueRef::Numeric(Numeric::Integer(i)) => match serial_type.kind() {
+                SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => return 0,
+                SerialTypeKind::I8 => &(i as i8).to_be_bytes(),
+                SerialTypeKind::I16 => &(i as i16).to_be_bytes(),
+                // Without the most significant byte.
+                SerialTypeKind::I24 => &(i as i32).to_be_bytes()[1..],
+                SerialTypeKind::I32 => &(i as i32).to_be_bytes(),
+                // Without the two most significant bytes.
+                SerialTypeKind::I48 => &i.to_be_bytes()[2..],
+                SerialTypeKind::I64 => &i.to_be_bytes(),
+                other => panic!("Serial type is not an integer: {other:?}"),
+            },
+            ValueRef::Numeric(Numeric::Float(f)) => {
+                let fval: f64 = f.into();
+                &fval.to_be_bytes()
             }
-        }
-
-        #[inline]
-        fn extend_from_slice(&mut self, slice: &[u8]) {
-            self.buf[self.pos..self.pos + slice.len()].copy_from_slice(slice);
-            self.pos += slice.len();
-        }
-
-        fn assert_finish_capacity(&self) {
-            // let's make sure we didn't reallocate anywhere else
-            assert_eq!(self.buf_capacity_start, self.buf.capacity());
-            assert_eq!(self.buf_ptr_start, self.buf.as_ptr());
-        }
+            ValueRef::Text(t) => t.value.as_bytes(),
+            ValueRef::Blob(b) => b,
+        };
+        out[..bytes.len()].copy_from_slice(bytes);
+        bytes.len()
     }
 
     #[inline(always)]
@@ -1695,6 +1747,7 @@ mod immutable_record {
         }
 
         /// Like [Self::from_registers], but serializes into `buf`; see [Self::build].
+        #[inline]
         pub fn build_from_registers<'a, I: Iterator<Item = &'a Register> + Clone>(
             registers: impl IntoIterator<Item = &'a Register, IntoIter = I>,
             buf: RecordBuf,
@@ -1714,6 +1767,7 @@ mod immutable_record {
         /// register's previous record buffer, making steady-state record
         /// construction allocation-free.
         #[turso_macros::allocation_site(crate::alloc::ValueBlobAllocationSite::RecordBuild)]
+        #[inline]
         pub fn build<'a>(
             values: impl IntoIterator<Item = impl AsValueRef + 'a> + Clone,
             buf: RecordBuf,
@@ -1722,9 +1776,8 @@ mod immutable_record {
             let mut size_header = 0;
             let mut size_values = 0;
 
-            let mut serial_type_buf = [0; 9];
-            // Sizing pass: the cloneable iterator is re-walked below to write
-            // the serial types, so no scratch buffer is needed.
+            // Sizing pass: the cloneable iterator is walked again below to
+            // write the serial types and the values.
             for value in values.clone() {
                 let serial_type = SerialType::from(value.as_value_ref());
                 size_header += varint_len(serial_type.into());
@@ -1732,63 +1785,24 @@ mod immutable_record {
             }
 
             let header_size = Record::calc_header_size(size_header);
-
-            // 1. write header size
             let total_size = header_size + size_values;
             buf.try_reserve_exact(total_size)?;
-            let n = write_varint(&mut serial_type_buf, header_size as u64);
-
             buf.resize(total_size, 0);
-            let mut writer = AppendWriter::new(&mut buf, 0);
-            writer.extend_from_slice(&serial_type_buf[..n]);
 
-            // 2. Write serial types
-            for value in values.clone() {
-                let serial_type = SerialType::from(value.as_value_ref());
-                let n = write_varint(&mut serial_type_buf[0..], serial_type.into());
-                writer.extend_from_slice(&serial_type_buf[..n]);
-            }
-
-            // write content
+            // Writing pass: each serial type goes into the header and each
+            // value after it, the varints straight into their place.
+            let mut header_pos = write_varint(&mut buf[..header_size], header_size as u64);
+            let mut value_pos = header_size;
             for value in values {
                 let value = value.as_value_ref();
-                match value {
-                    ValueRef::Null => {}
-                    ValueRef::Numeric(Numeric::Integer(i)) => {
-                        let serial_type = SerialType::from(value);
-                        match serial_type.kind() {
-                            SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => {}
-                            SerialTypeKind::I8 => {
-                                writer.extend_from_slice(&(i as i8).to_be_bytes())
-                            }
-                            SerialTypeKind::I16 => {
-                                writer.extend_from_slice(&(i as i16).to_be_bytes())
-                            }
-                            SerialTypeKind::I24 => {
-                                writer.extend_from_slice(&(i as i32).to_be_bytes()[1..])
-                            } // remove most significant byte
-                            SerialTypeKind::I32 => {
-                                writer.extend_from_slice(&(i as i32).to_be_bytes())
-                            }
-                            SerialTypeKind::I48 => writer.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
-                            SerialTypeKind::I64 => writer.extend_from_slice(&i.to_be_bytes()),
-                            other => panic!("Serial type is not an integer: {other:?}"),
-                        }
-                    }
-                    ValueRef::Numeric(Numeric::Float(f)) => {
-                        let fval: f64 = f.into();
-                        writer.extend_from_slice(&fval.to_be_bytes());
-                    }
-                    ValueRef::Text(t) => {
-                        writer.extend_from_slice(t.value.as_bytes());
-                    }
-                    ValueRef::Blob(b) => {
-                        writer.extend_from_slice(b);
-                    }
-                };
+                let serial_type = SerialType::from(value);
+                header_pos += write_varint(&mut buf[header_pos..header_size], serial_type.into());
+                value_pos += write_value(&mut buf[value_pos..], value, serial_type);
             }
-
-            writer.assert_finish_capacity();
+            crate::turso_assert!(
+                header_pos == header_size && value_pos == total_size,
+                "record sizing pass and writing pass disagree"
+            );
             Ok(Self {
                 payload: Value::Blob(buf),
             })
@@ -3660,6 +3674,25 @@ mod tests {
     use super::*;
     use crate::alloc::vec;
     use crate::translate::collate::CollationSeq;
+
+    #[test]
+    fn is_ascii_checks_every_byte_of_every_length() {
+        for len in 0..40 {
+            let mut ascii: Vec<u8> = vec![];
+            ascii.extend((0..len).map(|i| b'a' + (i % 26) as u8));
+            assert!(is_ascii(&ascii), "length {len}");
+            assert_eq!(validate_utf8(&ascii), std::str::from_utf8(&ascii).ok());
+            for position in 0..len {
+                let mut bytes = ascii.clone();
+                bytes[position] = 0xc3;
+                assert!(!is_ascii(&bytes), "length {len}, byte {position}");
+                assert_eq!(validate_utf8(&bytes), std::str::from_utf8(&bytes).ok());
+            }
+        }
+        let text = "héllo wörld, ünïcödé";
+        assert!(!is_ascii(text.as_bytes()));
+        assert_eq!(validate_utf8(text.as_bytes()), Some(text));
+    }
 
     fn assert_integer_conversions<T>(in_range: &[(i64, T)], out_of_range: &[i64])
     where

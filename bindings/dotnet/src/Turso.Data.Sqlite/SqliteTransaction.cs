@@ -7,6 +7,7 @@ public class SqliteTransaction : DbTransaction
 {
     private SqliteConnection? _connection;
     private readonly IsolationLevel _isolationLevel;
+    private readonly global::Turso.TursoTransaction? _managedTransaction;
     private bool _completed;
     private bool _externalRollback;
 
@@ -17,6 +18,23 @@ public class SqliteTransaction : DbTransaction
 
         if (_isolationLevel == IsolationLevel.ReadUncommitted)
             connection.ReadUncommitted = true;
+
+        if (connection.IsManagedConnection)
+        {
+            try
+            {
+                _managedTransaction = new global::Turso.TursoTransaction(
+                    connection.ManagedConnection,
+                    _isolationLevel,
+                    deferred);
+            }
+            catch (Turso.Raw.Public.TursoException ex)
+            {
+                throw SqliteCommand.ToSqliteException(ex);
+            }
+
+            return;
+        }
 
         Execute(_isolationLevel == IsolationLevel.Serializable && !deferred ? "BEGIN IMMEDIATE;" : "BEGIN;");
     }
@@ -33,21 +51,81 @@ public class SqliteTransaction : DbTransaction
 
     internal bool WasRolledBackExternally => _externalRollback;
 
+    internal global::Turso.TursoTransaction? ManagedTransaction => _managedTransaction;
+
     public override void Commit()
     {
         ThrowIfCompleted();
         if (_externalRollback)
             throw new InvalidOperationException(Properties.Resources.TransactionCompleted);
 
-        Execute("COMMIT;");
+        if (_managedTransaction is not null)
+        {
+            try
+            {
+                _managedTransaction.Commit();
+            }
+            catch (global::Turso.TursoRemoteSqlException ex) when (ex.IsStreamExpired)
+            {
+                Complete();
+                throw SqliteCommand.ToSqliteException(ex);
+            }
+            catch (Turso.Raw.Public.TursoException ex)
+            {
+                if (_managedTransaction.IsCompleted)
+                    Complete();
+                throw SqliteCommand.ToSqliteException(ex);
+            }
+            catch
+            {
+                if (_managedTransaction.IsCompleted)
+                    Complete();
+                throw;
+            }
+        }
+        else
+        {
+            Execute("COMMIT;");
+        }
+
         Complete();
     }
 
-    public override Task CommitAsync(CancellationToken cancellationToken = default)
+    public override async Task CommitAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Commit();
-        return Task.CompletedTask;
+        ThrowIfCompleted();
+        if (_externalRollback)
+            throw new InvalidOperationException(Properties.Resources.TransactionCompleted);
+        if (_managedTransaction is null)
+        {
+            Commit();
+            return;
+        }
+
+        try
+        {
+            await _managedTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (global::Turso.TursoRemoteSqlException ex) when (ex.IsStreamExpired)
+        {
+            Complete();
+            throw SqliteCommand.ToSqliteException(ex);
+        }
+        catch (Turso.Raw.Public.TursoException ex)
+        {
+            if (_managedTransaction.IsCompleted)
+                Complete();
+            throw SqliteCommand.ToSqliteException(ex);
+        }
+        catch
+        {
+            if (_managedTransaction.IsCompleted)
+                Complete();
+            throw;
+        }
+
+        Complete();
     }
 
     public override void Rollback()
@@ -56,7 +134,16 @@ public class SqliteTransaction : DbTransaction
         try
         {
             if (!_externalRollback)
-                Execute("ROLLBACK;");
+            {
+                if (_managedTransaction is not null)
+                    _managedTransaction.Rollback();
+                else
+                    Execute("ROLLBACK;");
+            }
+        }
+        catch (Turso.Raw.Public.TursoException ex)
+        {
+            throw SqliteCommand.ToSqliteException(ex);
         }
         finally
         {
@@ -64,58 +151,96 @@ public class SqliteTransaction : DbTransaction
         }
     }
 
-    public override Task RollbackAsync(CancellationToken cancellationToken = default)
+    public override async Task RollbackAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Rollback();
-        return Task.CompletedTask;
+        ThrowIfCompleted();
+        try
+        {
+            if (!_externalRollback)
+            {
+                if (_managedTransaction is not null)
+                    await _managedTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                else
+                    Execute("ROLLBACK;");
+            }
+        }
+        catch (Turso.Raw.Public.TursoException ex)
+        {
+            throw SqliteCommand.ToSqliteException(ex);
+        }
+        finally
+        {
+            Complete();
+        }
     }
 
     public override void Save(string savepointName)
     {
         ArgumentNullException.ThrowIfNull(savepointName);
         ThrowIfCompleted();
-        Execute("SAVEPOINT " + QuoteIdentifier(savepointName) + ";");
+        ExecuteTransactionCommand("SAVEPOINT " + QuoteIdentifier(savepointName) + ";");
     }
 
     public override Task SaveAsync(string savepointName, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        Save(savepointName);
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(savepointName);
+        ThrowIfCompleted();
+        return ExecuteTransactionCommandAsync(
+            "SAVEPOINT " + QuoteIdentifier(savepointName) + ";",
+            cancellationToken);
     }
 
     public override void Rollback(string savepointName)
     {
         ArgumentNullException.ThrowIfNull(savepointName);
         ThrowIfCompleted();
-        Execute("ROLLBACK TO SAVEPOINT " + QuoteIdentifier(savepointName) + ";");
+        ExecuteTransactionCommand("ROLLBACK TO SAVEPOINT " + QuoteIdentifier(savepointName) + ";");
     }
 
     public override Task RollbackAsync(string savepointName, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        Rollback(savepointName);
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(savepointName);
+        ThrowIfCompleted();
+        return ExecuteTransactionCommandAsync(
+            "ROLLBACK TO SAVEPOINT " + QuoteIdentifier(savepointName) + ";",
+            cancellationToken);
     }
 
     public override void Release(string savepointName)
     {
         ArgumentNullException.ThrowIfNull(savepointName);
         ThrowIfCompleted();
-        Execute("RELEASE SAVEPOINT " + QuoteIdentifier(savepointName) + ";");
+        ExecuteTransactionCommand("RELEASE SAVEPOINT " + QuoteIdentifier(savepointName) + ";");
     }
 
     public override Task ReleaseAsync(string savepointName, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        Release(savepointName);
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(savepointName);
+        ThrowIfCompleted();
+        return ExecuteTransactionCommandAsync(
+            "RELEASE SAVEPOINT " + QuoteIdentifier(savepointName) + ";",
+            cancellationToken);
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !_completed && _connection is { State: ConnectionState.Open })
+        if (disposing && !_completed && _managedTransaction is not null)
+        {
+            try
+            {
+                _managedTransaction.Dispose();
+            }
+            catch (Turso.Raw.Public.TursoException ex)
+            {
+                throw SqliteCommand.ToSqliteException(ex);
+            }
+            finally
+            {
+                Complete();
+            }
+        }
+        else if (disposing && !_completed && _connection is { State: ConnectionState.Open })
             Rollback();
         else if (disposing && _connection is not null && ReferenceEquals(_connection.Transaction, this))
             _connection.Transaction = null;
@@ -125,6 +250,12 @@ public class SqliteTransaction : DbTransaction
 
     internal void MarkCompletedExternally(bool rolledBack)
     {
+        if (_managedTransaction is not null)
+        {
+            throw new InvalidOperationException(
+                "Managed transactions cannot be completed through raw transaction-control SQL.");
+        }
+
         if (rolledBack)
         {
             _externalRollback = true;
@@ -186,6 +317,53 @@ public class SqliteTransaction : DbTransaction
         command.CommandText = sql;
         command.Transaction = this;
         command.ExecuteNonQuery();
+    }
+
+    private void ExecuteTransactionCommand(string sql)
+    {
+        if (_managedTransaction is null)
+        {
+            Execute(sql);
+            return;
+        }
+
+        try
+        {
+            using var command = new global::Turso.TursoCommand(_connection!.ManagedConnection)
+            {
+                CommandText = sql,
+                Transaction = _managedTransaction,
+            };
+            command.ExecuteNonQuery();
+        }
+        catch (Turso.Raw.Public.TursoException ex)
+        {
+            throw SqliteCommand.ToSqliteException(ex, sql);
+        }
+    }
+
+    private async Task ExecuteTransactionCommandAsync(string sql, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_managedTransaction is null)
+        {
+            Execute(sql);
+            return;
+        }
+
+        try
+        {
+            await using var command = new global::Turso.TursoCommand(_connection!.ManagedConnection)
+            {
+                CommandText = sql,
+                Transaction = _managedTransaction,
+            };
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Turso.Raw.Public.TursoException ex)
+        {
+            throw SqliteCommand.ToSqliteException(ex, sql);
+        }
     }
 
 }

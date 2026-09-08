@@ -328,8 +328,7 @@ pub(crate) fn update_dbpage(pager: &Arc<Pager>, args: &[Value]) -> Result<Option
     pager.add_dirty(&page_ref)?;
     let contents = page_ref.get_contents();
     let buffer = contents
-        .buffer
-        .as_ref()
+        .buffer()
         .expect("sqlite_dbpage page buffer should be loaded");
     buffer.as_mut_slice().copy_from_slice(data);
 

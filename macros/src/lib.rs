@@ -763,11 +763,14 @@ fn emit_condition_assert(
     let details = details_json(&input.details);
 
     let fmt_args = details_format_args(&msg, &input.details);
+    // Without the antithesis cfg, a debug assertion must not evaluate its
+    // condition in release builds: `debug_assert!` keeps the expression
+    // inside the `if cfg!(debug_assertions)` block, so the compiler can drop
+    // it together with the check. Binding it to `__turso_cond` first would
+    // keep every condition with a fallible or non-trivial callee alive.
     let assert_call = match kind {
-        ConditionAssertKind::Assert => quote! { assert!(__turso_cond, #fmt_args); },
-        ConditionAssertKind::DebugAssert => {
-            quote! { debug_assert!(__turso_cond, #fmt_args); }
-        }
+        ConditionAssertKind::Assert => quote! { assert!(#cond, #fmt_args); },
+        ConditionAssertKind::DebugAssert => quote! { debug_assert!(#cond, #fmt_args); },
     };
     let exit_msg = quote! {
         eprint!("[antithesis] assertion failed: ");
@@ -778,9 +781,9 @@ fn emit_condition_assert(
     let env_check = antithesis_env_check();
     quote! {
         {
-            let __turso_cond = #cond;
             #[cfg(antithesis)]
             {
+                let __turso_cond = #cond;
                 #env_check
                 antithesis_sdk::assert_always_or_unreachable!(__turso_cond, #prefixed, #details);
                 if !__turso_cond {

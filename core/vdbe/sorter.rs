@@ -900,7 +900,7 @@ impl ArenaSortableRecord {
         let mut payload_iter = ValueIterator::new(payload)?;
 
         let mut key_values = bumpalo::collections::Vec::new_in(arena);
-        key_values.try_reserve(payload_iter.clone().count())?;
+        key_values.try_reserve(key_len)?;
         for _ in 0..key_len {
             let value = match payload_iter.next() {
                 Some(Ok(v)) => v,

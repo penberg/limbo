@@ -221,6 +221,34 @@ For common embedded SQLite usage, the `Turso.Data.Sqlite.Provider` package expos
 + using var connection = new SqliteConnection("Data Source=app.db");
 ```
 
+The same facade can connect directly to a remote database:
+
+```C#
+using Turso.Data.Sqlite;
+
+await using var connection = new SqliteConnection(
+    "Data Source=libsql://example-org.turso.io;Auth Token=eyJ...");
+await connection.OpenAsync();
+```
+
+Add `Replica Path` to keep queries local while syncing an embedded replica:
+
+```C#
+await using var connection = new SqliteConnection(
+    "Data Source=libsql://example-org.turso.io;"
+    + "Auth Token=eyJ...;"
+    + "Replica Path=./replica.db;"
+    + "Sync Interval=30");
+await connection.OpenAsync();
+await connection.SyncAsync();
+```
+
+Local paths continue to use the native SQLite-compatible backend. Remote URLs without
+`Replica Path` use direct remote execution; remote URLs with `Replica Path` use the
+local replica backend. Client-side functions, aggregates, collations, backup, blob,
+and extension helpers are unavailable on direct remote connections because they
+require a local database handle.
+
 Supported common connection string keywords include:
 
 | Keyword | Notes |
@@ -236,9 +264,9 @@ Supported common connection string keywords include:
 | `Encryption Cipher` | Turso local encryption cipher. |
 | `Encryption Key` | Hex-encoded encryption key used with `Encryption Cipher`. |
 | `Auth Token` | Bearer token for remote Turso/libSQL URLs. Aliases include `AuthToken` and `Authentication Token`. |
-| `Replica Path` | Reserved for embedded replicas. The .NET provider currently fails early with a clear unsupported error. |
+| `Replica Path` | Local path for an embedded replica of the remote `Data Source`. |
 | `Read Your Writes` | Keeps the remote Hrana session baton across commands. Defaults to `True`. Set `False` for stateless one-shot remote requests. |
-| `Sync Interval` | Reserved for embedded replicas. Automatic sync is not enabled yet. |
+| `Sync Interval` | Embedded replica automatic pull interval in seconds. `0` disables automatic sync. |
 | `Tls` | Optional override for `libsql://` development URLs. Conflicting values with explicit `http://` or `https://` schemes fail early. |
 
 ## SQLite-compatible facade coverage

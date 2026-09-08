@@ -17,7 +17,7 @@ use crate::translate::emitter::{
 };
 use crate::translate::expr::{walk_expr, WalkControl};
 use crate::translate::fkeys::emit_fk_drop_table_check;
-use crate::translate::plan::{Plan, QueryDestination};
+use crate::translate::plan::{compound_column_affinity, Plan, QueryDestination};
 use crate::translate::planner::ROWID_STRS;
 use crate::translate::select::{emit_select_plan, prepare_select_plan};
 use crate::translate::{ProgramBuilder, ProgramBuilderOpts};
@@ -929,6 +929,18 @@ fn derive_ctas_schema(
         }
         _ => bail_parse_error!("unexpected plan type for CTAS"),
     };
+    // SQLite derives a compound output affinity from all arms, not only the leftmost arm.
+    let compound_arms = match &plan {
+        Plan::CompoundSelect {
+            left, right_most, ..
+        } => {
+            let mut arms = Vec::with_capacity(left.len() + 1);
+            arms.extend(left.iter().map(|(select, _)| select));
+            arms.push(right_most);
+            Some(arms)
+        }
+        _ => None,
+    };
 
     // Collect names first, then deduplicate using SQLite's :N suffix convention.
     let mut names: Vec<String> = result_columns
@@ -949,8 +961,12 @@ fn derive_ctas_schema(
     let mut sql_parts = Vec::with_capacity(result_columns.len());
     let mut col_defs = Vec::with_capacity(result_columns.len());
 
-    for (col, name) in result_columns.iter().zip(names) {
-        let ty = col.declared_type(table_refs);
+    for (column_index, (col, name)) in result_columns.iter().zip(names).enumerate() {
+        // Names come from the leftmost arm, but compound affinity can weaken its type.
+        let ty = compound_arms
+            .as_ref()
+            .map(|arms| compound_column_affinity(arms, column_index).short_type_name())
+            .unwrap_or_else(|| col.declared_type(table_refs));
 
         let quoted = quote_identifier(&name);
         if ty.is_empty() {
@@ -1042,6 +1058,13 @@ fn emit_ctas_insert(
 
     // Open the new table for writing using the root page from CreateBtree.
     let ctas_btree = Arc::new(create_table(table_name, body, 0)?);
+    // SQLite applies the derived CTAS affinity in MakeRecord. This keeps each
+    // stored value consistent with the declared type of the CTAS column.
+    let affinity_str = ctas_btree
+        .columns()
+        .iter()
+        .map(|column| column.affinity().aff_mask())
+        .collect();
     let new_table_cursor_id = program.alloc_cursor_id(CursorType::BTreeTable(ctas_btree));
     program.emit_insn(Insn::OpenWrite {
         cursor_id: new_table_cursor_id,
@@ -1072,7 +1095,7 @@ fn emit_ctas_insert(
         count: to_u32(col_count),
         dest_reg: to_u32(record_reg),
         index_name: None,
-        affinity_str: None,
+        affinity_str: Some(affinity_str),
     });
 
     let rowid_reg = program.alloc_register();

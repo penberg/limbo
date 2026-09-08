@@ -619,7 +619,7 @@ pub fn finish_read_page(page_idx: usize, buffer: Arc<Buffer>, page: PageRef) {
     tracing::trace!("finish_read_page(page_idx = {page_idx})");
     {
         let inner = page.get();
-        inner.buffer = Some(buffer);
+        inner.set_buffer(buffer);
         page.clear_locked();
         page.set_loaded();
         // we set the wal tag only when reading page from log, or in allocate_page,
@@ -643,7 +643,7 @@ pub fn begin_write_btree_page(
     let page_id = page.get().id;
     tracing::trace!("begin_write_btree_page(page_id={})", page_id);
 
-    let buffer = page.get().buffer.clone().expect("buffer not loaded");
+    let buffer = page.get().buffer().cloned().expect("buffer not loaded");
     let buf_len = buffer.len();
 
     let write_complete = {
@@ -1117,7 +1117,7 @@ pub fn read_value<'a>(buf: &'a [u8], serial_type: SerialType) -> Result<(ValueRe
                     content_size
                 ))
             })?;
-            let val = simdutf8::basic::from_utf8(data).map_err(|_| {
+            let val = crate::types::validate_utf8(data).ok_or_else(|| {
                 mark_unlikely();
                 LimboError::Corrupt("TEXT value contains invalid UTF-8".into())
             })?;
@@ -1247,7 +1247,7 @@ pub fn read_value_serial_type<'a>(
                         content_size
                     ))
                 })?;
-                let val = simdutf8::basic::from_utf8(data).map_err(|_| {
+                let val = crate::types::validate_utf8(data).ok_or_else(|| {
                     mark_unlikely();
                     LimboError::Corrupt("TEXT value contains invalid UTF-8".into())
                 })?;
@@ -1409,6 +1409,7 @@ pub fn varint_len(value: u64) -> usize {
     }
 }
 
+#[inline]
 pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     if value <= 0x7f {
         buf[0] = (value & 0x7f) as u8;

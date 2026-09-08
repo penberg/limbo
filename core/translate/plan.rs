@@ -58,7 +58,7 @@ fn infer_type_from_expr(expr: &ast::Expr, tables: Option<&TableReferences>) -> A
 /// (TEXT affinity + a numeric arm, or numeric affinity + a text arm), in which
 /// case it is downgraded to BLOB (none) so the column is compared by storage
 /// class.
-fn compound_column_affinity(arms: &[&SelectPlan], i: usize) -> Affinity {
+pub(super) fn compound_column_affinity(arms: &[&SelectPlan], i: usize) -> Affinity {
     if arms.is_empty() {
         return Affinity::None;
     }
