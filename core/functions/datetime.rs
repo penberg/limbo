@@ -1,6 +1,6 @@
 use crate::numeric::Numeric;
 use crate::types::AsValueRef;
-use crate::types::Value;
+use crate::types::{TextRef, TextSubtype, Value};
 use crate::LimboError::InvalidModifier;
 use crate::{Result, ValueRef};
 // chrono isn't used more due to incompatibility with sqlite
@@ -879,7 +879,7 @@ where
         set_to_current(&mut p);
     } else {
         let first = values.next().unwrap();
-        match first.as_value_ref() {
+        match blob_as_text(first.as_value_ref()) {
             ValueRef::Text(s) => {
                 if parse_date_or_time(s.as_str(), &mut p).is_err() {
                     return Value::Null;
@@ -907,7 +907,7 @@ where
 
     for (i, val) in values.enumerate() {
         has_modifier = true;
-        if let ValueRef::Text(s) = val.as_value_ref() {
+        if let ValueRef::Text(s) = blob_as_text(val.as_value_ref()) {
             if parse_modifier(&mut p, s.as_str(), i).is_err() {
                 return Value::Null;
             }
@@ -1048,7 +1048,7 @@ where
 
     // Parse first argument (d1)
     let val1 = values.next().unwrap();
-    match val1.as_value_ref() {
+    match blob_as_text(val1.as_value_ref()) {
         ValueRef::Text(s) => {
             if parse_date_or_time(s.as_str(), &mut d1).is_err() {
                 return Value::Null;
@@ -1075,7 +1075,7 @@ where
 
     // Parse second argument (d2)
     let val2 = values.next().unwrap();
-    match val2.as_value_ref() {
+    match blob_as_text(val2.as_value_ref()) {
         ValueRef::Text(s) => {
             if parse_date_or_time(s.as_str(), &mut d2).is_err() {
                 return Value::Null;
@@ -1232,7 +1232,7 @@ where
         set_to_current(&mut p);
     } else {
         let init_val = values.next().unwrap();
-        match init_val.as_value_ref() {
+        match blob_as_text(init_val.as_value_ref()) {
             ValueRef::Text(s) => {
                 let s_str = s.as_str();
                 if s_str.eq_ignore_ascii_case("now") {
@@ -1273,7 +1273,7 @@ where
         }
 
         for (i, val) in values.enumerate() {
-            if let ValueRef::Text(s) = val.as_value_ref() {
+            if let ValueRef::Text(s) = blob_as_text(val.as_value_ref()) {
                 if parse_modifier(&mut p, s.as_str(), i).is_err() {
                     return Value::Null;
                 }
@@ -1422,6 +1422,19 @@ where
     Value::from_text(res)
 }
 
+/// SQLite reads date/time arguments with sqlite3_value_text(), which hands back a
+/// BLOB's bytes unchanged, so a blob holding '2024-01-01' parses like that text.
+/// Bytes that are not UTF-8 stay a blob and the caller rejects them.
+fn blob_as_text(value: ValueRef<'_>) -> ValueRef<'_> {
+    let ValueRef::Blob(bytes) = value else {
+        return value;
+    };
+    match std::str::from_utf8(bytes) {
+        Ok(text) => ValueRef::Text(TextRef::new(text, TextSubtype::Text)),
+        Err(_) => value,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1562,7 +1575,7 @@ mod tests {
             Value::from_f64(f64::NAN),                // NaN
             Value::from_f64(f64::INFINITY),           // Infinity
             Value::Null,                              // Null value
-            Value::Blob(crate::alloc::vec![1, 2, 3]), // Blob (unsupported type)
+            Value::Blob(crate::alloc::vec![1, 2, 3]), // Blob whose bytes are not a date
             // Invalid timezone tests
             Value::build_text("2024-07-21T12:00:00+24:00"), // Invalid timezone offset (too large)
             Value::build_text("2024-07-21T12:00:00-24:00"), // Invalid timezone offset (too small)
@@ -1691,7 +1704,7 @@ mod tests {
             Value::from_f64(f64::NAN),                // NaN
             Value::from_f64(f64::INFINITY),           // Infinity
             Value::Null,                              // Null value
-            Value::Blob(crate::alloc::vec![1, 2, 3]), // Blob (unsupported type)
+            Value::Blob(crate::alloc::vec![1, 2, 3]), // Blob whose bytes are not a date
             // Invalid timezone tests
             Value::build_text("2024-07-21T12:00:00+24:00"), // Invalid timezone offset (too large)
             Value::build_text("2024-07-21T12:00:00-24:00"), // Invalid timezone offset (too small)

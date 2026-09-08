@@ -2579,3 +2579,45 @@ test unixepoch-just-past-lower-boundary {
 }
 expect {
 }
+
+test date-blob-time-value {
+    SELECT date(CAST('2024-01-01' AS BLOB));
+}
+expect {
+    2024-01-01
+}
+
+test unixepoch-blob-time-value {
+    SELECT unixepoch(X'323032342D30312D3031');
+}
+expect {
+    1704067200
+}
+
+test date-blob-modifier {
+    SELECT date('2024-06-15', X'2B3120646179');
+}
+expect {
+    2024-06-16
+}
+
+test strftime-blob-time-value {
+    SELECT strftime('%Y-%m-%d', X'323032342D30312D3031');
+}
+expect {
+    2024-01-01
+}
+
+test timediff-blob-time-values {
+    SELECT timediff(X'323032342D30312D3032', X'323032342D30312D3031');
+}
+expect {
+    +0000-00-01 00:00:00.000
+}
+
+test date-blob-that-is-not-utf8 {
+    SELECT typeof(date(X'FF00'));
+}
+expect {
+    null
+}
