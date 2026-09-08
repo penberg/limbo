@@ -9,7 +9,7 @@
 
     <PackageId>Turso.EntityFrameworkCore.Sqlite</PackageId>
     <Title>Turso Entity Framework Core SQLite Provider</Title>
-    <Description>Entity Framework Core integration for Turso local databases using EF Core SQLite translation and Turso.Data.Sqlite execution.</Description>
+    <Description>Entity Framework Core integration for Turso local, direct remote, and embedded-replica databases using EF Core SQLite translation and Turso.Data.Sqlite execution.</Description>
     <Authors>Turso authors</Authors>
     <PackageTags>turso;sqlite;database;entity-framework-core;efcore;linq</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
