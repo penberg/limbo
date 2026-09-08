@@ -10,10 +10,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Turso.Data.Sqlite.Provider" Version="$(Version)" />
+    <Compile Include="..\ReplicaPackageSmoke.cs" Link="ReplicaPackageSmoke.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TursoUseProjectReferences)' != 'true'">
+    <PackageReference Include="Turso.Data.Sqlite.Provider" Version="$(TursoPackageVersion)" />
     <PackageReference Include="Turso.Data.NativeAot.$(RuntimeIdentifier)"
-                      Version="$(Version)"
+                      Version="$(TursoPackageVersion)"
                       PrivateAssets="all"
                       Condition="'$(PublishAot)' == 'true' and '$(TursoUseStaticNativeLibrary)' == 'true' and '$(RuntimeIdentifier)' != ''" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TursoUseProjectReferences)' == 'true'">
+    <ProjectReference Include="..\..\src\Turso.Data.Sqlite\Turso.Data.Sqlite.csproj" />
   </ItemGroup>
 </Project>

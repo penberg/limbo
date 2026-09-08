@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TrimMode Condition="'$(Configuration)' == 'Release'">full</TrimMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\ReplicaPackageSmoke.cs" Link="ReplicaPackageSmoke.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TursoUseProjectReferences)' != 'true'">
+    <PackageReference Include="Turso.Data.Sqlite.Provider" Version="$(TursoPackageVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TursoUseProjectReferences)' == 'true'">
+    <ProjectReference Include="..\..\..\src\Turso.Data.Sqlite\Turso.Data.Sqlite.csproj" />
+  </ItemGroup>
+</Project>

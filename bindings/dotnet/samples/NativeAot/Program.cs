@@ -1,19 +1,17 @@
-using Turso.Data.Sqlite;
+using Turso.Samples;
 
-using var connection = new SqliteConnection("Data Source=:memory:");
-connection.Open();
+var directory = Path.Combine(Path.GetTempPath(), $"turso-nativeaot-{Guid.NewGuid():N}");
+Directory.CreateDirectory(directory);
 
-using (var command = connection.CreateCommand())
+try
 {
-    command.CommandText = """
-        CREATE TABLE items (value TEXT NOT NULL);
-        INSERT INTO items VALUES ('native'), ('aot'), ('turso');
-        """;
-    command.ExecuteNonQuery();
+    var result = ReplicaPackageSmoke.Run(Path.Combine(directory, "replica.db"));
+    Console.WriteLine($"Rows: {result.Rows}");
+    Console.WriteLine($"Stats revision: {result.Revision}");
+    Console.WriteLine("Checkpoint: complete");
+    Console.WriteLine("Disposed: complete");
 }
-
-using (var command = connection.CreateCommand())
+finally
 {
-    command.CommandText = "SELECT COUNT(*) FROM items";
-    Console.WriteLine($"Rows: {command.ExecuteScalar()}");
+    Directory.Delete(directory, recursive: true);
 }
