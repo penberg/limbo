@@ -35,10 +35,10 @@ info:
 ---
 QUERY PLAN
 |--SCAN orders
-|--SEARCH lineitem USING INDEX sqlite_autoindex_lineitem_1 (l_orderkey=?)
-|--SEARCH supplier USING INTEGER PRIMARY KEY (rowid=?)
 |--SEARCH customer USING INTEGER PRIMARY KEY (rowid=?)
 |--SEARCH nation USING INTEGER PRIMARY KEY (rowid=?)
 |--SEARCH region USING INTEGER PRIMARY KEY (rowid=?)
+|--SEARCH lineitem USING INDEX sqlite_autoindex_lineitem_1 (l_orderkey=?)
+|--SEARCH supplier USING INTEGER PRIMARY KEY (rowid=?)
 |--USE SORTER FOR GROUP BY
 `--USE SORTER FOR ORDER BY
