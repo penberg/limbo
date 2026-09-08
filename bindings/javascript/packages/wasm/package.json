@@ -1,6 +1,6 @@
 {
   "name": "@tursodatabase/database-wasm",
-  "version": "0.8.0-pre.8",
+  "version": "0.8.0-pre.9",
   "repository": {
     "type": "git",
     "url": "https://github.com/tursodatabase/turso"
@@ -51,7 +51,7 @@
     ]
   },
   "dependencies": {
-    "@tursodatabase/database-common": "^0.8.0-pre.8",
-    "@tursodatabase/database-wasm-common": "^0.8.0-pre.8"
+    "@tursodatabase/database-common": "^0.8.0-pre.9",
+    "@tursodatabase/database-wasm-common": "^0.8.0-pre.9"
   }
 }

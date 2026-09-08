@@ -1,6 +1,6 @@
 {
   "name": "@tursodatabase/sync-react-native",
-  "version": "0.8.0-pre.8",
+  "version": "0.8.0-pre.9",
   "description": "React Native bindings for TursoDB",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
