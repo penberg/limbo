@@ -44,5 +44,3 @@ cargo run --release -p turso-join-benchmark -- \
   --query 5 --query 9 \
   --timeout-seconds 300
 ```
-
-See [RESULTS.md](RESULTS.md) for the first join optimizer study.
