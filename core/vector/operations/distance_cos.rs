@@ -101,8 +101,14 @@ fn vector_f32_distance_cos_rust(v1: &[f32], v2: &[f32]) -> f64 {
         norm1 += a * a;
         norm2 += b * b;
     }
-    if norm1 == 0.0 || norm2 == 0.0 {
+    // simsimd calls two zero vectors identical, and a zero vector maximally
+    // distant from any other vector. Match it so the fallback and the SIMD
+    // path agree.
+    if norm1 == 0.0 && norm2 == 0.0 {
         return 0.0;
+    }
+    if dot == 0.0 {
+        return 1.0;
     }
     (1.0 - dot / (norm1 * norm2).sqrt()) as f64
 }
@@ -140,8 +146,14 @@ fn vector_f64_distance_cos_rust(v1: &[f64], v2: &[f64]) -> f64 {
         norm1 += a * a;
         norm2 += b * b;
     }
-    if norm1 == 0.0 || norm2 == 0.0 {
+    // simsimd calls two zero vectors identical, and a zero vector maximally
+    // distant from any other vector. Match it so the fallback and the SIMD
+    // path agree.
+    if norm1 == 0.0 && norm2 == 0.0 {
         return 0.0;
+    }
+    if dot == 0.0 {
+        return 1.0;
     }
     1.0 - dot / (norm1 * norm2).sqrt()
 }
@@ -228,6 +240,18 @@ mod tests {
         assert!(vector_f64_distance_cos_simsimd(&[1.0, 2.0], &[1.0, 2.0]).abs() < 1e-6);
         assert!((vector_f64_distance_cos_simsimd(&[1.0, 2.0], &[-1.0, -2.0]) - 2.0).abs() < 1e-6);
         assert!((vector_f64_distance_cos_simsimd(&[1.0, 2.0], &[-2.0, 1.0]) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_vector_distance_cos_f32_rust_zero_vectors() {
+        assert_eq!(vector_f32_distance_cos_rust(&[], &[]), 0.0);
+        assert_eq!(vector_f32_distance_cos_rust(&[1.0, 2.0], &[0.0, 0.0]), 1.0);
+    }
+
+    #[test]
+    fn test_vector_distance_cos_f64_rust_zero_vectors() {
+        assert_eq!(vector_f64_distance_cos_rust(&[], &[]), 0.0);
+        assert_eq!(vector_f64_distance_cos_rust(&[1.0, 2.0], &[0.0, 0.0]), 1.0);
     }
 
     #[test]
