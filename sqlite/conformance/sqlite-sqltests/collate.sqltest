@@ -274,6 +274,14 @@ expect {
     Apple|0
 }
 
+@cross-check-integrity
+test collate_in_list_does_not_leak_to_following_result {
+    SELECT 'A' COLLATE NOCASE IN ('a'), 'A' IN ('a'), 'B' IN ('b');
+}
+expect {
+    1|0|0
+}
+
 # =====================================================================
 # --- Hash join with NOCASE on build-side column, comparison in SELECT ---
 # The NOCASE column ends up in the hash payload; the cached register must

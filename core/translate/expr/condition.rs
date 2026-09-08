@@ -182,7 +182,7 @@ pub(super) fn translate_in_list(
             }
         }
     }
-
+    program.reset_collation();
     if check_null_reg != 0 {
         program.emit_insn(Insn::IsNull {
             reg: check_null_reg,
