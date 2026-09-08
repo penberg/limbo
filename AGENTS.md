@@ -137,7 +137,9 @@ OOGA BOOGA! Programming already complex! Use simple word! Say what you mean! Exa
 +    fn empty_schema_never_chooses_a_statement_that_needs_a_table() {
 ```
 
-No-one knows what the hell a bootstrap-safe statement is. Everyone knows what "a statement that needs a table" is.
+No-one knows what the hell a bootstrap-safe statement is. Everyone knows what "a statement that needs a table" is. Do
+not use metaphorical language, such as the following terms: load-bearing, pin, bite, sharp, arm, guard, bless, wedge,
+retire, retarget, answer, settle, carry. Do not make up terms if they have equivalents that are commonly used in the domain.
 
 ## Code flows from top to bottom
 
@@ -154,15 +156,9 @@ fn sync_wal()           // called by write_frames
 When adding a helper, put it below the functions that call it, not at the
 end of the file or wherever the cursor happened to be.
 
-## Use comments only when absolutely necessary
+## Do not add comments
 
-Comments should explain *why*, not *what*. Do not narrate what the code
-already says: no `// Check if the page is dirty` above `if page.is_dirty()`,
-no `// Helper function for X`, no `// Step 1:`. If the code needs a comment
-to be understood, rename the function or variable instead. A comment earns
-its place when it says something the code cannot: an invariant the type
-system does not enforce, a SQLite compatibility quirk, or a workaround for a
-specific bug with a reference.
+- Do not add comments. Instead, focus on making your code expressive.
 
 ## CI Note
 
