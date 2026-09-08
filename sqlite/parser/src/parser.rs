@@ -4130,6 +4130,8 @@ impl<'a> Parser<'a> {
     ) -> Result<Vec<NamedColumnConstraint>> {
         let mut result = vec![];
         let mut has_primary_key = false;
+        let mut has_default = false;
+        let mut has_generated = false;
 
         loop {
             let name = match self.peek()? {
@@ -4186,6 +4188,12 @@ impl<'a> Parser<'a> {
             match self.peek()? {
                 Some(tok) => match tok.token_type {
                     TK_DEFAULT => {
+                        if has_generated {
+                            return Err(Error::Custom(
+                                "a generated column cannot have a DEFAULT value".to_owned(),
+                            ));
+                        }
+                        has_default = true;
                         result.push(NamedColumnConstraint {
                             name,
                             constraint: self.parse_default_column_constraint()?,
@@ -4250,6 +4258,12 @@ impl<'a> Parser<'a> {
                         });
                     }
                     TK_GENERATED | TK_AS => {
+                        if has_default {
+                            return Err(Error::Custom(
+                                "a generated column cannot have a DEFAULT value".to_owned(),
+                            ));
+                        }
+                        has_generated = true;
                         result.push(NamedColumnConstraint {
                             name,
                             constraint: self.parse_generated_column_constraint()?,
@@ -5521,6 +5535,11 @@ mod tests {
         let testcases = vec![
             "ALTER TABLE my_table ADD COLUMN my_column PRIMARY KEY",
             "ALTER TABLE my_table ADD COLUMN my_column UNIQUE",
+            // https://github.com/tursodatabase/turso/issues/7058
+            "ALTER TABLE my_table ADD COLUMN my_column DEFAULT 5 AS (1)",
+            "ALTER TABLE my_table ADD COLUMN my_column AS (1) DEFAULT 5",
+            "CREATE TABLE foo(b DEFAULT 5 AS (a+1))",
+            "CREATE TABLE foo(b AS (a+1) DEFAULT 5)",
             "CREATE TEMP TABLE baz.foo(bar)",
             "CREATE TABLE foo(d INT AS (a*abs(b)))",
             "CREATE TABLE foo(d INT AS (a*abs(b)))",

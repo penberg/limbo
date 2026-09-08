@@ -3308,13 +3308,24 @@ expect error {
     (Cannot add a PRIMARY KEY column|generated columns cannot be part of the PRIMARY KEY)
 }
 
-@skip "TODO: parser accepts DEFAULT + GENERATED without error"
+# Regression test for https://github.com/tursodatabase/turso/issues/7058
+# Generated columns may not use the DEFAULT clause (SQLite gencol.html
+# §2.3 limitation 1). The order of DEFAULT vs. GENERATED/AS does not
+# matter; both combinations are rejected.
 test gencol_alter_add_column_generated_default_rejected {
     CREATE TABLE t1(a INTEGER);
     ALTER TABLE t1 ADD COLUMN b DEFAULT 5 AS (a+1);
 }
 expect error {
-    (Cannot add a column with non-constant default|error in generated column|cannot have a DEFAULT)
+    (Cannot add a column with non-constant default|error in generated column|cannot have a DEFAULT|cannot use DEFAULT on a generated column)
+}
+
+test gencol_alter_add_column_default_after_generated_rejected {
+    CREATE TABLE t1(a INTEGER);
+    ALTER TABLE t1 ADD COLUMN b AS (a+1) DEFAULT 5;
+}
+expect error {
+    (Cannot add a column with non-constant default|error in generated column|cannot have a DEFAULT|cannot use DEFAULT on a generated column)
 }
 
 # NOT NULL on virtual column validated against existing data
