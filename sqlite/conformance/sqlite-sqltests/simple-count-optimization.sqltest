@@ -110,6 +110,7 @@ expect {
     1
 }
 
+@skip-if sqlite "Deliberately break up with sqlite here to return the actual value instead of error"
 test simple-count-unusable-partial-index-column-correctness {
     CREATE TABLE t(x NOT NULL);
     CREATE INDEX pi ON t(x) WHERE x > 5;
