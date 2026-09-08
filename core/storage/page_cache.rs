@@ -96,6 +96,7 @@ pub enum SpillResult {
 /// Sweep order follows next: tail (LRU) -> head (MRU) -> .. -> tail
 /// New pages are inserted after the clock hand in the `next` direction,
 /// which places them at head (MRU) (i.e. `tail.next` is the head).
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct PageCache {
     /// Capacity in pages
     capacity: usize,
@@ -106,9 +107,11 @@ pub struct PageCache {
     /// Clock hand cursor for SIEVE eviction (pointer to an entry in the queue, or null)
     clock_hand: *mut PageCacheEntry,
     /// Threshold number of pages at which we start spilling dirty pages.
+    #[cfg_attr(feature = "aristo-instr", inspect)]
     spill_threshold: usize,
     spill_enabled: bool,
     /// Conservative estimation of pages that are evictable based on dirty/spilled state.
+    #[cfg_attr(feature = "aristo-instr", inspect)]
     evictable_count: usize,
 }
 
@@ -481,6 +484,15 @@ impl PageCache {
 
     #[inline]
     /// Count pages that can be evicted without spilling.
+    ///
+    /// Verification-only: `expose_pub` raises this to a public
+    /// `inspect_count_evictable_pages()` so the aretta-books harness can read
+    /// the O(n) ground-truth evictable count (aretta-books accessor A-05).
+    /// NEVER use in production.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        aristo::instrument::expose_pub(as = "inspect_count_evictable_pages")
+    )]
     fn count_evictable_pages(&self) -> usize {
         self.map
             .values()
@@ -612,6 +624,16 @@ impl PageCache {
     /// their ref_bit and leaving them in place; only pages with ref_bit == 0 are evicted.
     ///
     /// Returns `CacheError::Full` if not enough pages can be evicted
+    ///
+    /// Verification-only: the `aristo-instr` `expose_pub` raises this to a public
+    /// `inspect_make_room_for()` so the aretta-books page-cache conformance harness
+    /// can drive the real SIEVE eviction sweep directly (aretta-books accessor A-29).
+    /// This exposes an existing internal eviction primitive; it adds no new
+    /// behaviour. NEVER use in production.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        aristo::instrument::expose_pub(as = "inspect_make_room_for")
+    )]
     fn make_room_for(&mut self, n: usize, bypass_capacity: bool) -> Result<(), CacheError> {
         if bypass_capacity {
             return Ok(());
@@ -798,6 +820,11 @@ impl PageCache {
         self.map.keys().copied().collect()
     }
 
+    // The `aristo-instr` feature widens this module to `pub`
+    // (see core/storage/mod.rs), which promotes `len` to true public API and
+    // trips `clippy::len_without_is_empty`. The cache has no `is_empty`
+    // caller, so allow the lint rather than grow an unused method.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -842,6 +869,60 @@ impl PageCache {
         } else {
             assert_eq!(map_len, 0, "clock hand null but map not empty");
         }
+    }
+
+    /// Non-panicking twin of `verify_cache_integrity`: returns whether
+    /// every cache invariant holds instead of asserting. Used by the
+    /// aretta-books differential-testing harness, which needs a boolean it
+    /// can compare against the model rather than a panic. Exposed publicly
+    /// through `expose_pub` as `inspect_cache_integrity_ok` (aretta-books
+    /// accessor A-04). NEVER use in production.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_cache_integrity_ok")]
+    fn cache_integrity_ok(&self) -> bool {
+        use rustc_hash::FxHashSet as HashSet;
+
+        let map_len = self.map.len();
+
+        // Walk the queue: count entries and collect distinct keys.
+        let mut queue_len = 0;
+        let mut cursor = self.queue.front();
+        let mut seen_keys = HashSet::default();
+        while let Some(entry) = cursor.get() {
+            queue_len += 1;
+            seen_keys.insert(entry.key);
+            cursor.move_next();
+        }
+
+        // map.len() == queue length.
+        if map_len != queue_len {
+            return false;
+        }
+        // map.len() == count of distinct keys seen in queue (no duplicates).
+        if map_len != seen_keys.len() {
+            return false;
+        }
+        // Every map key present in the queue.
+        for &key in self.map.keys() {
+            if !seen_keys.contains(&key) {
+                return false;
+            }
+        }
+        // clock_hand consistency: non-null => map non-empty AND hand key
+        // in map; null => map empty.
+        if !self.clock_hand.is_null() {
+            if map_len == 0 {
+                return false;
+            }
+            let hand_key = unsafe { (*self.clock_hand).key };
+            if !self.map.contains_key(&hand_key) {
+                return false;
+            }
+        } else if map_len != 0 {
+            return false;
+        }
+
+        true
     }
 
     #[cfg(test)]

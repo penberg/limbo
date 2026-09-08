@@ -16,6 +16,9 @@ pub(crate) mod checksum;
 pub mod database;
 pub(crate) mod encryption;
 pub(crate) mod journal_mode;
+#[cfg(feature = "aristo-instr")]
+pub mod page_cache;
+#[cfg(not(feature = "aristo-instr"))]
 pub(crate) mod page_cache;
 pub(crate) mod page_transform;
 #[allow(clippy::arc_with_non_send_sync)]

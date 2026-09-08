@@ -3697,6 +3697,44 @@ impl Pager {
         Ok(page_cache.resize(capacity))
     }
 
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_page_cache_handle")]
+    fn page_cache_handle(&self) -> crate::sync::Arc<crate::sync::RwLock<PageCache>> {
+        self.page_cache.clone()
+    }
+
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_new_test_pager")]
+    fn new_for_differential_test() -> Self {
+        Self::new_for_differential_test_with_capacity(64)
+    }
+
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_new_test_pager_with_capacity")]
+    fn new_for_differential_test_with_capacity(cache_capacity: usize) -> Self {
+        use crate::io::{MemoryIO, OpenFlags, IO};
+        use crate::storage::database::DatabaseFile;
+
+        let page_size: u32 = 4096;
+        let pages: u32 = 64;
+        let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
+        let db_file: Arc<dyn DatabaseStorage> = Arc::new(DatabaseFile::new(
+            io.open_file("test.db", OpenFlags::Create, true).unwrap(),
+        ));
+        let buffer_pool = BufferPool::begin_init(&io, (pages * page_size) as usize);
+        let init_page_1 = Arc::new(ArcSwapOption::new(Some(default_page1(None))));
+        Pager::new(
+            db_file,
+            None,
+            io,
+            PageCache::new(cache_capacity),
+            buffer_pool,
+            Arc::new(Mutex::new(())),
+            init_page_1,
+        )
+        .unwrap()
+    }
+
     pub fn add_dirty(&self, page: &Page) -> Result<()> {
         turso_assert!(
             page.is_loaded(),
