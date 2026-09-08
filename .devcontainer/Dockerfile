@@ -134,6 +134,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
   git \
   procps \
+  valgrind \
   fzf \
   zsh \
   man-db \
