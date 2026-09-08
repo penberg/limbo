@@ -3014,6 +3014,11 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> StateTransition for CommitStat
     type Context = Arc<MvStore<Clock, A>>;
     type SMResult = ();
 
+    #[aristo::intent(
+        "An abandoned partial write never reaches disk.",
+        verify = "full",
+        id = "abandoned_partial_write_never_reaches_disk"
+    )]
     #[tracing::instrument(fields(state = ?self.state), skip(self, mvcc_store), level = Level::DEBUG)]
     fn step(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         tracing::trace!("step(state={:?})", self.state);
