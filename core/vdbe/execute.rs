@@ -218,6 +218,23 @@ macro_rules! check_arg_count {
 pub type InsnResult = Result<InsnFunctionStepResult, Box<LimboError>>;
 pub type InsnFunction = fn(&Program, &mut ProgramState, &Insn, &Arc<Pager>) -> InsnResult;
 
+/// This is an optimization over `checked_add(n).ok_or(LimboError::Overflow)`. With `ok_or`, the
+/// compiler generates [LimboError] drop glue even though [LimboError::Overflow] owns nothing.
+/// But with [OkOverflow], it's able to skip the drop glue.
+trait OrOverflow<T> {
+    fn or_overflow(self) -> Result<T>;
+}
+
+impl<T> OrOverflow<T> for Option<T> {
+    #[inline(always)]
+    fn or_overflow(self) -> Result<T> {
+        match self {
+            Some(value) => Ok(value),
+            None => Err(LimboError::IntegerOverflow),
+        }
+    }
+}
+
 /// Parse a Value (text, int, float, or blob) into a BigDecimal.
 fn value_to_bigdecimal(val: &Value) -> Result<bigdecimal::BigDecimal> {
     use bigdecimal::BigDecimal;
@@ -846,17 +863,29 @@ pub fn op_compare(
         }
     }
 
-    // (https://github.com/tursodatabase/turso/issues/2304): reusing logic from compare_immutable().
-    // TODO: There are tons of cases like this where we could reuse this in a similar vein
-    let a_range =
-        (start_reg_a..start_reg_a + count + 1).map(|idx| state.registers[idx].get_value());
-    let b_range =
-        (start_reg_b..start_reg_b + count + 1).map(|idx| state.registers[idx].get_value());
-    let cmp = compare_immutable(a_range, b_range, key_info);
+    return op_compare_slow(state, start_reg_a, start_reg_b, count, key_info);
 
-    state.last_compare = Some(cmp);
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    // keep slow path out of line to keep stack frame small
+    #[inline(never)]
+    fn op_compare_slow(
+        state: &mut ProgramState,
+        start_reg_a: usize,
+        start_reg_b: usize,
+        count: usize,
+        key_info: &[crate::types::KeyInfo],
+    ) -> InsnResult {
+        // (https://github.com/tursodatabase/turso/issues/2304): reusing logic from compare_immutable().
+        // TODO: There are tons of cases like this where we could reuse this in a similar vein
+        let a_range =
+            (start_reg_a..start_reg_a + count + 1).map(|idx| state.registers[idx].get_value());
+        let b_range =
+            (start_reg_b..start_reg_b + count + 1).map(|idx| state.registers[idx].get_value());
+        let cmp = compare_immutable(a_range, b_range, key_info);
+
+        state.last_compare = Some(cmp);
+        state.pc += 1;
+        Ok(InsnFunctionStepResult::Step)
+    }
 }
 
 pub fn op_jump(
@@ -3281,10 +3310,9 @@ pub fn op_make_record(
             ))
             .into());
         }
-        for (i, affinity_ch) in affinity_str.chars().enumerate().take(count) {
-            let reg_index = start_reg + i;
-            let affinity = Affinity::from_char(affinity_ch);
-            apply_affinity_char(&mut state.registers[reg_index], affinity);
+        let registers = &mut state.registers[start_reg..start_reg + count];
+        for (register, &affinity_code) in registers.iter_mut().zip(affinity_str.as_bytes()) {
+            apply_affinity_char(register, Affinity::from_char_code(affinity_code));
         }
     }
 
@@ -7246,7 +7274,7 @@ fn update_agg_payload(
                         "Count: payload is not an integer".to_string(),
                     ));
                 };
-                *i = i.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+                *i = i.checked_add(1).or_overflow()?;
             }
         }
         AggFunc::Count0 => {
@@ -7257,7 +7285,7 @@ fn update_agg_payload(
                     "Count0: payload is not an integer".to_string(),
                 ));
             };
-            *i = i.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            *i = i.checked_add(1).or_overflow()?;
         }
         AggFunc::Avg => {
             if matches!(arg, Value::Null) {
@@ -7290,7 +7318,7 @@ fn update_agg_payload(
                 NumericArg::Null => unreachable!("NULL early-returned above"),
             }
             *r_err_val = Value::from_f64(sum_state.r_err);
-            *count = count.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            *count = count.checked_add(1).or_overflow()?;
         }
         AggFunc::Sum | AggFunc::Total => {
             // invariant as per init_agg_payload: payload[0] is acc (Null/Integer/Float),
@@ -7327,7 +7355,7 @@ fn update_agg_payload(
                 ovrfl: *ovrfl_i != 0,
             };
             if !matches!(arg, Value::Null) {
-                *count = count.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+                *count = count.checked_add(1).or_overflow()?;
             }
             if matches!(*acc, Value::Null) && sum_state.approx {
                 return Ok(());
@@ -7483,7 +7511,7 @@ fn update_agg_payload(
                         separator_lengths.try_reserve(
                             count
                                 .checked_mul(std::mem::size_of::<i64>())
-                                .ok_or(LimboError::IntegerOverflow)?,
+                                .or_overflow()?,
                         )?;
                         let bytes = first_separator_len.to_be_bytes();
                         for _ in 0..prior_separator_count {
@@ -7496,7 +7524,7 @@ fn update_agg_payload(
                 }
             }
             acc.exec_group_concat(arg)?;
-            *count = count.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            *count = count.checked_add(1).or_overflow()?;
         }
         AggFunc::External(_) => {
             mark_unlikely();
@@ -8007,7 +8035,7 @@ fn op_window_step(
             let Value::Numeric(Numeric::Integer(step)) = &payload[1] else {
                 unreachable!("nth_value step count must be Integer");
             };
-            let step = step.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            let step = step.checked_add(1).or_overflow()?;
             payload[1] = Value::from_i64(step);
             if step == n {
                 payload[0].try_clone_from(arg_slot.get_value())?;
@@ -8632,7 +8660,7 @@ fn inverse_agg_payload(func: &AggFunc, arg: Value, payload: &mut [Value]) -> Res
             let expected_separator_bytes = old_count
                 .saturating_sub(1)
                 .checked_mul(std::mem::size_of::<i64>())
-                .ok_or(LimboError::IntegerOverflow)?;
+                .or_overflow()?;
             if !separator_lengths.is_empty() && separator_lengths.len() != expected_separator_bytes
             {
                 return Err(LimboError::InternalError(format!(
@@ -8664,9 +8692,7 @@ fn inverse_agg_payload(func: &AggFunc, arg: Value, payload: &mut [Value]) -> Res
             } else {
                 0
             };
-            let remove_len = value_len
-                .checked_add(separator_len)
-                .ok_or(LimboError::IntegerOverflow)?;
+            let remove_len = value_len.checked_add(separator_len).or_overflow()?;
             let Value::Text(text) = acc else {
                 unreachable!("GroupConcat accumulator is Text after a non-NULL xStep");
             };
@@ -8720,7 +8746,7 @@ fn inverse_agg_payload(func: &AggFunc, arg: Value, payload: &mut [Value]) -> Res
             for _ in 0..element_count {
                 end = end
                     .checked_add(raw_jsonb_element_len(data, end)?)
-                    .ok_or(LimboError::IntegerOverflow)?;
+                    .or_overflow()?;
             }
             data.drain(1..end);
         }
@@ -12145,6 +12171,7 @@ pub fn op_yield(
 
 pub struct OpInsertState {
     pub sub_state: OpInsertSubState,
+    pub has_dependent_views: bool,
     pub old_record: Option<(i64, crate::alloc::Vec<Value>)>,
     /// Set by the NoopCheck sub-state to indicate the row already has the exact
     /// same payload, so the physical write can be skipped.
@@ -12205,6 +12232,7 @@ pub fn op_insert(
                         .get_dependent_materialized_views(table_name)
                         .is_empty()
                 };
+                state.active_op_state.insert().has_dependent_views = has_dependent_views;
                 // If there are no dependent views, we don't need to capture the old record.
                 // We also don't need to do it if the rowid of the UPDATEd row was changed, because
                 // op_delete already captured the deletion for IVM, and this insert only needs to
@@ -12246,12 +12274,7 @@ pub fn op_insert(
                 )? {
                     return Ok(InsnFunctionStepResult::IO(io));
                 }
-                let has_dependent_views = {
-                    let schema = program.connection.schema.read();
-                    !schema
-                        .get_dependent_materialized_views(table_name)
-                        .is_empty()
-                };
+                let has_dependent_views = state.active_op_state.insert().has_dependent_views;
                 let needs_capture =
                     has_dependent_views && !flag.has(InsertFlags::UPDATE_ROWID_CHANGE);
                 if needs_capture {
@@ -12320,19 +12343,14 @@ pub fn op_insert(
                 // The noop check is fundamentally incompatible with the MVCC
                 // Delete+Insert update pattern.
                 state.active_op_state.insert().is_noop_update = false;
-                let is_mvcc = {
-                    let cursor_ref = get_cursor!(state, *cursor_id);
-                    cursor_ref.as_btree_mut().is_mvcc()
-                };
-                let has_rowid = {
-                    let cursor = get_cursor!(state, *cursor_id);
-                    cursor.as_btree_mut().has_rowid()
-                };
-                if !is_mvcc
-                    && has_rowid
-                    && flag.has(InsertFlags::SKIP_LAST_ROWID)
+                let may_be_noop_update = flag.has(InsertFlags::SKIP_LAST_ROWID)
                     && !flag.has(InsertFlags::UPDATE_ROWID_CHANGE)
-                {
+                    && {
+                        let cursor = get_cursor!(state, *cursor_id);
+                        let cursor = cursor.as_btree_mut();
+                        !cursor.is_mvcc() && cursor.has_rowid()
+                    };
+                if may_be_noop_update {
                     let key = match &state.registers[*key_reg].get_value() {
                         Value::Numeric(Numeric::Integer(i)) => *i,
                         _ => unreachable!("expected integer key"),
@@ -12418,21 +12436,18 @@ pub fn op_insert(
                     cursor.has_rowid()
                 };
                 if has_rowid {
-                    let maybe_rowid = {
-                        let cursor = state.get_cursor(*cursor_id);
-                        let cursor = cursor.as_btree_mut();
-                        return_if_io!(cursor.rowid())
-                    };
-                    if let Some(rowid) = maybe_rowid {
-                        if !flag.has(InsertFlags::SKIP_LAST_ROWID) {
-                            program.connection.update_last_rowid(rowid);
-                        }
-                        if !flag.has(InsertFlags::SKIP_ALL_CHANGE_COUNTS) {
-                            if flag.has(InsertFlags::SKIP_STATEMENT_CHANGE_COUNT) {
-                                state.record_total_change();
-                            } else {
-                                state.record_statement_change();
-                            }
+                    if !flag.has(InsertFlags::SKIP_LAST_ROWID) {
+                        let rowid = match &state.registers[*key_reg].get_value() {
+                            Value::Numeric(Numeric::Integer(i)) => *i,
+                            _ => unreachable!("expected integer key"),
+                        };
+                        program.connection.update_last_rowid(rowid);
+                    }
+                    if !flag.has(InsertFlags::SKIP_ALL_CHANGE_COUNTS) {
+                        if flag.has(InsertFlags::SKIP_STATEMENT_CHANGE_COUNT) {
+                            state.record_total_change();
+                        } else {
+                            state.record_statement_change();
                         }
                     }
                 } else if !flag.has(InsertFlags::SKIP_ALL_CHANGE_COUNTS) {
@@ -12442,9 +12457,7 @@ pub fn op_insert(
                         state.record_statement_change();
                     }
                 }
-                let schema = program.connection.schema.read();
-                let dependent_views = schema.get_dependent_materialized_views(table_name);
-                if !dependent_views.is_empty() {
+                if state.active_op_state.insert().has_dependent_views {
                     if !has_rowid {
                         return Err(LimboError::ParseError(
                             "WITHOUT ROWID tables with dependent materialized views are not supported"
@@ -13003,11 +13016,11 @@ fn new_rowid_inner(
 
     const MAX_ROWID: i64 = i64::MAX;
     const MAX_ATTEMPTS: u32 = 100;
-    let mv_store = program.connection.mv_store();
+    let has_mv_store = state.mv_store(&program.connection).is_some();
     loop {
         match *state.active_op_state.new_rowid() {
             OpNewRowidState::Start => {
-                if mv_store.is_some() {
+                if has_mv_store {
                     let cursor = state.get_cursor(*cursor);
                     let cursor = cursor.as_btree_mut() as &mut dyn Any;
                     if let Some(mvcc_cursor) = cursor.downcast_mut::<MvCursor>() {
@@ -13080,7 +13093,7 @@ fn new_rowid_inner(
                     return_if_io!(cursor.rowid())
                 };
 
-                if mv_store.is_some() {
+                if has_mv_store {
                     let cursor = state.get_cursor(*cursor);
                     let cursor = cursor.as_btree_mut() as &mut dyn Any;
                     if let Some(mvcc_cursor) = cursor.downcast_mut::<MvCursor>() {
@@ -13171,7 +13184,7 @@ fn new_rowid_inner(
                     state.active_op_state.clear();
                     state.pc += 1;
 
-                    if mv_store.is_some() {
+                    if has_mv_store {
                         let cursor = state.get_cursor(*cursor);
                         let cursor = cursor.as_btree_mut() as &mut dyn Any;
                         if let Some(mvcc_cursor) = cursor.downcast_mut::<MvCursor>() {
@@ -13196,7 +13209,7 @@ fn new_rowid_inner(
                 state.active_op_state.clear();
                 state.pc += 1;
 
-                if mv_store.is_some() {
+                if has_mv_store {
                     let cursor = state.get_cursor(*cursor);
                     let cursor = cursor.as_btree_mut() as &mut dyn Any;
                     if let Some(mvcc_cursor) = cursor.downcast_mut::<MvCursor>() {
@@ -16218,12 +16231,9 @@ pub fn op_affinity(
         .into());
     }
 
-    for (i, affinity_char) in affinities.chars().enumerate().take(count.get()) {
-        let reg_index = *start_reg + i;
-
-        let affinity = Affinity::from_char(affinity_char);
-
-        apply_affinity_char(&mut state.registers[reg_index], affinity);
+    let registers = &mut state.registers[*start_reg..*start_reg + count.get()];
+    for (register, &affinity_code) in registers.iter_mut().zip(affinities.as_bytes()) {
+        apply_affinity_char(register, Affinity::from_char_code(affinity_code));
     }
 
     state.pc += 1;
@@ -18228,7 +18238,31 @@ pub fn op_hash_grace_advance_partition(
     Ok(InsnFunctionStepResult::Step)
 }
 
+#[inline(always)]
 fn apply_affinity_char(target: &mut Register, affinity: Affinity) -> bool {
+    // handle the common cases that don't require a conversion inline
+    if let Register::Value(value) = target {
+        let settled = match affinity {
+            Affinity::Blob | Affinity::None => true,
+            Affinity::Text => matches!(value, Value::Text(_) | Value::Null | Value::Blob(_)),
+            Affinity::Integer | Affinity::Numeric => matches!(
+                value,
+                Value::Numeric(Numeric::Integer(_)) | Value::Null | Value::Blob(_)
+            ),
+            Affinity::Real => matches!(
+                value,
+                Value::Numeric(Numeric::Float(_)) | Value::Null | Value::Blob(_)
+            ),
+        };
+        if settled {
+            return true;
+        }
+    }
+    apply_affinity_char_slow(target, affinity)
+}
+
+#[inline(never)]
+fn apply_affinity_char_slow(target: &mut Register, affinity: Affinity) -> bool {
     if let Register::Value(value) = target {
         if matches!(value, Value::Blob(_)) {
             return true;

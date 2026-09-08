@@ -818,6 +818,8 @@ pub struct BTreeCursor {
     /// 1. an uninitialized database,
     /// 2. an initialized database when the command is immediately followed by VACUUM.
     usable_space_cached: usize,
+    /// The overflow limits for the usable space above
+    payload_limits: PayloadLimits,
     /// Page id of the root page used to go back up fast.
     root_page: i64,
     /// Rowid and record are stored before being consumed.
@@ -1144,6 +1146,7 @@ impl BTreeCursor {
             pager,
             root_page,
             usable_space_cached: usable_space,
+            payload_limits: PayloadLimits::new(usable_space),
             has_record: false,
             null_flag: false,
             going_upwards: false,
@@ -1570,10 +1573,10 @@ impl BTreeCursor {
     /// Check if any ancestor pages still have cells to iterate.
     /// If not, traversing back up to parent is of no use because we are at the end of the tree.
     fn ancestor_pages_have_more_children(&self) -> bool {
-        let node_states = self.stack.node_states;
-        (0..self.stack.current())
+        self.stack.node_states[..self.stack.current()]
+            .iter()
             .rev()
-            .any(|idx| !node_states[idx].is_at_end())
+            .any(|node_state| !node_state.is_at_end())
     }
 
     /// Move the cursor to the next record and return it.
@@ -2207,7 +2210,7 @@ impl BTreeCursor {
                 .stack
                 .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .cell_read_payload_ptr(cur_cell_idx as usize, self.usable_space())?;
+                .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
 
             if let Some(next_page) = first_overflow_page {
                 let res = self.process_overflow_read(payload, next_page, payload_size)?;
@@ -2727,7 +2730,7 @@ impl BTreeCursor {
             .stack
             .get_page_contents_at_level(old_top_idx)
             .unwrap()
-            .cell_read_payload_ptr(cur_cell_idx as usize, self.usable_space())?;
+            .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
 
         if let Some(next_page) = first_overflow_page {
             let res = self.process_overflow_read(payload, next_page, payload_size)?;
@@ -2884,7 +2887,10 @@ impl BTreeCursor {
             .get_record()
             .expect("expected record present on insert");
         if let CursorState::None = &self.state {
-            self.state = CursorState::Write(WriteState::Start);
+            std::mem::forget(std::mem::replace(
+                &mut self.state,
+                CursorState::Write(WriteState::Start),
+            ));
         }
         let usable_space = self.usable_space();
         let ret = loop {
@@ -2973,12 +2979,17 @@ impl BTreeCursor {
                             payload.try_reserve(needed_capacity - payload.capacity())
                         )?;
                     }
-                    *write_state = WriteState::Insert {
-                        page,
-                        cell_idx,
-                        new_payload: payload,
-                        fill_cell_payload_state: FillCellPayloadState::Start,
-                    };
+                    // The current state (`WriteState::Start`) has no allocations, so
+                    // we std::mem::forget it to save on drop glue
+                    std::mem::forget(std::mem::replace(
+                        write_state,
+                        WriteState::Insert {
+                            page,
+                            cell_idx,
+                            new_payload: payload,
+                            fill_cell_payload_state: FillCellPayloadState::Start,
+                        },
+                    ));
                     continue;
                 }
                 WriteState::Insert {
@@ -2994,7 +3005,7 @@ impl BTreeCursor {
                         *cell_idx,
                         &record,
                         usable_space,
-                        self.pager.clone(),
+                        &self.pager,
                         fill_cell_payload_state,
                     ));
 
@@ -3090,8 +3101,11 @@ impl BTreeCursor {
             // it's probably not the greatest idea in the world to do this eagerly here,
             // but at least it works.
             return_if_io!(self.restore_context());
+            // WriteState::Finish owns nothing: std::mem::forget it to skip the drop glue
+            std::mem::forget(std::mem::replace(&mut self.state, CursorState::None));
+        } else {
+            self.state = CursorState::None;
         }
-        self.state = CursorState::None;
         ret
     }
 
@@ -6047,7 +6061,7 @@ impl BTreeCursor {
                             cell_idx,
                             record,
                             self.usable_space(),
-                            self.pager.clone(),
+                            &self.pager,
                             fill_cell_payload_state,
                         ));
                     }
@@ -6457,6 +6471,12 @@ impl CursorTrait for BTreeCursor {
             self.invalidate_record();
             return Ok(IOResult::Done(()));
         }
+        if self.is_on_last_cell_of_tree() {
+            self.stack.advance();
+            self.invalidate_record();
+            self.set_has_record(false);
+            return Ok(IOResult::Done(()));
+        }
         if self.valid_state == CursorValidState::Invalid {
             return Ok(IOResult::Done(()));
         }
@@ -6637,7 +6657,7 @@ impl CursorTrait for BTreeCursor {
         let contents = page.get_contents();
         let cell_idx = self.stack.current_cell_index();
         let (payload, payload_size, first_overflow_page) =
-            contents.cell_read_payload_ptr(cell_idx as usize, self.usable_space())?;
+            contents.cell_read_payload_ptr(cell_idx as usize, self.payload_limits)?;
         if let Some(next_page) = first_overflow_page {
             return_if_io!(self.process_overflow_read(payload, next_page, payload_size))
         } else {
@@ -6661,10 +6681,9 @@ impl CursorTrait for BTreeCursor {
         let noted = self.noted_payload;
         if noted.size != 0 {
             let size = noted.size as usize;
-            let usable_space = self.usable_space();
             // A cell that keeps its whole payload on the page: the rowid
             // read already found where it starts.
-            if size <= payload_overflow_threshold_max(PageType::TableLeaf, usable_space) {
+            if size <= self.payload_limits.max_local_table {
                 let start = noted.start as usize;
                 let contents = self.stack.top_ref().get_contents();
                 if let Some(payload) = contents.payload_on_page(start, size) {
@@ -6681,7 +6700,7 @@ impl CursorTrait for BTreeCursor {
             let contents = page.get_contents();
             let cell_idx = self.stack.current_cell_index();
             let (payload, payload_start, _payload_size, first_overflow_page) =
-                contents.cell_read_payload_at(cell_idx as usize, self.usable_space())?;
+                contents.cell_read_payload_at(cell_idx as usize, self.payload_limits)?;
             if first_overflow_page.is_none() {
                 // The whole record sits on the pinned page: decode it there
                 // instead of copying it into the reusable record first, and
@@ -7614,19 +7633,40 @@ impl BTreeCursor {
     /// overflow read, and an in-flight spill descent.
     #[inline(always)]
     fn can_advance_within_leaf(&self) -> bool {
-        if !matches!(self.advance_state, AdvanceState::Start)
+        if self.has_pending_advance_state() {
+            return false;
+        }
+        let contents = self.stack.top_ref().get_contents();
+        let cell_idx = self.stack.current_cell_index();
+        cell_idx >= 0 && contents.is_leaf() && cell_idx as usize + 1 < contents.cell_count()
+    }
+
+    /// True when the cursor sits on the last cell of the rightmost leaf and
+    /// nothing is pending: the tree has no next record, so `next()` only has
+    /// to step past the cell. This is what every NewRowid does before an
+    /// append, and what a scan does once at its end.
+    #[inline(always)]
+    fn is_on_last_cell_of_tree(&self) -> bool {
+        if self.has_pending_advance_state() {
+            return false;
+        }
+        let contents = self.stack.top_ref().get_contents();
+        let cell_idx = self.stack.current_cell_index();
+        cell_idx >= 0
+            && contents.is_leaf()
+            && cell_idx as usize + 1 == contents.cell_count()
+            && !self.ancestor_pages_have_more_children()
+    }
+
+    #[inline(always)]
+    fn has_pending_advance_state(&self) -> bool {
+        !matches!(self.advance_state, AdvanceState::Start)
             || !matches!(self.valid_state, CursorValidState::Valid)
             || self.needs_restore()
             || self.skip_advance
             || !self.has_record
             || self.read_overflow_state.is_some()
             || self.iteration_pending_descent.is_some()
-        {
-            return false;
-        }
-        let contents = self.stack.top_ref().get_contents();
-        let cell_idx = self.stack.current_cell_index();
-        cell_idx >= 0 && contents.is_leaf() && cell_idx as usize + 1 < contents.cell_count()
     }
 }
 
@@ -9866,7 +9906,7 @@ fn insert_into_cell(
 /// Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected
 /// to be between first cell byte and end of cell pointer area.
 #[allow(unused_assignments)]
-#[inline]
+#[inline(always)]
 fn compute_free_space(page: &PageContent, usable_space: usize) -> Result<usize> {
     // TODO(pere): maybe free space is not calculated correctly with offset
 
@@ -10049,7 +10089,7 @@ fn fill_cell_payload(
     cell_idx: usize,
     record: &impl AsRef<[u8]>,
     usable_space: usize,
-    pager: Arc<Pager>,
+    pager: &Pager,
     fill_cell_payload_state: &mut FillCellPayloadState,
 ) -> IOResultOr<()> {
     let overflow_page_pointer_size = 4;
@@ -10089,8 +10129,9 @@ fn fill_cell_payload(
                     // enough allowed space to fit inside a btree page
                     crate::with_btree_allocation_site!(
                         CellPayload,
-                        cell_payload.try_extend(record_buf.iter().copied())
+                        cell_payload.try_reserve(record_buf.len())
                     )?;
+                    cell_payload.extend_from_slice(record_buf);
                     break Ok(IOResult::Done(()));
                 }
 
@@ -10196,6 +10237,35 @@ fn fill_cell_payload(
     };
     result
 }
+
+/// The payload sizes at which a cell spills to overflow pages
+#[derive(Clone, Copy, Debug)]
+pub struct PayloadLimits {
+    pub usable_size: usize,
+    pub max_local_table: usize,
+    pub max_local_index: usize,
+    pub min_local: usize,
+}
+
+impl PayloadLimits {
+    pub fn new(usable_size: usize) -> Self {
+        Self {
+            usable_size,
+            max_local_table: payload_overflow_threshold_max(PageType::TableLeaf, usable_size),
+            max_local_index: payload_overflow_threshold_max(PageType::IndexLeaf, usable_size),
+            min_local: payload_overflow_threshold_min(PageType::TableLeaf, usable_size),
+        }
+    }
+
+    #[inline(always)]
+    pub fn max_local(&self, page_type: PageType) -> usize {
+        match page_type {
+            PageType::IndexInterior | PageType::IndexLeaf => self.max_local_index,
+            PageType::TableInterior | PageType::TableLeaf => self.max_local_table,
+        }
+    }
+}
+
 /// Returns the maximum payload size (X) that can be stored directly on a b-tree page without spilling to overflow pages.
 ///
 /// For table leaf pages: X = usable_size - 35
@@ -10831,7 +10901,7 @@ mod tests {
                     pos,
                     &record,
                     4096,
-                    conn.pager.load().clone(),
+                    &conn.pager.load(),
                     &mut fill_cell_payload_state,
                 )
             },
@@ -13074,7 +13144,7 @@ mod tests {
                                 cell_idx,
                                 &record,
                                 4096,
-                                conn.pager.load().clone(),
+                                &conn.pager.load(),
                                 &mut fill_cell_payload_state,
                             )
                         },
@@ -13157,7 +13227,7 @@ mod tests {
                                     cell_idx,
                                     &record,
                                     4096,
-                                    conn.pager.load().clone(),
+                                    &conn.pager.load(),
                                     &mut fill_cell_payload_state,
                                 )
                             },
@@ -13569,7 +13639,7 @@ mod tests {
                     0,
                     &record,
                     4096,
-                    conn.pager.load().clone(),
+                    &conn.pager.load(),
                     &mut fill_cell_payload_state,
                 )
             },
@@ -13655,7 +13725,7 @@ mod tests {
                     0,
                     &record,
                     4096,
-                    conn.pager.load().clone(),
+                    &conn.pager.load(),
                     &mut fill_cell_payload_state,
                 )
             },
@@ -13906,7 +13976,7 @@ mod tests {
                     cell_idx as usize,
                     &record,
                     pager.usable_space(),
-                    pager.clone(),
+                    &pager,
                     &mut fill_cell_payload_state,
                 )
             },

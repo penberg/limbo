@@ -2246,22 +2246,19 @@ pub fn checksum_wal(
     turso_assert_eq!(buf.len() % 8, 0, "buffer must be a multiple of 8");
     let mut s0: u32 = input.0;
     let mut s1: u32 = input.1;
-    let mut i = 0;
     if native_endian {
-        while i < buf.len() {
-            let v0 = u32::from_ne_bytes(buf[i..i + 4].try_into().unwrap());
-            let v1 = u32::from_ne_bytes(buf[i + 4..i + 8].try_into().unwrap());
+        for words in buf.chunks_exact(8) {
+            let v0 = u32::from_ne_bytes([words[0], words[1], words[2], words[3]]);
+            let v1 = u32::from_ne_bytes([words[4], words[5], words[6], words[7]]);
             s0 = s0.wrapping_add(v0.wrapping_add(s1));
             s1 = s1.wrapping_add(v1.wrapping_add(s0));
-            i += 8;
         }
     } else {
-        while i < buf.len() {
-            let v0 = u32::from_ne_bytes(buf[i..i + 4].try_into().unwrap()).swap_bytes();
-            let v1 = u32::from_ne_bytes(buf[i + 4..i + 8].try_into().unwrap()).swap_bytes();
+        for words in buf.chunks_exact(8) {
+            let v0 = u32::from_ne_bytes([words[0], words[1], words[2], words[3]]).swap_bytes();
+            let v1 = u32::from_ne_bytes([words[4], words[5], words[6], words[7]]).swap_bytes();
             s0 = s0.wrapping_add(v0.wrapping_add(s1));
             s1 = s1.wrapping_add(v1.wrapping_add(s0));
-            i += 8;
         }
     }
     (s0, s1)
