@@ -11701,17 +11701,11 @@ pub fn op_function(
                                                 ..
                                             } => {
                                                 for col in pk_cols {
-                                                    let (ast::Expr::Name(ref name)
-                                                    | ast::Expr::Id(ref name)) = *col.expr
-                                                    else {
-                                                        return Err(LimboError::ParseError("Unexpected expression in PRIMARY KEY constraint".to_string()).into());
-                                                    };
-                                                    if normalize_ident(name.as_str()) == rename_from
-                                                    {
-                                                        *col.expr = ast::Expr::Name(Name::exact(
-                                                            column_def.col_name.as_str().to_owned(),
-                                                        ));
-                                                    }
+                                                    rename_identifiers(
+                                                        col.expr.as_mut(),
+                                                        &rename_from,
+                                                        column_def.col_name.as_str(),
+                                                    );
                                                 }
                                             }
                                             ast::TableConstraint::Unique {
@@ -11719,17 +11713,11 @@ pub fn op_function(
                                                 ..
                                             } => {
                                                 for col in uniq_cols {
-                                                    let (ast::Expr::Name(ref name)
-                                                    | ast::Expr::Id(ref name)) = *col.expr
-                                                    else {
-                                                        return Err(LimboError::ParseError("Unexpected expression in UNIQUE constraint".to_string()).into());
-                                                    };
-                                                    if normalize_ident(name.as_str()) == rename_from
-                                                    {
-                                                        *col.expr = ast::Expr::Name(Name::exact(
-                                                            column_def.col_name.as_str().to_owned(),
-                                                        ));
-                                                    }
+                                                    rename_identifiers(
+                                                        col.expr.as_mut(),
+                                                        &rename_from,
+                                                        column_def.col_name.as_str(),
+                                                    );
                                                 }
                                             }
                                             ast::TableConstraint::ForeignKey {
