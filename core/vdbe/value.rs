@@ -1355,7 +1355,7 @@ impl Value {
             }
             result = Some(match result {
                 None => v,
-                Some(cur) if v < cur => v,
+                Some(cur) if v <= cur => v,
                 Some(cur) => cur,
             });
         }

@@ -1058,6 +1058,23 @@ expect {
     1
 }
 
+test min-int-equals-float {
+    select min(1, 1.0)
+}
+expect {
+    1.0
+}
+expect @js {
+    1
+}
+
+test min-float-equals-int {
+    select min(1.0, 1)
+}
+expect {
+    1
+}
+
 test max-int-float {
     select max(1,5.0)
 }
