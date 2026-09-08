@@ -1,0 +1,24 @@
+# Copyright 2026 the Turso authors. All rights reserved. MIT license.
+
+[package]
+name = "turso-join-benchmark"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Execution benchmark for join plans"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "turso-join-benchmark"
+path = "main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+turso_core = { workspace = true }

@@ -233,7 +233,7 @@ fn process_payload(payload_group: Group) -> String {
             _ => {}
         }
     }
-    format!("{{ {variable_name_list} }}").to_string()
+    format!("{{ {variable_name_list} }}")
 }
 /// Generates the `get_description` implementation for the processed enum.
 fn generate_get_description(
