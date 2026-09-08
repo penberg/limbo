@@ -60,12 +60,19 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Restore cached dist
+        id: cache-dist
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/dist
+          key: cargo-dist-${{ runner.os }}-v0.31.0
       - name: Install dist
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         # we specify bash to get pipefail; it guards against the `curl` command
         # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
         run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh"
-      - name: Cache dist
+      - name: Share dist with build jobs
         uses: actions/upload-artifact@v6
         with:
           name: cargo-dist-cache
