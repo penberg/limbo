@@ -3196,12 +3196,19 @@ impl PostgreSQLTranslator {
             }
         }
 
+        let translated_order = self.translate_order_by(&func_call.agg_order)?;
+        let (order_by, within_group) = if func_call.agg_within_group {
+            (vec![], translated_order)
+        } else {
+            (translated_order, vec![])
+        };
+
         Ok(ast::Expr::FunctionCall {
             name: ast::Name::from_string(func_name),
             distinctness,
             args,
-            order_by: vec![],
-            within_group: vec![],
+            order_by,
+            within_group,
             filter_over,
         })
     }
@@ -6563,6 +6570,76 @@ mod tests {
         } else {
             panic!("Expected CreateView");
         }
+    }
+
+    #[test]
+    fn test_function_within_group_order_is_translated() {
+        let translator = PostgreSQLTranslator::new();
+        let sql = "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY x) FROM test";
+        let parsed = crate::parse(sql).unwrap();
+        let translated = translator.translate(&parsed).unwrap();
+
+        let ast::Stmt::Select(select) = translated else {
+            panic!("expected select statement");
+        };
+        let ast::OneSelect::Select { columns, .. } = &select.body.select else {
+            panic!("expected select body");
+        };
+        let ast::ResultColumn::Expr(expr, _) = &columns[0] else {
+            panic!("expected result column");
+        };
+        let ast::Expr::FunctionCall {
+            order_by,
+            within_group,
+            ..
+        } = expr.as_ref()
+        else {
+            panic!("expected function call");
+        };
+        let [sorted_column] = within_group.as_slice() else {
+            panic!("expected single sorted column");
+        };
+        let ast::Expr::Id(name) = sorted_column.expr.as_ref() else {
+            panic!("expected id");
+        };
+
+        assert_eq!(name.as_str(), "x");
+        assert!(order_by.is_empty());
+    }
+
+    #[test]
+    fn test_function_argument_order_is_translated() {
+        let translator = PostgreSQLTranslator::new();
+        let sql = "SELECT array_agg(x ORDER BY y) FROM test";
+        let parsed = crate::parse(sql).unwrap();
+        let translated = translator.translate(&parsed).unwrap();
+
+        let ast::Stmt::Select(select) = translated else {
+            panic!("expected select statement");
+        };
+        let ast::OneSelect::Select { columns, .. } = &select.body.select else {
+            panic!("expected select body");
+        };
+        let ast::ResultColumn::Expr(expr, _) = &columns[0] else {
+            panic!("expected result column");
+        };
+        let ast::Expr::FunctionCall {
+            order_by,
+            within_group,
+            ..
+        } = expr.as_ref()
+        else {
+            panic!("expected function call");
+        };
+        let [sorted_column] = order_by.as_slice() else {
+            panic!("expected single sorted column");
+        };
+        let ast::Expr::Id(name) = sorted_column.expr.as_ref() else {
+            panic!("expected id");
+        };
+
+        assert_eq!(name.as_str(), "y");
+        assert!(within_group.is_empty());
     }
 
     #[test]
