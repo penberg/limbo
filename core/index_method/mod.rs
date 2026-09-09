@@ -27,6 +27,12 @@ pub mod toy_vector_sparse_ivf;
 pub const BACKING_BTREE_INDEX_METHOD_NAME: &str = "backing_btree";
 pub const TOY_VECTOR_SPARSE_IVF_INDEX_METHOD_NAME: &str = "toy_vector_sparse_ivf";
 
+/// Default for `PRAGMA fts_merge_threshold`: the number of visible FTS
+/// segments a statement flush may leave behind before the write path merges
+/// them. Lives here (not in the feature-gated `fts` module) because the
+/// connection setting exists regardless of the feature.
+pub const DEFAULT_FTS_MERGE_THRESHOLD: i64 = 32;
+
 /// index method "entry point" which can create attachment of the method to the table with given configuration
 /// (this trait acts like a "factory")
 pub trait IndexMethod: std::fmt::Debug + Send + Sync {

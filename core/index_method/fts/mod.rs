@@ -486,6 +486,13 @@ struct FtsShared {
     /// Throwaway index used only to mint `SegmentMeta` values for
     /// synthesized `meta.json` content.
     scratch: Mutex<Option<Index>>,
+    /// Heuristic count of visible segments: bumped by segment-appending
+    /// publishes, reset by merges, reconciled by every full registry scan.
+    /// Only used to decide whether the write-path auto-merge should pay for
+    /// the real scan — never for correctness (the merge recomputes the true
+    /// visible set from its own snapshot). May drift on rollbacks or across
+    /// processes; the next scan or merge corrects it.
+    visible_segment_estimate: AtomicUsize,
     stats: FtsRuntimeStats,
 }
 
@@ -1050,6 +1057,11 @@ pub struct FtsCursor {
     pending_tombstone_rows: Vec<(SegmentId, u32)>,
     /// Row publication in flight (statement flush, control row, or merge).
     publish: Option<PendingPublish>,
+    /// Set when a statement flush published a new segment; tells
+    /// `stage_statement_commit` to consider a write-path merge once the
+    /// flush publication completes. Survives IO yields so the auto-merge
+    /// check resumes exactly once per flushed statement.
+    auto_merge_pending: bool,
     /// Segment ids this transaction published into the shared byte cache;
     /// purged on rollback.
     own_published: Vec<SegmentId>,
@@ -1119,6 +1131,7 @@ impl FtsCursor {
             doc_buffer: Vec::new(),
             pending_tombstone_rows: Vec::new(),
             publish: None,
+            auto_merge_pending: false,
             own_published: Vec::new(),
             state: FtsState::Init,
             opening_for_write: false,
@@ -1848,6 +1861,11 @@ impl FtsCursor {
                             );
                         }
                         self.snapshot_loaded = true;
+                        // A full scan is ground truth for the auto-merge
+                        // trigger heuristic; reconcile any drift.
+                        self.shared
+                            .visible_segment_estimate
+                            .store(self.segments.len(), Ordering::Relaxed);
                     }
                     self.ensure_searcher()?;
                     self.state = FtsState::Ready;
@@ -2114,11 +2132,17 @@ impl FtsCursor {
             PublishApply::AppendSegment(new_segment) => {
                 if let Some(segment) = new_segment {
                     self.segments.push(segment);
+                    self.shared
+                        .visible_segment_estimate
+                        .fetch_add(1, Ordering::Relaxed);
                 }
                 self.invalidate_snapshot_view();
             }
             PublishApply::ReplaceSegments(segments) => {
                 self.segments = segments;
+                self.shared
+                    .visible_segment_estimate
+                    .store(self.segments.len(), Ordering::Relaxed);
                 self.invalidate_snapshot_view();
             }
         }
@@ -2233,6 +2257,132 @@ impl FtsCursor {
         Ok(())
     }
 
+    /// Which visible segments the write-path merge should rewrite (B2):
+    /// - a segment at least half tombstoned is always a candidate —
+    ///   rewriting reclaims its dead space no matter how big it is;
+    /// - otherwise candidates are every clean segment at or below the
+    ///   smallest size layer holding at least two of them, so one huge
+    ///   segment is not rewritten on every trigger.
+    ///
+    /// Returns an empty set when nothing is worth rewriting (no pair of
+    /// mergeable clean segments and no tombstone-heavy segment).
+    fn auto_merge_candidates(&self) -> HashSet<SegmentId> {
+        /// ParadeDB-style size layers. Segments at or past the last
+        /// boundary never merge on size grounds.
+        const FTS_MERGE_LAYER_BYTES: [u64; 4] = [100 << 10, 1 << 20, 100 << 20, 1 << 30];
+        fn segment_bytes(segment: &LoadedSegment) -> u64 {
+            segment.descriptor.files.iter().map(|file| file.size).sum()
+        }
+
+        let mut candidates: HashSet<SegmentId> = self
+            .segments
+            .iter()
+            .filter(|segment| {
+                segment.descriptor.max_doc > 0
+                    && segment.deleted.len() as u64 * 2 >= u64::from(segment.descriptor.max_doc)
+            })
+            .map(LoadedSegment::id)
+            .collect();
+        for ceiling in FTS_MERGE_LAYER_BYTES {
+            let group: Vec<SegmentId> = self
+                .segments
+                .iter()
+                .filter(|segment| {
+                    !candidates.contains(&segment.id()) && segment_bytes(segment) <= ceiling
+                })
+                .map(LoadedSegment::id)
+                .collect();
+            if group.len() >= 2 {
+                candidates.extend(group);
+                return candidates;
+            }
+        }
+        // No clean tier is mergeable; rewriting only pays off if a
+        // tombstone-heavy segment reclaims space.
+        candidates
+    }
+
+    /// After a statement flush published a new segment, merge the visible
+    /// set down if it exceeds the connection's `fts_merge_threshold`. Runs
+    /// inside the same transaction, under the same lease and admissibility
+    /// rules as OPTIMIZE — so a refused lease (`Busy` /
+    /// `WriteWriteConflict`) skips the merge silently: a writer must never
+    /// fail because maintenance was contended.
+    fn try_auto_merge(&mut self) -> Result<IOResult<()>> {
+        // Re-entry after an IO yield inside the merge publication: the
+        // pending flag was already cleared when the merge was staged, so
+        // this only handles yields from the snapshot scan below.
+        let Some(conn) = self.connection.as_ref().and_then(Weak::upgrade) else {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        };
+        let threshold = conn.get_fts_merge_threshold();
+        if threshold <= 0 {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        // Cheap pre-check: below the threshold, a flushed statement must pay
+        // nothing beyond this load — the estimate keeps the insert fast path
+        // scan-free. Over-estimates cost one wasted scan; under-estimates
+        // delay the merge until the next reconciling scan.
+        if self
+            .shared
+            .visible_segment_estimate
+            .load(Ordering::Relaxed)
+            .max(self.segments.len())
+            <= threshold as usize
+        {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        // The insert fast path stops after format detection; counting the
+        // visible set needs the full registry scan (resumable on IO).
+        return_if_io!(self.ensure_snapshot_loaded());
+        if self.segments.len() <= threshold as usize {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        match self.acquire_mvcc_maintenance_lease() {
+            Ok(()) => {}
+            Err(LimboError::Busy | LimboError::WriteWriteConflict) => {
+                tracing::debug!("FTS auto-merge: lease contended, skipping");
+                self.auto_merge_pending = false;
+                return Ok(IOResult::Done(()));
+            }
+            Err(err) => return Err(err),
+        }
+        if let Some((mv_store, tx_id, index_id)) = self.mvcc_index_id(
+            &conn,
+            self.database_id
+                .ok_or_else(|| LimboError::InternalError("FTS database id not set".into()))?,
+        )? {
+            match mv_store.check_index_method_merge_admissible(tx_id, index_id) {
+                Ok(()) => {}
+                Err(LimboError::Busy | LimboError::WriteWriteConflict) => {
+                    tracing::debug!("FTS auto-merge: deleter overlap, skipping");
+                    self.auto_merge_pending = false;
+                    return Ok(IOResult::Done(()));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        // Tiered candidacy: rewrite the small tier and tombstone-heavy
+        // segments, never a big clean segment on every trigger.
+        let candidates = self.auto_merge_candidates();
+        if candidates.is_empty() {
+            tracing::debug!("FTS auto-merge: no tier is worth rewriting, skipping");
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        self.stage_merge_of_segments(&candidates)?;
+        // Clear before driving: a yield inside the publication resumes
+        // through `stage_statement_commit`'s is_publishing branch, which
+        // must not evaluate the trigger again.
+        self.auto_merge_pending = false;
+        return_if_io!(self.drive_publish());
+        Ok(IOResult::Done(()))
+    }
+
     /// Complete any in-flight or due batch publication before a mutation.
     /// The VDBE retries the current instruction when an operation returns
     /// `IOResult::IO`, so this must finish before Tantivy state changes.
@@ -2340,6 +2490,7 @@ impl FtsCursor {
         self.doc_buffer.clear();
         self.pending_tombstone_rows.clear();
         self.publish = None;
+        self.auto_merge_pending = false;
         self.segments.clear();
         self.snapshot_loaded = false;
         self.scan_descriptors.clear();
@@ -3212,7 +3363,14 @@ impl IndexMethodCursor for FtsCursor {
                 self.pending_op_count()
             );
             self.stage_flush()?;
+            self.auto_merge_pending = matches!(
+                self.publish.as_ref().map(|publish| &publish.apply),
+                Some(PublishApply::AppendSegment(Some(_)))
+            );
             return_if_io!(self.drive_publish());
+        }
+        if self.auto_merge_pending {
+            return_if_io!(self.try_auto_merge());
         }
         // This cursor's statement-scope writes are staged; it never flushes
         // again, so a later statement's cursor may write this index.

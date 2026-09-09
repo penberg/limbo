@@ -484,29 +484,40 @@ fn bench_fts_single_row_commit_churn(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("FTS Single Row Commit Churn");
     group.sample_size(10);
 
-    for commit_count in [64, 256] {
-        group.bench_function(BenchmarkId::new("committed_rows", commit_count), |b| {
-            iter_custom_or_iter!(b, |iters| {
-                let mut total = std::time::Duration::ZERO;
-                for repetition in 0..iters {
-                    let temp_dir = tempfile::tempdir().unwrap();
-                    let db = setup_fts_db(&temp_dir, 0);
-                    let conn = db.connect().unwrap();
-                    let start = std::time::Instant::now();
-                    for id in 0..commit_count {
-                        let id = id as u64 + repetition * commit_count as u64;
-                        conn.execute(format!(
-                            "INSERT INTO docs (id, title, body) VALUES \
+    // merge_threshold 0 disables the write-path auto-merge; the default (32)
+    // pays for merges past the threshold. The pair isolates what B1's
+    // auto-merge costs a single-row-commit workload.
+    for (commit_count, merge_threshold) in [(64, 0), (64, 32), (256, 0), (256, 32)] {
+        group.bench_function(
+            BenchmarkId::new(
+                "committed_rows",
+                format!("{commit_count}_merge_threshold_{merge_threshold}"),
+            ),
+            |b| {
+                iter_custom_or_iter!(b, |iters| {
+                    let mut total = std::time::Duration::ZERO;
+                    for repetition in 0..iters {
+                        let temp_dir = tempfile::tempdir().unwrap();
+                        let db = setup_fts_db(&temp_dir, 0);
+                        let conn = db.connect().unwrap();
+                        conn.execute(format!("PRAGMA fts_merge_threshold = {merge_threshold}"))
+                            .unwrap();
+                        let start = std::time::Instant::now();
+                        for id in 0..commit_count {
+                            let id = id as u64 + repetition * commit_count as u64;
+                            conn.execute(format!(
+                                "INSERT INTO docs (id, title, body) VALUES \
                                  ({id}, 'commit {id}', \
                                  'independently committed database document {id}')"
-                        ))
-                        .unwrap();
+                            ))
+                            .unwrap();
+                        }
+                        total += start.elapsed();
                     }
-                    total += start.elapsed();
-                }
-                total
-            });
-        });
+                    total
+                });
+            },
+        );
     }
 
     group.finish();

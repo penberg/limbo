@@ -1963,6 +1963,10 @@ pub enum PragmaName {
     /// Sets or queries whether concurrent MVCC commits batch their logical-log
     /// appends behind a single fsync.
     MvccGroupCommit,
+    /// Sets or queries the number of visible FTS index segments a statement
+    /// flush may leave behind before the write path merges them. 0 disables
+    /// write-path merging.
+    FtsMergeThreshold,
     /// List all available types (built-in and custom)
     ListTypes,
     /// Deprecated no-op: control whether callback is invoked for empty result sets
