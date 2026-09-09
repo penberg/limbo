@@ -595,7 +595,7 @@ impl PageInner {
     }
 
     /// Returns a cell's record payload and overflow info without constructing
-    /// a `BTreeCell`.
+    /// a [BTreeCell].
     ///
     /// This bypasses the full `cell_get()` to `read_btree_cell()` path for
     /// record reads and index binary-search hot loops.
@@ -617,12 +617,12 @@ impl PageInner {
     #[inline(always)]
     pub fn cell_read_payload_at(
         &self,
-        idx: usize,
+        cell_idx: usize,
         limits: PayloadLimits,
     ) -> crate::Result<(&'static [u8], usize, u64, Option<u32>)> {
         let buf = self.as_ptr();
         let cell_pointer_array_start = self.header_size();
-        let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
+        let cell_pointer = cell_pointer_array_start + (cell_idx * CELL_PTR_SIZE_BYTES);
         let cell_offset = self.read_u16(cell_pointer) as usize;
 
         let page_type = self.page_type()?;
@@ -650,14 +650,13 @@ impl PageInner {
             }
         };
 
-        let (overflows, local_size) = sqlite3_ondisk::payload_overflows(
-            payload_size as usize,
-            limits.max_local(page_type),
-            limits.min_local,
-            limits.usable_size,
-        );
-
-        let (payload_slice, first_overflow) = if overflows {
+        let (payload_slice, first_overflow) = if let Some(local_size) =
+            sqlite3_ondisk::payload_overflows(
+                payload_size as usize,
+                limits.max_local(page_type),
+                limits.min_local,
+                limits.usable_size,
+            ) {
             let overflow_ptr_offset = payload_start + local_size - 4;
             crate::assert_or_bail_corrupt!(
                 overflow_ptr_offset + 4 <= buf.len(),
@@ -760,14 +759,13 @@ impl PageInner {
             PageType::IndexInterior => {
                 let (len_payload, n_payload) =
                     read_varint(crate::slice_in_bounds_or_corrupt!(buf, start + 4..))?;
-                let (overflows, to_read) = sqlite3_ondisk::payload_overflows(
+                if let Some(local_size) = sqlite3_ondisk::payload_overflows(
                     len_payload as usize,
                     max_local,
                     min_local,
                     usable_size,
-                );
-                if overflows {
-                    4 + to_read + n_payload
+                ) {
+                    4 + local_size + n_payload
                 } else {
                     4 + len_payload as usize + n_payload
                 }
@@ -780,14 +778,13 @@ impl PageInner {
             PageType::IndexLeaf => {
                 let (len_payload, n_payload) =
                     read_varint(crate::slice_in_bounds_or_corrupt!(buf, start..))?;
-                let (overflows, to_read) = sqlite3_ondisk::payload_overflows(
+                if let Some(local_size) = sqlite3_ondisk::payload_overflows(
                     len_payload as usize,
                     max_local,
                     min_local,
                     usable_size,
-                );
-                if overflows {
-                    to_read + n_payload
+                ) {
+                    local_size + n_payload
                 } else {
                     let mut size = len_payload as usize + n_payload;
                     if size < MINIMUM_CELL_SIZE {
@@ -801,14 +798,13 @@ impl PageInner {
                     read_varint(crate::slice_in_bounds_or_corrupt!(buf, start..))?;
                 let (_, n_rowid) =
                     read_varint(crate::slice_in_bounds_or_corrupt!(buf, start + n_payload..))?;
-                let (overflows, to_read) = sqlite3_ondisk::payload_overflows(
+                if let Some(local_size) = sqlite3_ondisk::payload_overflows(
                     len_payload as usize,
                     max_local,
                     min_local,
                     usable_size,
-                );
-                if overflows {
-                    to_read + n_payload + n_rowid
+                ) {
+                    local_size + n_payload + n_rowid
                 } else {
                     let mut size = len_payload as usize + n_payload + n_rowid;
                     if size < MINIMUM_CELL_SIZE {
