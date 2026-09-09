@@ -1,0 +1,56 @@
+@database :temp:
+
+# Regression tests for NULL-key index seek (issue #8690).
+# Expr::is_nonnull() must return false for JSON arrow operators (-> / ->>)
+# and for LIKE with a nullable ESCAPE clause, because these expressions can
+# evaluate to NULL even when their operands are non-NULL. If the optimizer
+# believes the seek key is non-NULL, the IsNull guard is skipped and the
+# seek starts at a NULL key, reading the full index: SELECT returns extra
+# rows and DELETE erases all rows.
+
+setup schema {
+    CREATE TABLE t3(c);
+    CREATE INDEX i3 ON t3(c);
+    INSERT INTO t3 VALUES (1),(2),(3);
+}
+
+@setup schema
+test json-arrow-shift-missing-path-select {
+    SELECT count(*) FROM t3 WHERE c > ('{"k":1}' ->> '$.missing');
+}
+expect {
+    0
+}
+
+@setup schema
+test json-arrow-shift-missing-path-delete {
+    DELETE FROM t3 WHERE c > ('{"k":1}' ->> '$.missing');
+    SELECT count(*) FROM t3;
+}
+expect {
+    3
+}
+
+@setup schema
+test json-arrow-missing-path-select {
+    SELECT count(*) FROM t3 WHERE c > ('{"k":1}' -> '$.missing');
+}
+expect {
+    0
+}
+
+@setup schema
+test like-escape-null-select {
+    SELECT count(*) FROM t3 WHERE c > ('a' LIKE 'a' ESCAPE NULL);
+}
+expect {
+    0
+}
+
+@setup schema
+test json-arrow-existing-path-still-uses-index {
+    SELECT count(*) FROM t3 WHERE c > ('{"k":2}' ->> '$.k');
+}
+expect {
+    1
+}
