@@ -9,7 +9,9 @@ DB_FILE="$TPCH_DIR/TPC-H.db"
 QUERIES_DIR="$TPCH_DIR/queries"
 LIMBO_BIN="$RELEASE_BUILD_DIR/tursodb"
 CURRENT_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-RESULTS_FILE="$TPCH_DIR/results_${CURRENT_TIMESTAMP}.txt"
+RESULTS_FILE=${RESULTS_FILE:-"$TPCH_DIR/results_${CURRENT_TIMESTAMP}.txt"}
+# The second pass after ANALYZE takes as long as the first. ANALYZE=0 skips it.
+ANALYZE=${ANALYZE:-1}
 
 declare -A LIMBO_TIMES_WITHOUT_ANALYZE
 declare -A SQLITE_TIMES_WITHOUT_ANALYZE
@@ -247,38 +249,40 @@ if [ $? -ne 0 ]; then
     exit_code=1
 fi
 
-# Run ANALYZE
-echo "==========================================================="
-echo "Running ANALYZE..."
-echo "==========================================================="
-"$SQLITE_BIN" "$DB_FILE" "ANALYZE;"
+if [ "$ANALYZE" != 0 ]; then
+    # Run ANALYZE
+    echo "==========================================================="
+    echo "Running ANALYZE..."
+    echo "==========================================================="
+    "$SQLITE_BIN" "$DB_FILE" "ANALYZE;"
 
-# Run queries with ANALYZE
-echo "==========================================================="
-echo "Running queries WITH ANALYZE"
-echo "==========================================================="
-run_queries "WITH ANALYZE"
-if [ $? -ne 0 ]; then
-    exit_code=1
-fi
-
-echo "DIFF: WITH ANALYZE - WITHOUT ANALYZE" >> "$RESULTS_FILE"
-echo "query,limbo_delta_seconds,sqlite_delta_seconds" >> "$RESULTS_FILE"
-for query_file in $(ls "$QUERIES_DIR"/*.sql | sort -V); do
-    if [ -f "$query_file" ]; then
-        query_name=$(basename "$query_file")
-        if head -n1 "$query_file" | grep -q "^-- LIMBO_SKIP: "; then
-            continue
-        fi
-        limbo_with=${LIMBO_TIMES_WITH_ANALYZE["$query_name"]}
-        limbo_without=${LIMBO_TIMES_WITHOUT_ANALYZE["$query_name"]}
-        sqlite_with=${SQLITE_TIMES_WITH_ANALYZE["$query_name"]}
-        sqlite_without=${SQLITE_TIMES_WITHOUT_ANALYZE["$query_name"]}
-        limbo_delta=$(awk -v w="$limbo_with" -v wo="$limbo_without" 'BEGIN{if(w==""||wo==""){print "NA"} else {printf "%.6f", w-wo}}')
-        sqlite_delta=$(awk -v w="$sqlite_with" -v wo="$sqlite_without" 'BEGIN{if(w==""||wo==""){print "NA"} else {printf "%.6f", w-wo}}')
-        echo "$query_name,$limbo_delta,$sqlite_delta" >> "$RESULTS_FILE"
+    # Run queries with ANALYZE
+    echo "==========================================================="
+    echo "Running queries WITH ANALYZE"
+    echo "==========================================================="
+    run_queries "WITH ANALYZE"
+    if [ $? -ne 0 ]; then
+        exit_code=1
     fi
-done
+
+    echo "DIFF: WITH ANALYZE - WITHOUT ANALYZE" >> "$RESULTS_FILE"
+    echo "query,limbo_delta_seconds,sqlite_delta_seconds" >> "$RESULTS_FILE"
+    for query_file in $(ls "$QUERIES_DIR"/*.sql | sort -V); do
+        if [ -f "$query_file" ]; then
+            query_name=$(basename "$query_file")
+            if head -n1 "$query_file" | grep -q "^-- LIMBO_SKIP: "; then
+                continue
+            fi
+            limbo_with=${LIMBO_TIMES_WITH_ANALYZE["$query_name"]}
+            limbo_without=${LIMBO_TIMES_WITHOUT_ANALYZE["$query_name"]}
+            sqlite_with=${SQLITE_TIMES_WITH_ANALYZE["$query_name"]}
+            sqlite_without=${SQLITE_TIMES_WITHOUT_ANALYZE["$query_name"]}
+            limbo_delta=$(awk -v w="$limbo_with" -v wo="$limbo_without" 'BEGIN{if(w==""||wo==""){print "NA"} else {printf "%.6f", w-wo}}')
+            sqlite_delta=$(awk -v w="$sqlite_with" -v wo="$sqlite_without" 'BEGIN{if(w==""||wo==""){print "NA"} else {printf "%.6f", w-wo}}')
+            echo "$query_name,$limbo_delta,$sqlite_delta" >> "$RESULTS_FILE"
+        fi
+    done
+fi
 
 echo "-----------------------------------------------------------"
 echo "TPC-H query timing comparison completed." 
