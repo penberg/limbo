@@ -11,7 +11,8 @@ use super::profile::{
     update_churn::UpdateChurn,
 };
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum JournalMode {
     Wal,
     Mvcc,

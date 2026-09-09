@@ -47,7 +47,10 @@ jobs:
           path: target/codspeed
 
       - name: Build memory benchmarks
-        run: cargo codspeed build -m memory -p memory-benchmark-codspeed --features codspeed
+        run: cargo codspeed build -m memory -p memory-benchmark-codspeed --features codspeed,fts
+
+      - name: Test FTS memory workload
+        run: cargo test -p memory-benchmark --features fts --locked
 
   run:
     name: "memory benchmarks (${{ matrix.workload }})"
@@ -69,6 +72,7 @@ jobs:
           - scan-heavy
           - series-blob
           - update-churn
+          - fts-queries
     steps:
       - uses: actions/checkout@v4
 
@@ -104,7 +108,12 @@ jobs:
         uses: CodSpeedHQ/action@v4.17.0
         with:
           mode: memory
-          run: cargo codspeed run -m memory -p memory-benchmark-codspeed --bench memory_profiles "${{ matrix.workload }}"
+          run: |
+            if [ "${{ matrix.workload }}" = "fts-queries" ]; then
+              cargo codspeed run -m memory -p memory-benchmark-codspeed --bench fts_queries
+            else
+              cargo codspeed run -m memory -p memory-benchmark-codspeed --bench memory_profiles "${{ matrix.workload }}"
+            fi
 
   cleanup:
     name: Delete temporary benchmark sticky disk
