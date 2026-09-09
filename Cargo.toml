@@ -98,28 +98,28 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.8.0-pre.9"
+version = "0.8.0-pre.10"
 authors = ["the Turso authors"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/tursodatabase/turso"
 
 [workspace.dependencies]
-turso = { path = "bindings/rust", version = "0.8.0-pre.9" }
-turso_node = { path = "bindings/javascript", version = "0.8.0-pre.9" }
-turso_sdk_kit = { path = "sdk-kit", version = "0.8.0-pre.9" }
-turso_sdk_kit_macros = { path = "sdk-kit-macros", version = "0.8.0-pre.9" }
-turso_sync_sdk_kit = { path = "sync/sdk-kit", version = "0.8.0-pre.9" }
-limbo_completion = { path = "extensions/completion", version = "0.8.0-pre.9" }
-turso_core = { path = "core", version = "0.8.0-pre.9" }
-turso_sync_engine = { path = "sync/engine", version = "0.8.0-pre.9" }
-turso_ext = { path = "extensions/core", version = "0.8.0-pre.9" }
-turso_macros = { path = "macros", version = "0.8.0-pre.9" }
-turso_parser = { path = "sqlite/parser", version = "0.8.0-pre.9" }
-turso_pg = { path = "postgres/frontend", version = "0.8.0-pre.9" }
-turso_pg_client = { path = "postgres/client", version = "0.8.0-pre.9" }
-turso_pg_parser = { path = "postgres/parser", version = "0.8.0-pre.9" }
-turso_pg_server = { path = "postgres/server", version = "0.8.0-pre.9" }
+turso = { path = "bindings/rust", version = "0.8.0-pre.10" }
+turso_node = { path = "bindings/javascript", version = "0.8.0-pre.10" }
+turso_sdk_kit = { path = "sdk-kit", version = "0.8.0-pre.10" }
+turso_sdk_kit_macros = { path = "sdk-kit-macros", version = "0.8.0-pre.10" }
+turso_sync_sdk_kit = { path = "sync/sdk-kit", version = "0.8.0-pre.10" }
+limbo_completion = { path = "extensions/completion", version = "0.8.0-pre.10" }
+turso_core = { path = "core", version = "0.8.0-pre.10" }
+turso_sync_engine = { path = "sync/engine", version = "0.8.0-pre.10" }
+turso_ext = { path = "extensions/core", version = "0.8.0-pre.10" }
+turso_macros = { path = "macros", version = "0.8.0-pre.10" }
+turso_parser = { path = "sqlite/parser", version = "0.8.0-pre.10" }
+turso_pg = { path = "postgres/frontend", version = "0.8.0-pre.10" }
+turso_pg_client = { path = "postgres/client", version = "0.8.0-pre.10" }
+turso_pg_parser = { path = "postgres/parser", version = "0.8.0-pre.10" }
+turso_pg_server = { path = "postgres/server", version = "0.8.0-pre.10" }
 sql_generation = { path = "sql_generation" }
 turso-dbhash = { path = "tools/dbhash" }
 strum = { version = "0.26", features = ["derive"] }
