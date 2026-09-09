@@ -16,10 +16,10 @@ You can check the API docs [here](./API.md), it aims to be fully compatible with
 
 ## Code Structure
 
-The Rust code for the bind is on [lib.rs](../src/lib.rs). It's exposed to JS users through [wrapper](../wrapper.js), where you can
+The Rust code for the bind is on [lib.rs](../src/lib.rs). It is exposed to JS users through the TypeScript wrappers in [packages/native](../packages/native/), where you can
 use some JS' ~weirdness~ facilities, for instance, since Rust doesn't have variadic functions the wrapper enables us to "normalize" `bindParameters` into an array.
 
-All tests should be within the [__test__](../__test__/) folder.
+All tests should be within the relevant package's test directory, such as [packages/common](../packages/common/) and [packages/native](../packages/native/).
 
 # Before open a PR
 
@@ -29,4 +29,3 @@ Please be assured that:
 - Your Rust code is formatted with `cargo fmt`;
 - Your JavaScript code is formatted with `tsserver` (VSCode's default);
 - If applicable, update the [API docs](./API.md) to match the current implementation;
-
