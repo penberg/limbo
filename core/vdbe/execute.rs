@@ -1006,95 +1006,62 @@ pub fn op_not_null(
     Ok(InsnFunctionStepResult::Step)
 }
 
-pub fn op_comparison(
-    program: &Program,
-    state: &mut ProgramState,
-    insn: &Insn,
-    _pager: &Arc<Pager>,
-) -> InsnResult {
-    let (lhs, rhs, target_pc, op) = match insn {
-        Insn::Eq {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Eq),
-        Insn::Ne {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Ne),
-        Insn::Lt {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Lt),
-        Insn::Le {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Le),
-        Insn::Gt {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Gt),
-        Insn::Ge {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Ge),
-        _ => unreachable!("unexpected Insn {:?}", insn),
-    };
-    let crate::vdbe::BranchOffset::Offset(target_pc) = target_pc else {
-        crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
-    };
+macro_rules! comparison_opcode {
+    ($name:ident, $variant:ident, $op:expr, $jumps:expr) => {
+        pub fn $name(
+            program: &Program,
+            state: &mut ProgramState,
+            insn: &Insn,
+            _pager: &Arc<Pager>,
+        ) -> InsnResult {
+            load_insn!(
+                $variant {
+                    lhs,
+                    rhs,
+                    target_pc,
+                    flags,
+                    collation
+                },
+                insn
+            );
+            let crate::vdbe::BranchOffset::Offset(target_pc) = *target_pc else {
+                crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
+            };
 
-    // Two integers compare directly: no NULL handling, affinity or collation.
-    if let (
-        Register::Value(Value::Numeric(Numeric::Integer(l))),
-        Register::Value(Value::Numeric(Numeric::Integer(r))),
-    ) = (&state.registers[lhs], &state.registers[rhs])
-    {
-        let should_jump = match op {
-            ComparisonOp::Eq => l == r,
-            ComparisonOp::Ne => l != r,
-            ComparisonOp::Lt => l < r,
-            ComparisonOp::Le => l <= r,
-            ComparisonOp::Gt => l > r,
-            ComparisonOp::Ge => l >= r,
-        };
-        state.pc = if should_jump { target_pc } else { state.pc + 1 };
-        return Ok(InsnFunctionStepResult::Step);
-    }
-    let (flags, collation) = match insn {
-        Insn::Eq {
-            flags, collation, ..
+            // Two integers compare directly: no NULL handling, affinity or collation.
+            if let (
+                Register::Value(Value::Numeric(Numeric::Integer(l))),
+                Register::Value(Value::Numeric(Numeric::Integer(r))),
+            ) = (&state.registers[*lhs], &state.registers[*rhs])
+            {
+                let jumps = $jumps;
+                state.pc = if jumps(*l, *r) {
+                    target_pc
+                } else {
+                    state.pc + 1
+                };
+                return Ok(InsnFunctionStepResult::Step);
+            }
+            op_comparison_slow(
+                program,
+                state,
+                *lhs,
+                *rhs,
+                target_pc,
+                *flags,
+                collation.unwrap_or_default(),
+                $op,
+            )
         }
-        | Insn::Ne {
-            flags, collation, ..
-        }
-        | Insn::Lt {
-            flags, collation, ..
-        }
-        | Insn::Le {
-            flags, collation, ..
-        }
-        | Insn::Gt {
-            flags, collation, ..
-        }
-        | Insn::Ge {
-            flags, collation, ..
-        } => (*flags, collation.unwrap_or_default()),
-        _ => unreachable!("unexpected Insn {:?}", insn),
     };
-    op_comparison_slow(program, state, lhs, rhs, target_pc, flags, collation, op)
 }
+
+comparison_opcode!(op_eq, Eq, ComparisonOp::Eq, |l: i64, r: i64| l == r);
+comparison_opcode!(op_ne, Ne, ComparisonOp::Ne, |l: i64, r: i64| l != r);
+comparison_opcode!(op_lt, Lt, ComparisonOp::Lt, |l: i64, r: i64| l < r);
+comparison_opcode!(op_le, Le, ComparisonOp::Le, |l: i64, r: i64| l <= r);
+comparison_opcode!(op_gt, Gt, ComparisonOp::Gt, |l: i64, r: i64| l > r);
+comparison_opcode!(op_ge, Ge, ComparisonOp::Ge, |l: i64, r: i64| l >= r);
 
 /// The comparison opcodes for every operand pair that is not two integers:
 /// NULLs, affinity conversions, text collations and array comparison.
@@ -1922,7 +1889,14 @@ pub fn op_column(
         },
         insn
     );
-    op_column_impl(
+    if state.active_op_state.is_idle() && state.deferred_seeks[*cursor_id].is_none() {
+        let result = op_column_fetch(program, state, *cursor_id, *column, *dest, default)?;
+        if matches!(result, InsnFunctionStepResult::Step) {
+            state.pc += 1;
+        }
+        return Ok(result);
+    }
+    op_column_deferred(
         program,
         state,
         *cursor_id,
@@ -1953,7 +1927,15 @@ pub fn op_column_range(
         },
         insn
     );
-    op_column_impl(
+    if state.active_op_state.is_idle() && state.deferred_seeks[*cursor_id].is_none() {
+        let result =
+            op_column_range_fetch(program, state, *cursor_id, *start_column, *dest, defaults)?;
+        if matches!(result, InsnFunctionStepResult::Step) {
+            state.pc += 1;
+        }
+        return Ok(result);
+    }
+    op_column_deferred(
         program,
         state,
         *cursor_id,
@@ -2010,27 +1992,6 @@ impl ColumnFetch<'_> {
             } => op_column_range_fetch(program, state, cursor_id, start_column, dest, defaults),
         }
     }
-}
-
-#[inline(always)]
-fn op_column_impl(
-    program: &Program,
-    state: &mut ProgramState,
-    cursor_id: usize,
-    fetch: ColumnFetch<'_>,
-) -> InsnResult {
-    // Fast path: no deferred seek pending and no suspended state machine. The
-    // column fetch either completes or yields IO with nothing persisted, so the
-    // op-state slot (enum write + drop on clear) is bypassed entirely. On IO
-    // resume the slot is still idle and this path re-executes.
-    if state.active_op_state.is_idle() && state.deferred_seeks[cursor_id].is_none() {
-        let result = fetch.fetch(program, state, cursor_id)?;
-        if matches!(result, InsnFunctionStepResult::Step) {
-            state.pc += 1;
-        }
-        return Ok(result);
-    }
-    op_column_deferred(program, state, cursor_id, fetch)
 }
 
 /// Column when a deferred seek is pending or the fetch was suspended for
@@ -3536,16 +3497,7 @@ pub fn op_next(
         let cursor = state.get_cursor(*cursor_id);
         match cursor {
             Cursor::BTree(btree_cursor) => !return_if_io!(btree_cursor.next_row()),
-            Cursor::MaterializedView(mv_cursor) => {
-                let has_more = return_if_io!(mv_cursor.next());
-                !has_more
-            }
-            Cursor::IndexMethod(_) => {
-                let cursor = cursor.as_index_method_mut();
-                let has_more = return_if_io!(cursor.query_next());
-                !has_more
-            }
-            _ => panic!("Next on non-btree/materialized-view cursor"),
+            _ => !return_if_io!(next_row_of_other_cursor(cursor)),
         }
     };
     if !is_empty {
@@ -3567,7 +3519,16 @@ pub fn op_next(
     } else {
         state.pc += 1;
     }
-    Ok(InsnFunctionStepResult::Step)
+    return Ok(InsnFunctionStepResult::Step);
+
+    #[inline(never)]
+    fn next_row_of_other_cursor(cursor: &mut Cursor) -> IOResultOr<bool> {
+        match cursor {
+            Cursor::MaterializedView(mv_cursor) => mv_cursor.next(),
+            Cursor::IndexMethod(_) => cursor.as_index_method_mut().query_next(),
+            _ => panic!("Next on non-btree/materialized-view cursor"),
+        }
+    }
 }
 
 pub fn op_prev(
@@ -6141,49 +6102,37 @@ fn op_row_id_read(state: &mut ProgramState, cursor_id: usize, dest: usize) -> In
         .cursors
         .get_mut(cursor_id)
         .expect("cursor_id should be valid");
-    match cursor {
-        Some(Cursor::NullRow) => {
-            state.registers[dest].set_null();
-        }
-        Some(Cursor::BTree(btree_cursor)) => {
-            // rowid() answers None for a cursor in the null-row state.
-            if let Some(rowid) = return_if_io!(btree_cursor.rowid()) {
-                state.registers[dest].set_int(rowid);
-            } else {
-                state.registers[dest].set_null();
+    let rowid = match cursor {
+        Some(Cursor::BTree(btree_cursor)) => return_if_io!(btree_cursor.rowid()),
+        _ => return_if_io!(row_id_of_other_cursor(cursor)),
+    };
+    match rowid {
+        Some(rowid) => state.registers[dest].set_int(rowid),
+        None => state.registers[dest].set_null(),
+    }
+    return Ok(InsnFunctionStepResult::Step);
+
+    // out of line to keep the stack frame small
+    #[inline(never)]
+    fn row_id_of_other_cursor(cursor: &mut Option<Cursor>) -> IOResultOr<Option<i64>> {
+        match cursor {
+            Some(Cursor::NullRow) => Ok(IOResult::Done(None)),
+            Some(Cursor::Virtual(virtual_cursor)) => {
+                let rowid = virtual_cursor.rowid();
+                Ok(IOResult::Done((rowid != 0).then_some(rowid)))
             }
-        }
-        Some(Cursor::Virtual(virtual_cursor)) => {
-            let rowid = virtual_cursor.rowid();
-            if rowid != 0 {
-                state.registers[dest].set_int(rowid);
-            } else {
-                state.registers[dest].set_null();
+            Some(Cursor::MaterializedView(mv_cursor)) => mv_cursor.rowid(),
+            Some(Cursor::IndexMethod(cursor)) => cursor.query_rowid(),
+            _ => {
+                mark_unlikely();
+                Err(LimboError::InternalError(
+                    "RowId: cursor is not a table, virtual, or materialized view cursor"
+                        .to_string(),
+                )
+                .into())
             }
-        }
-        Some(Cursor::MaterializedView(mv_cursor)) => {
-            if let Some(rowid) = return_if_io!(mv_cursor.rowid()) {
-                state.registers[dest].set_int(rowid);
-            } else {
-                state.registers[dest].set_null();
-            }
-        }
-        Some(Cursor::IndexMethod(cursor)) => {
-            if let Some(rowid) = return_if_io!(cursor.query_rowid()) {
-                state.registers[dest].set_int(rowid);
-            } else {
-                state.registers[dest].set_null();
-            }
-        }
-        _ => {
-            mark_unlikely();
-            return Err(LimboError::InternalError(
-                "RowId: cursor is not a table, virtual, or materialized view cursor".to_string(),
-            )
-            .into());
         }
     }
-    Ok(InsnFunctionStepResult::Step)
 }
 
 pub fn op_idx_row_id(

@@ -108,6 +108,11 @@ use std::{
 };
 use tracing::{instrument, Level};
 
+const MAX_CHECK_MASK: u64 = 255;
+// we use the check interval as bitmask so that we can efficiently calculate if the `vm_steps` counter
+// has reached a check interval (if `n` is a power of 2, `x & (n - 1)` checks for multiples of `n`)
+const _: () = assert!((MAX_CHECK_MASK + 1).is_power_of_two());
+
 type MvccCommitStateMachine = CommitStateMachine<MvccClock, DynAllocator>;
 
 /// State machine for committing view deltas with I/O handling
@@ -985,7 +990,7 @@ impl ProgramState {
         let cursor_seqs = vec![0i64; max_cursors];
         let registers = vec![Register::Value(Value::Null); max_registers].into_boxed_slice();
         Self {
-            check_mask: 63,
+            check_mask: MAX_CHECK_MASK,
             io_completions: None,
             pc: 0,
             cursors,
@@ -2135,6 +2140,7 @@ impl Program {
         state.pre_op_registers = Some(state.registers.clone());
     }
 
+    #[inline(always)]
     fn normal_step(
         &self,
         state: &mut ProgramState,
@@ -2143,85 +2149,99 @@ impl Program {
     ) -> Result<StepResult, Box<LimboError>> {
         let enable_tracing = tracing::enabled!(tracing::Level::TRACE);
         let vdbe_trace = self.connection.get_vdbe_trace();
-        // One flag for the per-instruction test; the two kinds of tracing are
-        // told apart only once it is set.
-        let trace_insns = enable_tracing || vdbe_trace;
-        // Reborrow the instruction list once: reloading it through `self`
-        // every iteration defeats LLVM's hoisting because the opcode call
-        // below is opaque to it.
-        let insns = self.insns.as_slice();
-        // Invalidate the previous result row once per step call: rows are only
-        // handed out between step calls, and ResultRow returns immediately
-        // after setting a fresh one.
-        let _ = state.result_row.take();
-        // The outer loop runs once per step call and is re-entered only when an
-        // instruction completed its IO inline; the inner loop dispatches
-        // instructions without re-inspecting the completion slot every time.
-        'io_check: loop {
-            if state.io_completions.is_some() {
-                if let Some(result) = self.finish_pending_io(state, pager, waker)? {
-                    return Ok(result);
-                }
-            }
-            if state.pending_fail_prepare_error.is_some() {
-                match self.prepare_pending_fail(state, pager, waker)? {
-                    Some(result) => return Ok(result),
-                    None => continue 'io_check,
-                }
-            }
-            loop {
-                if state.metrics.vm_steps & state.check_mask == 0 {
-                    if let Some(result) = self.periodic_checks(state, pager)? {
-                        return Ok(result);
-                    }
-                }
 
-                let (insn, _) = &insns[state.pc as usize];
-                if trace_insns {
-                    self.trace_step(state, insn, enable_tracing, vdbe_trace);
-                }
-
-                // Always increment VM steps for every loop iteration
-                state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
-
-                let result = insn::dispatch_insn(self, state, insn, pager);
-                if let Ok(InsnFunctionStepResult::Step) = result {
-                    // Instruction completed, moving to next
-                    state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                    continue;
-                }
-                if let Ok(InsnFunctionStepResult::Row) = result {
-                    // Instruction completed (ResultRow already incremented PC)
-                    state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                    return Ok(StepResult::Row);
-                }
-                // Match less frequent results out of line
-                match dispatch(self, state, pager, waker, result)? {
-                    Some(result) => return Ok(result),
-                    None => continue 'io_check,
-                }
-            }
-        }
+        return if enable_tracing || vdbe_trace {
+            dispatch_loop::<true>(self, state, pager, waker, enable_tracing, vdbe_trace)
+        } else {
+            dispatch_loop::<false>(self, state, pager, waker, false, false)
+        };
 
         #[inline(never)]
-        fn dispatch(
+        fn dispatch_loop<const TRACE: bool>(
             program: &Program,
             state: &mut ProgramState,
             pager: &Arc<Pager>,
             waker: Option<&Waker>,
-            result: execute::InsnResult,
-        ) -> Result<Option<StepResult>, Box<LimboError>> {
-            match result {
-                Ok(InsnFunctionStepResult::Done) => {
-                    // Instruction completed execution
-                    state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                    state.auto_txn_cleanup = TxnCleanup::None;
-                    Ok(Some(StepResult::Done))
+            enable_tracing: bool,
+            vdbe_trace: bool,
+        ) -> Result<StepResult, Box<LimboError>> {
+            // Reborrow the instruction list once: reloading it through `self`
+            // every iteration defeats LLVM's hoisting because the opcode call
+            // below is opaque to it.
+            let insns = program.insns.as_slice();
+            // Invalidate the previous result row once per step call: rows are only
+            // handed out between step calls, and ResultRow returns immediately
+            // after setting a fresh one.
+            let _ = state.result_row.take();
+            // The outer loop runs once per step call and is re-entered only when an
+            // instruction completed its IO inline; the inner loop dispatches
+            // instructions without re-inspecting the completion slot every time.
+            'io_check: loop {
+                if state.io_completions.is_some() {
+                    if let Some(result) = program.finish_pending_io(state, pager, waker)? {
+                        return Ok(result);
+                    }
                 }
-                Ok(InsnFunctionStepResult::IO(io)) => Ok(program.park_on_io(state, io, waker)),
-                Err(boxed_err) => program.fail_step(state, pager, *boxed_err),
-                Ok(InsnFunctionStepResult::Step) | Ok(InsnFunctionStepResult::Row) => {
-                    unreachable!("the dispatch loop settles steps and rows itself")
+                if state.pending_fail_prepare_error.is_some() {
+                    match program.prepare_pending_fail(state, pager, waker)? {
+                        Some(result) => return Ok(result),
+                        None => continue 'io_check,
+                    }
+                }
+                loop {
+                    if state.metrics.vm_steps & state.check_mask == 0 {
+                        if let Some(result) = program.periodic_checks(state, pager)? {
+                            return Ok(result);
+                        }
+                    }
+
+                    let (insn, _) = &insns[state.pc as usize];
+                    if TRACE {
+                        program.trace_step(state, insn, enable_tracing, vdbe_trace);
+                    }
+
+                    // Always increment VM steps for every loop iteration
+                    state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
+
+                    let result = insn::dispatch_insn(program, state, insn, pager);
+                    if let Ok(InsnFunctionStepResult::Step) = result {
+                        // Instruction completed, moving to next
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
+                        continue;
+                    }
+                    if let Ok(InsnFunctionStepResult::Row) = result {
+                        // Instruction completed (ResultRow already incremented PC)
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
+                        return Ok(StepResult::Row);
+                    }
+                    // Match less frequent results out of line
+                    match dispatch(program, state, pager, waker, result)? {
+                        Some(result) => return Ok(result),
+                        None => continue 'io_check,
+                    }
+                }
+            }
+
+            #[inline(never)]
+            fn dispatch(
+                program: &Program,
+                state: &mut ProgramState,
+                pager: &Arc<Pager>,
+                waker: Option<&Waker>,
+                result: execute::InsnResult,
+            ) -> Result<Option<StepResult>, Box<LimboError>> {
+                match result {
+                    Ok(InsnFunctionStepResult::Done) => {
+                        // Instruction completed execution
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
+                        state.auto_txn_cleanup = TxnCleanup::None;
+                        Ok(Some(StepResult::Done))
+                    }
+                    Ok(InsnFunctionStepResult::IO(io)) => Ok(program.park_on_io(state, io, waker)),
+                    Err(boxed_err) => program.fail_step(state, pager, *boxed_err),
+                    Ok(InsnFunctionStepResult::Step) | Ok(InsnFunctionStepResult::Row) => {
+                        unreachable!("the dispatch loop settles steps and rows itself")
+                    }
                 }
             }
         }
@@ -2329,24 +2349,15 @@ impl Program {
         }
     }
 
-    /// The checks the dispatch loop runs once every CHECK_INTERVAL
-    /// instructions: a closed connection, an interrupt, the deadline and the
-    /// progress handler. A handler with interval N < 64 narrows the mask at
-    /// the next firing (a one-time lag of at most CHECK_INTERVAL
-    /// instructions; the cadence is approximate by contract).
     #[inline(never)]
     fn periodic_checks(
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
     ) -> Result<Option<StepResult>, Box<LimboError>> {
-        // The interval must stay a power of two so the gate in the loop is
-        // a mask test, never a division.
-        const CHECK_INTERVAL: u64 = 64;
-        const _: () = assert!(CHECK_INTERVAL.is_power_of_two());
         let progress_ops = self.connection.progress_ops();
-        state.check_mask = if progress_ops == 0 || progress_ops >= CHECK_INTERVAL {
-            CHECK_INTERVAL - 1
+        state.check_mask = if progress_ops == 0 || progress_ops >= MAX_CHECK_MASK {
+            MAX_CHECK_MASK
         } else {
             progress_ops.next_power_of_two() - 1
         };

@@ -1331,27 +1331,58 @@ mod immutable_record {
         }
     }
 
+    /// [`write_varint`] with the one-byte case inline.
+    #[inline(always)]
+    fn write_short_varint(out: &mut [u8], value: u64) -> usize {
+        if value <= 0x7f {
+            out[0] = value as u8;
+            return 1;
+        }
+        write_varint(out, value)
+    }
+
     /// Writes the bytes of `value` for `serial_type` at the start of `out`
     /// and returns how many it wrote.
     #[inline(always)]
     fn write_value(out: &mut [u8], value: ValueRef<'_>, serial_type: SerialType) -> usize {
         let bytes: &[u8] = match value {
             ValueRef::Null => return 0,
-            ValueRef::Numeric(Numeric::Integer(i)) => match serial_type.kind() {
-                SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => return 0,
-                SerialTypeKind::I8 => &(i as i8).to_be_bytes(),
-                SerialTypeKind::I16 => &(i as i16).to_be_bytes(),
-                // Without the most significant byte.
-                SerialTypeKind::I24 => &(i as i32).to_be_bytes()[1..],
-                SerialTypeKind::I32 => &(i as i32).to_be_bytes(),
-                // Without the two most significant bytes.
-                SerialTypeKind::I48 => &i.to_be_bytes()[2..],
-                SerialTypeKind::I64 => &i.to_be_bytes(),
-                other => panic!("Serial type is not an integer: {other:?}"),
-            },
+            ValueRef::Numeric(Numeric::Integer(i)) => {
+                return match serial_type.kind() {
+                    SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => 0,
+                    SerialTypeKind::I8 => {
+                        out[0] = i as u8;
+                        1
+                    }
+                    SerialTypeKind::I16 => {
+                        out[..2].copy_from_slice(&(i as i16).to_be_bytes());
+                        2
+                    }
+                    // Without the most significant byte.
+                    SerialTypeKind::I24 => {
+                        out[..3].copy_from_slice(&(i as i32).to_be_bytes()[1..]);
+                        3
+                    }
+                    SerialTypeKind::I32 => {
+                        out[..4].copy_from_slice(&(i as i32).to_be_bytes());
+                        4
+                    }
+                    // Without the two most significant bytes.
+                    SerialTypeKind::I48 => {
+                        out[..6].copy_from_slice(&i.to_be_bytes()[2..]);
+                        6
+                    }
+                    SerialTypeKind::I64 => {
+                        out[..8].copy_from_slice(&i.to_be_bytes());
+                        8
+                    }
+                    other => panic!("Serial type is not an integer: {other:?}"),
+                };
+            }
             ValueRef::Numeric(Numeric::Float(f)) => {
                 let fval: f64 = f.into();
-                &fval.to_be_bytes()
+                out[..8].copy_from_slice(&fval.to_be_bytes());
+                return 8;
             }
             ValueRef::Text(t) => t.value.as_bytes(),
             ValueRef::Blob(b) => b,
@@ -1793,12 +1824,13 @@ mod immutable_record {
 
             // Writing pass: each serial type goes into the header and each
             // value after it, the varints straight into their place.
-            let mut header_pos = write_varint(&mut buf[..header_size], header_size as u64);
+            let mut header_pos = write_short_varint(&mut buf[..header_size], header_size as u64);
             let mut value_pos = header_size;
             for value in values {
                 let value = value.as_value_ref();
                 let serial_type = SerialType::from(value);
-                header_pos += write_varint(&mut buf[header_pos..header_size], serial_type.into());
+                header_pos +=
+                    write_short_varint(&mut buf[header_pos..header_size], serial_type.into());
                 value_pos += write_value(&mut buf[value_pos..], value, serial_type);
             }
             crate::turso_assert!(

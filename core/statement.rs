@@ -304,10 +304,7 @@ pub struct Statement {
     /// - `Some(Some(duration))`: override with a query-specific timeout
     /// - `Some(None)`: disable timeout for this execution
     query_timeout_override: Option<Option<Duration>>,
-    /// True once step() has returned Row for a write statement (INSERT/UPDATE/DELETE
-    /// with RETURNING). With ephemeral-buffered RETURNING, the first Row proves all
-    /// DML completed — only the scan-back remains. Used by reset_internal to decide
-    /// commit vs rollback when a statement is abandoned.
+    /// True once [Self::step] has returned a [Row].
     has_returned_row: bool,
     /// Byte offset in the original SQL string where this statement ends.
     /// Used by sqlite3_prepare_v2 to set the *pzTail output parameter.
@@ -579,14 +576,7 @@ impl Statement {
             .step(&mut self.state, &self.pager, self.query_mode, waker);
         if let Ok(StepResult::Row) = res {
             self.busy = true;
-            // Track when a write statement yields its first Row. With ephemeral-buffered
-            // RETURNING, this proves all DML completed — only the scan-back remains.
-            if self.query_mode == QueryMode::Normal
-                && self.program.change_cnt_on
-                && !self.program.result_columns.is_empty()
-            {
-                self.has_returned_row = true;
-            }
+            self.has_returned_row = true;
             return Ok(StepResult::Row);
         }
         self.finish_step(res, waker)
@@ -731,13 +721,7 @@ impl Statement {
             // else: Handler says stop, res stays as Busy
         }
 
-        // Track when a write statement yields its first Row. With ephemeral-buffered
-        // RETURNING, this proves all DML completed — only the scan-back remains.
-        if matches!(res, Ok(StepResult::Row))
-            && self.query_mode == QueryMode::Normal
-            && self.program.change_cnt_on
-            && !self.program.result_columns.is_empty()
-        {
+        if matches!(res, Ok(StepResult::Row)) {
             self.has_returned_row = true;
         }
 
