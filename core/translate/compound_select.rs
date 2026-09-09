@@ -667,6 +667,7 @@ fn read_deduplicated_union_or_except_rows(
         cursor_id: dedupe_cursor_id,
         pc_if_next: label_dedupe_loop_start,
         fullscan: false,
+        is_index: false,
     });
     program.preassign_label_to_next_insn(label_close);
     program.emit_insn(Insn::Close {
@@ -741,6 +742,7 @@ fn read_intersect_rows(
         cursor_id: left_cursor_id,
         pc_if_next: label_loop_start,
         fullscan: false,
+        is_index: false,
     });
 
     program.preassign_label_to_next_insn(label_close);
@@ -1000,6 +1002,7 @@ fn emit_compound_order_by(
         cursor_id: collection_cursor_id,
         pc_if_next: label_sorter_loop,
         fullscan: false,
+        is_index: false,
     });
     program.preassign_label_to_next_insn(label_sorter_done);
     program.emit_insn(Insn::Close {

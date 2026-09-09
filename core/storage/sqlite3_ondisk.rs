@@ -636,11 +636,11 @@ pub fn begin_write_btree_page(
     page: &PageRef,
     group: Option<&mut CompletionGroup>,
 ) -> Result<Completion> {
-    tracing::trace!("begin_write_btree_page(page={})", page.get().id);
+    tracing::trace!("begin_write_btree_page(page={})", page.get().id());
     let page_source = &pager.db_file;
     let page_finish = page.clone();
 
-    let page_id = page.get().id;
+    let page_id = page.get().id();
     tracing::trace!("begin_write_btree_page(page_id={})", page_id);
 
     let buffer = page.get().buffer().cloned().expect("buffer not loaded");
@@ -1335,6 +1335,13 @@ pub fn read_integer(buf: &[u8], serial_type: u8) -> Result<i64> {
 /// This function is similar to `sqlite3GetVarint32`
 #[inline(always)]
 pub fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
+    match buf {
+        [b0, ..] if *b0 < 0x80 => return Ok((*b0 as u64, 1)),
+        [b0, b1, ..] if *b1 < 0x80 => {
+            return Ok(((((*b0 & 0x7f) as u64) << 7) | *b1 as u64, 2));
+        }
+        _ => {}
+    }
     let mut v: u64 = 0;
     for i in 0..8 {
         match buf.get(i) {

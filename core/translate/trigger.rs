@@ -586,6 +586,7 @@ pub fn translate_drop_trigger(
         cursor_id: sqlite_schema_cursor_id,
         pc_if_next: search_loop_label,
         fullscan: false,
+        is_index: false,
     });
 
     program.preassign_label_to_next_insn(done_label);

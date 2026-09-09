@@ -322,6 +322,7 @@ pub fn translate_expr(
                         cursor_id: *cursor_id,
                         pc_if_next: label_null_checks_loop_start,
                         fullscan: false,
+                        is_index: false,
                     });
                     // Loop exhausted without finding all-NULL row
                     program.emit_insn(Insn::Goto {

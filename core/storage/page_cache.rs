@@ -339,17 +339,17 @@ impl PageCache {
 
         if page.is_locked() {
             return Err(CacheError::Locked {
-                pgno: page.get().id,
+                pgno: page.get().id(),
             });
         }
         if page.is_dirty() {
             return Err(CacheError::Dirty {
-                pgno: page.get().id,
+                pgno: page.get().id(),
             });
         }
         if page.is_pinned() {
             return Err(CacheError::Pinned {
-                pgno: page.get().id,
+                pgno: page.get().id(),
             });
         }
 
@@ -521,7 +521,7 @@ impl PageCache {
             && !page.is_locked()
             && !page.is_pinned()
             && Arc::strong_count(page) == 1
-            && page.get().id.ne(&DatabaseHeader::PAGE_ID)
+            && page.get().id().ne(&DatabaseHeader::PAGE_ID)
             && page.get().overflow_cells.is_empty()
     }
 
@@ -531,7 +531,7 @@ impl PageCache {
     /// since those are typically short-lived. We track based on dirty/spilled state.
     fn counted_as_evictable(page: &PageRef) -> bool {
         // Page 1 is never evictable
-        if page.get().id == DatabaseHeader::PAGE_ID {
+        if page.get().id() == DatabaseHeader::PAGE_ID {
             return false;
         }
         // A page is evictable if it's clean OR spilled
@@ -547,7 +547,7 @@ impl PageCache {
             let page = &entry.page;
             // Page was evictable (clean or spilled) before becoming dirty,
             // now it's dirty && !spilled, so not evictable
-            if page.get().id != DatabaseHeader::PAGE_ID {
+            if page.get().id() != DatabaseHeader::PAGE_ID {
                 // Only decrement if we were counting it as evictable
                 // (it was clean or spilled before this call)
                 self.evictable_count = self.evictable_count.saturating_sub(1);
@@ -563,7 +563,7 @@ impl PageCache {
             let entry = unsafe { &*entry_ptr };
             let page = &entry.page;
             // Page was dirty && !spilled (not evictable), now it's spilled (evictable)
-            if page.get().id != DatabaseHeader::PAGE_ID {
+            if page.get().id() != DatabaseHeader::PAGE_ID {
                 self.evictable_count += 1;
             }
         }
@@ -594,7 +594,7 @@ impl PageCache {
                 break;
             }
         }
-        spillable.sort_by_key(|pg| pg.get().id);
+        spillable.sort_by_key(|pg| pg.get().id());
         spillable
     }
 
@@ -654,7 +654,7 @@ impl PageCache {
         (!page.is_dirty() || page.is_spilled())
             && !page.is_locked()
             && !page.is_pinned()
-            && page.get().id.ne(&DatabaseHeader::PAGE_ID)
+            && page.get().id().ne(&DatabaseHeader::PAGE_ID)
             && Arc::strong_count(page) == 1
     }
 
@@ -733,7 +733,7 @@ impl PageCache {
             let entry = unsafe { &*entry_ptr };
             if entry.page.is_dirty() && !clear_dirty {
                 return Err(CacheError::Dirty {
-                    pgno: entry.page.get().id,
+                    pgno: entry.page.get().id(),
                 });
             }
         }
@@ -1066,14 +1066,14 @@ mod tests {
         let key3 = insert_page(&mut cache, 3);
 
         // With capacity=1, inserting key3 should evict key2
-        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id, 3);
+        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id(), 3);
         assert!(
             cache.get(&key2).unwrap().is_none(),
             "key2 should be evicted"
         );
 
         // key3 should still be accessible
-        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id, 3);
+        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id(), 3);
         assert!(
             cache.get(&key2).unwrap().is_none(),
             "capacity=1 should have evicted the older page"
@@ -1268,8 +1268,8 @@ mod tests {
         let key1 = insert_page(&mut cache, 1);
         let key2 = insert_page(&mut cache, 2);
 
-        assert_eq!(cache.get(&key1).unwrap().unwrap().get().id, 1);
-        assert_eq!(cache.get(&key2).unwrap().unwrap().get().id, 2);
+        assert_eq!(cache.get(&key1).unwrap().unwrap().get().id(), 1);
+        assert_eq!(cache.get(&key2).unwrap().unwrap().get().id(), 2);
         cache.verify_cache_integrity();
     }
 
@@ -1524,8 +1524,8 @@ mod tests {
             // Verify all pages in reference_map are in cache
             for (key, page) in &reference_map {
                 let cached_page = cache.peek(key, false).expect("Page should be in cache");
-                assert_eq!(cached_page.get().id, key.0);
-                assert_eq!(page.get().id, key.0);
+                assert_eq!(cached_page.get().id(), key.0);
+                assert_eq!(page.get().id(), key.0);
             }
         }
     }

@@ -973,6 +973,7 @@ pub fn insn_to_row(
                 cursor_id,
                 pc_if_next,
                 fullscan,
+                ..
             } => (
                 "Next",
                 *cursor_id as i64,
@@ -2047,6 +2048,7 @@ pub fn insn_to_row(
                 cursor_id,
                 pc_if_prev,
                 fullscan,
+                ..
             } => (
                 "Prev",
                 *cursor_id as i64,

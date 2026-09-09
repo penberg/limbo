@@ -509,6 +509,7 @@ impl<'a, 'plan> PreparedHashBuild<'a, 'plan> {
             cursor_id: build_iter_cursor_id,
             pc_if_next: build_loop_start,
             fullscan: false,
+            is_index: false,
         });
 
         planner.program.preassign_label_to_next_insn(build_loop_end);

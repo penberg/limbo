@@ -402,7 +402,7 @@ impl CompiledExpression {
 
                     // Execute the instruction
                     match insn_fn(program, &mut state, insn, &pager)? {
-                        crate::vdbe::execute::InsnFunctionStepResult::IO(_) => {
+                        crate::vdbe::execute::InsnFunctionStepResult::IO => {
                             return Err(crate::LimboError::InternalError(
                                 "Expression evaluation encountered unexpected I/O".to_string(),
                             ));

@@ -2107,6 +2107,7 @@ impl ProgramBuilder {
             cursor_id,
             pc_if_next: loop_start,
             fullscan: false,
+            is_index: false,
         });
         self.preassign_label_to_next_insn(loop_end);
     }
@@ -2252,6 +2253,26 @@ impl ProgramBuilder {
         sql: &str,
     ) -> crate::Result<PreparedProgram> {
         self.resolve_labels()?;
+
+        // Fill in the is_index field on Next and Prev, now that we know all cursor types
+        for (insn, _) in self.insns.iter_mut() {
+            if let Insn::Next {
+                cursor_id,
+                is_index,
+                ..
+            }
+            | Insn::Prev {
+                cursor_id,
+                is_index,
+                ..
+            } = insn
+            {
+                *is_index = self
+                    .cursor_ref
+                    .get(*cursor_id)
+                    .is_some_and(|(_, cursor_type)| cursor_type.is_index());
+            }
+        }
 
         self.parameters.list.dedup();
 

@@ -1983,6 +1983,7 @@ pub fn translate_drop_table(
         cursor_id: sqlite_schema_cursor_id_0,
         pc_if_next: metadata_loop,
         fullscan: false,
+        is_index: false,
     });
     program.preassign_label_to_next_insn(end_metadata_label);
     // end of loop on schema table
@@ -2093,6 +2094,7 @@ pub fn translate_drop_table(
                     cursor_id: temp_cursor,
                     pc_if_next: temp_loop_label,
                     fullscan: false,
+                    is_index: false,
                 });
                 program.preassign_label_to_next_insn(temp_end_label);
             }
@@ -2247,6 +2249,7 @@ pub fn translate_drop_table(
             cursor_id: sqlite_schema_cursor_id_1,
             pc_if_next: copy_schema_to_temp_table_loop,
             fullscan: false,
+            is_index: false,
         });
         program.preassign_label_to_next_insn(copy_schema_to_temp_table_loop_end_label);
         // End loop to copy over row id's from the schema table for rows that have the same root page as the one that was moved
@@ -2314,6 +2317,7 @@ pub fn translate_drop_table(
             cursor_id: ephemeral_cursor_id,
             pc_if_next: copy_temp_table_to_schema_loop,
             fullscan: false,
+            is_index: false,
         });
         program.preassign_label_to_next_insn(copy_temp_table_to_schema_loop_end_label);
         // End loop to copy over row id's from the ephemeral table and then re-insert into the schema table with the correct root page
@@ -2376,6 +2380,7 @@ pub fn translate_drop_table(
             cursor_id: seq_cursor_id,
             pc_if_next: loop_start_label,
             fullscan: false,
+            is_index: false,
         });
 
         program.preassign_label_to_next_insn(end_loop_label);
@@ -2477,6 +2482,7 @@ pub fn translate_drop_table(
             cursor_id: ver_cursor_id,
             pc_if_next: ver_loop_start_label,
             fullscan: false,
+            is_index: false,
         });
 
         program.preassign_label_to_next_insn(end_ver_loop_label);
@@ -3025,6 +3031,7 @@ pub fn translate_drop_type(
         cursor_id: types_cursor_id,
         pc_if_next: loop_start_label,
         fullscan: false,
+        is_index: false,
     });
 
     program.preassign_label_to_next_insn(end_loop_label);

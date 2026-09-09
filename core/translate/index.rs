@@ -448,6 +448,7 @@ pub(crate) fn emit_refill_index(
             cursor_id: table_cursor_id,
             pc_if_next: loop_start_label,
             fullscan: false,
+            is_index: false,
         });
         program.preassign_label_to_next_insn(loop_end_label);
     } else {
@@ -544,6 +545,7 @@ pub(crate) fn emit_refill_index(
             cursor_id: table_cursor_id,
             pc_if_next: loop_start_label,
             fullscan: false,
+            is_index: false,
         });
         program.preassign_label_to_next_insn(loop_end_label);
 
@@ -1361,6 +1363,7 @@ pub fn translate_drop_index(
         cursor_id: sqlite_schema_cursor_id,
         pc_if_next: loop_start_label,
         fullscan: false,
+        is_index: false,
     });
 
     program.preassign_label_to_next_insn(loop_end_label);
