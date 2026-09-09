@@ -1915,6 +1915,13 @@ expect {
     {"name":"John","age":30,"city":"New York"}
 }
 
+test jsonb_null_is_sql_null {
+    SELECT typeof(jsonb(NULL)), jsonb(NULL) IS NULL;
+}
+expect {
+    null|1
+}
+
 test json_complex_nested {
     SELECT json(jsonb('{"complex": {"nested": ["array", "of", "values"], "numbers": [1, 2, 3]}}'));
 }
