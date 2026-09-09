@@ -139,7 +139,7 @@ OOGA BOOGA! Programming already complex! Use simple word! Say what you mean! Exa
 
 No-one knows what the hell a bootstrap-safe statement is. Everyone knows what "a statement that needs a table" is. Do
 not use metaphorical language, such as the following terms: load-bearing, pin, bite, sharp, arm, guard, bless, wedge,
-retire, retarget, answer, settle, carry. Do not make up terms if they have equivalents that are commonly used in the domain.
+retire, retarget, answer, settle, carry, land. Do not make up terms if they have equivalents that are commonly used in the domain.
 
 ## Code flows from top to bottom
 
