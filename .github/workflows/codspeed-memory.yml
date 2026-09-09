@@ -47,7 +47,7 @@ jobs:
           path: target/codspeed
 
       - name: Build memory benchmarks
-        run: cargo codspeed build -m memory -p memory-benchmark-codspeed --features codspeed,fts-stress
+        run: cargo codspeed build -m memory -p memory-benchmark-codspeed --features codspeed,fts
 
       - name: Test FTS memory workload
         run: cargo test -p memory-benchmark --features fts --locked
@@ -73,7 +73,6 @@ jobs:
           - series-blob
           - update-churn
           - fts-queries
-          - fts-large-index
     steps:
       - uses: actions/checkout@v4
 
@@ -111,9 +110,7 @@ jobs:
           mode: memory
           run: |
             if [ "${{ matrix.workload }}" = "fts-queries" ]; then
-              cargo codspeed run -m memory -p memory-benchmark-codspeed --bench fts_queries "rare|common|and|or|phrase|ranked"
-            elif [ "${{ matrix.workload }}" = "fts-large-index" ]; then
-              cargo codspeed run -m memory -p memory-benchmark-codspeed --bench fts_queries "oversized_index"
+              cargo codspeed run -m memory -p memory-benchmark-codspeed --bench fts_queries
             else
               cargo codspeed run -m memory -p memory-benchmark-codspeed --bench memory_profiles "${{ matrix.workload }}"
             fi

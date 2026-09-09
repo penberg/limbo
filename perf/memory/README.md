@@ -153,11 +153,13 @@ cargo bench --profile bench-profile -p memory-benchmark-codspeed \
 ```
 
 It runs one and two MVCC connections, three transactions each, two queries per
-transaction, with one sample by default. To use CodSpeed, build with
-`--features codspeed,fts-stress` and filter its runner to `oversized_index`.
-CI enables this feature and runs it in the separate `fts-large-index` shard;
-the `fts-queries` shard runs only the smaller cases. The build job also runs the
-FTS workload and CLI tests. Local multi-connection Divan
+transaction, with one sample by default. CI builds with `codspeed,fts`, excluding
+the large case at compile time. The large case took about 18 minutes per
+configuration under CodSpeed, and positional name filters did not isolate it
+from the smaller Divan cases. Keep `fts-stress` for explicit local investigations;
+the dhat command above remains available for process-wide memory measurements.
+The `fts-queries` CI shard runs the smaller cases, and the build job also runs
+the FTS workload and CLI tests. Local multi-connection Divan
 allocation counts remain incomplete; use dhat for all-thread totals.
 
 ## Consume explicit workload phases

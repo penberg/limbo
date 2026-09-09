@@ -110,9 +110,11 @@ across changing snapshots. Writer arena (64 MiB) and document flush (1000) limit
 apply during setup, outside query profiling. See the README for all caveats.
 The matching Divan case is opt-in: `--features fts-stress --bench fts_queries --
 oversized_index`, with one/two MVCC connections, three transactions, two queries
-per transaction, and one sample. CI builds with `codspeed,fts-stress` and runs
-the large cases in `fts-large-index`, separately from the small `fts-queries`
-shard. Its build job also runs `cargo test -p memory-benchmark --features fts --locked`.
+per transaction, and one sample. CI builds with `codspeed,fts`, excluding the
+large cases at compile time, and runs the smaller cases in `fts-queries`.
+The large case took about 18 minutes per configuration under CodSpeed; positional
+filters did not isolate Divan cases. Use local Divan or dhat for above-cache runs.
+The build job also runs `cargo test -p memory-benchmark --features fts --locked`.
 
 ## Running Stack Reports
 
