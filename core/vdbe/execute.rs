@@ -7541,6 +7541,11 @@ fn update_agg_payload(
                     "JsonGroupObject/JsonbGroupObject: no value provided".to_string(),
                 ));
             };
+            // SQLite skips rows whose object label is SQL NULL. A NULL value is
+            // still encoded as JSON null, so only the key is filtered here.
+            if matches!(arg, Value::Null) {
+                return Ok(());
+            }
             ensure_blob_arg_is_jsonb(value.as_value_ref())?;
             let mut key_vec = convert_dbtype_to_raw_jsonb(arg, Conv::ToString)?;
             let mut val_vec = convert_dbtype_to_raw_jsonb(value, Conv::NotStrict)?;
@@ -7754,12 +7759,20 @@ fn finalize_agg_payload(func: &AggFunc, payload: &[Value]) -> Result<Value> {
         #[cfg(feature = "json")]
         AggFunc::JsonGroupObject => {
             let data = payload[0].to_blob().expect("Should be blob");
-            json_from_raw_bytes_agg(data, false)?
+            if data.is_empty() {
+                Value::Text(Text::json("{}".to_string()))
+            } else {
+                json_from_raw_bytes_agg(data, false)?
+            }
         }
         #[cfg(feature = "json")]
         AggFunc::JsonbGroupObject => {
             let data = payload[0].to_blob().expect("Should be blob");
-            json_from_raw_bytes_agg(data, true)?
+            if data.is_empty() {
+                Value::Blob(json::jsonb::Jsonb::make_empty_obj(1)?.data())
+            } else {
+                json_from_raw_bytes_agg(data, true)?
+            }
         }
         #[cfg(feature = "json")]
         AggFunc::JsonGroupArray => {
