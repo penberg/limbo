@@ -45,6 +45,30 @@ expect {
     CREATE INDEX i ON t (b)
 }
 
+@cross-check-integrity
+test alter-table-rename-column-table-unique-collate {
+    CREATE TABLE t (a TEXT, b TEXT, UNIQUE (a COLLATE NOCASE));
+    INSERT INTO t VALUES ('a', 'x');
+    ALTER TABLE t RENAME COLUMN b TO c;
+    ALTER TABLE t RENAME COLUMN a TO d;
+    SELECT d, c FROM t;
+}
+expect {
+    a|x
+}
+
+@cross-check-integrity
+test alter-table-rename-column-table-primary-key-collate {
+    CREATE TABLE t (a TEXT, b TEXT, PRIMARY KEY (a COLLATE NOCASE));
+    INSERT INTO t VALUES ('a', 'x');
+    ALTER TABLE t RENAME COLUMN b TO c;
+    ALTER TABLE t RENAME COLUMN a TO d;
+    SELECT d, c FROM t;
+}
+expect {
+    a|x
+}
+
 @skip-if mvcc "views not supported in MVCC mode"
 test alter-table-rename-column-view {
     CREATE TABLE t (a, b);
