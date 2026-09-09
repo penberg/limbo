@@ -54,3 +54,19 @@ test json-arrow-existing-path-still-uses-index {
 expect {
     1
 }
+
+@setup schema
+test array-contains-non-array-operand-select {
+    SELECT count(*) FROM t3 WHERE c > (5 @> 5);
+}
+expect {
+    0
+}
+
+@setup schema
+test array-overlap-non-array-operand-select {
+    SELECT count(*) FROM t3 WHERE c > (5 && 5);
+}
+expect {
+    0
+}
