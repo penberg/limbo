@@ -27,11 +27,6 @@ use tracing::{debug, trace, warn};
 /// Size of the io_uring submission and completion queues
 const ENTRIES: u32 = 512;
 
-/// Idle timeout for the sqpoll kernel thread before it needs
-/// to be woken back up by a call IORING_ENTER_SQ_WAKEUP flag.
-/// (handled by the io_uring crate in `submit_and_wait`)
-const SQPOLL_IDLE: u32 = 1000;
-
 /// Number of Vec<Box<[iovec]>> we preallocate on initialization
 const IOVEC_POOL_SIZE: usize = 64;
 
@@ -121,7 +116,11 @@ impl RingState {
 
     /// SAFETY: caller must guarantee no other `SubmissionQueue` exists for
     /// `ring` (i.e. caller holds the `RingState` Mutex).
-    unsafe fn submit_entry(&mut self, ring: &io_uring::IoUring, entry: &io_uring::squeue::Entry) {
+    unsafe fn submit_entry(
+        &mut self,
+        ring: &io_uring::IoUring,
+        entry: &io_uring::squeue::Entry,
+    ) -> Result<()> {
         trace!("submit_entry({:?})", entry);
         self.flush_overflow(ring);
         let pushed = {
@@ -130,12 +129,11 @@ impl RingState {
         };
         if pushed {
             self.pending_ops += 1;
-            return;
+        } else {
+            self.overflow.push_back(entry.clone());
         }
-        // SQ full — buffer locally and ask the kernel to drain so the next
-        // attempt has space.
-        self.overflow.push_back(entry.clone());
-        let _ = ring.submit();
+        ring.submit().map_err(|e| io_error(e, "io_uring_submit"))?;
+        Ok(())
     }
 
     /// SAFETY: same contract as `submit_entry`.
@@ -148,11 +146,11 @@ impl RingState {
             let mut sq = ring.submission_shared();
             sq.push(entry).is_ok()
         };
-        if pushed {
+        if !pushed {
+            self.overflow.push_front(entry.clone());
+        } else {
             self.pending_ops += 1;
-            return Ok(());
         }
-        self.overflow.push_front(entry.clone());
         ring.submit().map_err(|e| io_error(e, "io_uring_submit"))?;
         Ok(())
     }
@@ -193,13 +191,7 @@ impl IovecPool {
 
 impl UringIO {
     pub fn new() -> Result<Self> {
-        let ring = match io_uring::IoUring::builder()
-            .setup_sqpoll(SQPOLL_IDLE)
-            .build(ENTRIES)
-        {
-            Ok(ring) => ring,
-            Err(_) => io_uring::IoUring::new(ENTRIES).map_err(|e| io_error(e, "io_uring_setup"))?,
-        };
+        let ring = io_uring::IoUring::new(ENTRIES).map_err(|e| io_error(e, "io_uring_setup"))?;
         // RL_MEMLOCK cap is typically 8MB, the current design is to have one large arena
         // registered at startup and therefore we can simply use the zero index, falling back
         // to similar logic as the existing buffer pool for cases where it is over capacity.
@@ -322,7 +314,12 @@ impl RingState {
 
     /// Submit or resubmit a writev operation. SAFETY: caller must hold the
     /// `RingState` Mutex (so no other `SubmissionQueue` exists for `ring`).
-    unsafe fn submit_writev(&mut self, ring: &io_uring::IoUring, key: u64, mut st: WritevState) {
+    unsafe fn submit_writev(
+        &mut self,
+        ring: &io_uring::IoUring,
+        key: u64,
+        mut st: WritevState,
+    ) -> Result<()> {
         st.free_last_iov(&mut self.iov_pool);
 
         let mut iov_allocation = self.iov_pool.acquire().unwrap_or_else(|| {
@@ -373,7 +370,7 @@ impl RingState {
             .build()
             .user_data(key);
         self.writev_states.insert(key, st);
-        self.submit_entry(ring, &entry);
+        self.submit_entry(ring, &entry)
     }
 
     /// Handle a writev CQE. SAFETY: caller must hold the `RingState` Mutex.
@@ -383,13 +380,13 @@ impl RingState {
         mut state: WritevState,
         user_data: u64,
         result: i32,
-    ) {
+    ) -> Result<()> {
         if result < 0 {
             let err = std::io::Error::from_raw_os_error(-result);
             tracing::error!("writev failed (user_data: {}): {}", user_data, err);
             state.free_last_iov(&mut self.iov_pool);
             completion_from_key(user_data).error(CompletionError::IOError(err.kind(), "pwritev"));
-            return;
+            return Ok(());
         }
 
         let written = result;
@@ -397,7 +394,7 @@ impl RingState {
         if written == 0 && state.remaining() > 0 {
             state.free_last_iov(&mut self.iov_pool);
             completion_from_key(user_data).error(CompletionError::ShortWrite);
-            return;
+            return Ok(());
         }
         state.advance(written as u64);
 
@@ -417,7 +414,7 @@ impl RingState {
                     written,
                     remaining
                 );
-                self.submit_writev(ring, user_data, state);
+                self.submit_writev(ring, user_data, state)?;
                 // Progress wake: the future is parked on the parent
                 // completion's waker, but `complete()` only fires on the
                 // final chunk. Without this, intermediate-chunk completions
@@ -426,6 +423,7 @@ impl RingState {
                 wake_user_data(user_data);
             }
         }
+        Ok(())
     }
 }
 
@@ -605,7 +603,7 @@ impl UringIO {
             if let Some(wstate) = state.writev_states.remove(&user_data) {
                 drop(cq);
                 // SAFETY: still holding `state` Mutex.
-                unsafe { state.handle_writev_completion(&self.ring, wstate, user_data, result) };
+                unsafe { state.handle_writev_completion(&self.ring, wstate, user_data, result)? };
                 continue;
             }
             if result < 0 {
@@ -753,7 +751,7 @@ impl File for UringFile {
         };
         let mut state = self.state.lock();
         // SAFETY: holding `state` Mutex.
-        unsafe { state.submit_entry(&self.ring, &read_e) };
+        unsafe { state.submit_entry(&self.ring, &read_e)? };
         Ok(c)
     }
 
@@ -792,7 +790,7 @@ impl File for UringFile {
         c.keep_write_buffer_alive(buffer);
         let mut state = self.state.lock();
         // SAFETY: holding `state` Mutex.
-        unsafe { state.submit_entry(&self.ring, &write) };
+        unsafe { state.submit_entry(&self.ring, &write)? };
         Ok(c)
     }
 
@@ -804,7 +802,7 @@ impl File for UringFile {
             .user_data(get_key(c.clone()));
         let mut state = self.state.lock();
         // SAFETY: holding `state` Mutex.
-        unsafe { state.submit_entry(&self.ring, &sync) };
+        unsafe { state.submit_entry(&self.ring, &sync)? };
         Ok(c)
     }
 
@@ -819,7 +817,7 @@ impl File for UringFile {
         let wstate = WritevState::new(self, pos, bufs);
         let mut state = self.state.lock();
         // SAFETY: holding `state` Mutex.
-        unsafe { state.submit_writev(&self.ring, get_key(c.clone()), wstate) };
+        unsafe { state.submit_writev(&self.ring, get_key(c.clone()), wstate)? };
         Ok(c)
     }
 
@@ -839,7 +837,7 @@ impl File for UringFile {
                 .user_data(get_key(c.clone()));
             let mut state = self.state.lock();
             // SAFETY: holding `state` Mutex.
-            unsafe { state.submit_entry(&self.ring, &truncate) };
+            unsafe { state.submit_entry(&self.ring, &truncate)? };
             Ok(c)
         } else {
             let result = self.file.set_len(len);
