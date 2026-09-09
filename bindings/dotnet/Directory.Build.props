@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
     <Version>0.8.0-pre.9</Version>
+    <TursoPackageVersion>$(Version)</TursoPackageVersion>
     <TursoTargetFrameworks>net8.0;net9.0;net10.0</TursoTargetFrameworks>
     <Company>Turso</Company>
     <Product>Turso</Product>

@@ -435,6 +435,16 @@ jobs:
             exit 1
           fi
 
+          while IFS= read -r package; do
+            package_entries=$(mktemp)
+            unzip -Z1 "$package" > "$package_entries"
+            if grep -Fq "turso_sync_sdk_kit" "$package_entries"; then
+              echo "Internal Rust crate name leaked into $package"
+              exit 1
+            fi
+            rm "$package_entries"
+          done < <(find src -path '*/bin/Release/*.nupkg' -type f)
+
           static_packages=(
             "win-x64:turso_sdk_kit.lib"
             "win-arm64:turso_sdk_kit.lib"
@@ -625,9 +635,211 @@ jobs:
           if ($output -notcontains "Rows: 3") {
             throw "Unexpected NativeAOT sample output: $output"
           }
+          if (-not ($output -match "^Stats revision:")) {
+            throw "NativeAOT sample did not read sync statistics: $output"
+          }
+          foreach ($expectedLine in @("Checkpoint: complete", "Disposed: complete")) {
+            if ($output -notcontains $expectedLine) {
+              throw "NativeAOT sample did not exercise the sync lifecycle ($expectedLine): $output"
+            }
+          }
+
+  validate-android-package:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ env.working-directory }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dotnet SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android workload and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet workload install android
+          sdkmanager --install "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v7
+        with:
+          name: nuget-packages
+          path: ${{ env.working-directory }}/artifacts/nuget-packages
+
+      - name: Build Android package consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_source=$(realpath artifacts/nuget-packages)
+          nuget_config=samples/MobilePackageConsumer/NuGet.config
+          cat > "$nuget_config" <<EOF
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="$package_source" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="local">
+                <package pattern="Turso.Data.Sqlite.Provider" />
+                <package pattern="Turso.Data.Common" />
+                <package pattern="Turso.Data.Native" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          EOF
+
+          project=samples/MobilePackageConsumer/Android/AndroidPackageConsumer.csproj
+          dotnet restore "$project" -r android-arm64 --configfile "$nuget_config"
+          dotnet build "$project" -c Release -f net10.0-android -r android-arm64 \
+            --no-restore -t:SignAndroidPackage -p:AndroidPackageFormats=apk
+
+      - name: Verify Android native asset and sync exports
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=$(find samples/MobilePackageConsumer/Android/bin/Release -name '*-Signed.apk' -print -quit)
+          if [ -z "$apk" ]; then
+            echo "Android package consumer did not produce a signed APK"
+            exit 1
+          fi
+
+          native_entry=lib/arm64-v8a/libturso_sdk_kit.so
+          if ! unzip -Z1 "$apk" | grep -Fxq "$native_entry"; then
+            echo "$apk does not contain $native_entry"
+            exit 1
+          fi
+
+          mkdir -p artifacts/mobile-android
+          unzip -p "$apk" "$native_entry" > artifacts/mobile-android/libturso_sdk_kit.so
+          readelf="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          for symbol in \
+            turso_sync_database_new \
+            turso_sync_database_create \
+            turso_sync_database_open \
+            turso_sync_database_connect \
+            turso_sync_database_stats \
+            turso_sync_database_checkpoint \
+            turso_sync_database_deinit
+          do
+            if ! "$readelf" --dyn-syms --wide artifacts/mobile-android/libturso_sdk_kit.so | grep -Eq "[[:space:]]${symbol}$"; then
+              echo "Android package asset does not export $symbol"
+              exit 1
+            fi
+          done
+
+  validate-ios-package:
+    needs: publish
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ env.working-directory }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dotnet SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install iOS workload
+        run: dotnet workload install ios
+
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v7
+        with:
+          name: nuget-packages
+          path: ${{ env.working-directory }}/artifacts/nuget-packages
+
+      - name: Build iOS package consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_source=$(realpath artifacts/nuget-packages)
+          nuget_config=samples/MobilePackageConsumer/NuGet.config
+          cat > "$nuget_config" <<EOF
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="$package_source" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="local">
+                <package pattern="Turso.Data.Sqlite.Provider" />
+                <package pattern="Turso.Data.Common" />
+                <package pattern="Turso.Data.Native" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          EOF
+
+          project=samples/MobilePackageConsumer/iOS/IosPackageConsumer.csproj
+          dotnet restore "$project" -r iossimulator-arm64 --configfile "$nuget_config"
+          dotnet build "$project" -c Release -f net10.0-ios -r iossimulator-arm64 --no-restore \
+            -p:CodesignKey= -p:CodesignProvision=
+
+      - name: Verify iOS native asset and sync exports
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(find samples/MobilePackageConsumer/iOS/bin/Release -name '*.app' -type d -print -quit)
+          if [ -z "$app" ]; then
+            echo "iOS package consumer did not produce an app bundle"
+            exit 1
+          fi
+
+          framework="$app/Frameworks/libturso_sdk_kit.framework/libturso_sdk_kit"
+          if [ ! -f "$framework" ]; then
+            echo "$app does not contain the legacy-named libturso_sdk_kit framework"
+            exit 1
+          fi
+
+          for symbol in \
+            turso_sync_database_new \
+            turso_sync_database_create \
+            turso_sync_database_open \
+            turso_sync_database_connect \
+            turso_sync_database_stats \
+            turso_sync_database_checkpoint \
+            turso_sync_database_deinit
+          do
+            if ! nm -gU "$framework" | grep -Eq "[[:space:]]_${symbol}$"; then
+              echo "iOS package asset does not export $symbol"
+              exit 1
+            fi
+          done
 
   publish-to-nuget:
-    needs: validate-nativeaot-static-package
+    needs: [validate-nativeaot-static-package, validate-android-package, validate-ios-package]
     if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip-publish && !inputs.dry-run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
