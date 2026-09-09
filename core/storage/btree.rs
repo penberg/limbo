@@ -6549,6 +6549,7 @@ impl CursorTrait for BTreeCursor {
         }
     }
 
+    #[inline(always)]
     fn next_row(&mut self) -> CursorStep {
         if self.null_flag {
             self.null_flag = false;
@@ -6611,14 +6612,15 @@ impl CursorTrait for BTreeCursor {
     }
 
     #[cfg_attr(debug_assertions, instrument(skip(self), level = Level::DEBUG))]
+    #[inline(always)]
     fn rowid(&mut self) -> IOResultOr<Option<i64>> {
         if self.needs_restore() {
-            return_if_io!(self.restore_context());
+            return rowid_general(self);
         }
         if self.get_null_flag() {
             return Ok(IOResult::Done(None));
         }
-        if self.has_record() {
+        return if self.has_record() {
             let page = self.stack.top_ref();
             let contents = page.get_contents();
             if contents.is_table() {
@@ -6630,11 +6632,22 @@ impl CursorTrait for BTreeCursor {
                 };
                 Ok(IOResult::Done(Some(cell.rowid)))
             } else {
-                let _ = return_if_io!(self.record());
-                Ok(IOResult::Done(self.get_index_rowid_from_record()))
+                index_rowid(self)
             }
         } else {
             Ok(IOResult::Done(None))
+        };
+
+        #[inline(never)]
+        fn rowid_general(cursor: &mut BTreeCursor) -> IOResultOr<Option<i64>> {
+            return_if_io!(cursor.restore_context());
+            cursor.rowid()
+        }
+
+        #[inline(never)]
+        fn index_rowid(cursor: &mut BTreeCursor) -> IOResultOr<Option<i64>> {
+            let _ = return_if_io!(cursor.record());
+            Ok(IOResult::Done(cursor.get_index_rowid_from_record()))
         }
     }
 
@@ -6710,6 +6723,7 @@ impl CursorTrait for BTreeCursor {
         Ok(IOResult::Done(self.reusable_immutable_record.as_ref()))
     }
 
+    #[inline(always)]
     fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
         if self.needs_restore() {
             return restore_record_payload(self);
@@ -8649,12 +8663,13 @@ impl PageStack {
         page
     }
 
+    /// The page at the top of the stack. Pages on the stack are pinned, and
+    /// every read of the page asserts that its buffer is present, so the
+    /// loaded flag is not tested here again.
     #[inline(always)]
     fn top_ref(&self) -> &PageRef {
         let current = self.current();
-        let page = self.stack[current].as_ref().unwrap();
-        turso_assert!(page.is_loaded_relaxed(), "page should be loaded");
-        page
+        self.stack[current].as_ref().unwrap()
     }
 
     /// Current page pointer being used

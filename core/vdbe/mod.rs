@@ -90,6 +90,7 @@ use execute::{
 use turso_parser::ast::{EqpFormat, ResolveType};
 
 use crate::io::TempFile;
+use crate::storage::sqlite3_ondisk::read_varint;
 use crate::vdbe::bloom_filter::BloomFilter;
 use crate::vdbe::rowset::RowSet;
 use explain::{
@@ -108,10 +109,7 @@ use std::{
 };
 use tracing::{instrument, Level};
 
-const MAX_CHECK_MASK: u64 = 255;
-// we use the check interval as bitmask so that we can efficiently calculate if the `vm_steps` counter
-// has reached a check interval (if `n` is a power of 2, `x & (n - 1)` checks for multiples of `n`)
-const _: () = assert!((MAX_CHECK_MASK + 1).is_power_of_two());
+const MAX_CHECK_INTERVAL: u64 = 256;
 
 type MvccCommitStateMachine = CommitStateMachine<MvccClock, DynAllocator>;
 
@@ -203,6 +201,36 @@ pub enum StepResult {
     Sleep {
         duration: std::time::Duration,
     },
+}
+
+/// This is an optimization over `Result<StepResult, Box<LimboError>>`.
+///
+/// See [crate::storage::btree::CursorStep] for the rationale behind this.
+#[repr(u8)]
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum ProgramStep {
+    Done,
+    IO,
+    Row,
+    Interrupt,
+    Busy,
+    Yield,
+    Error(Box<LimboError>),
+}
+
+impl From<ProgramStep> for Result<StepResult, Box<LimboError>> {
+    fn from(step: ProgramStep) -> Self {
+        match step {
+            ProgramStep::Done => Ok(StepResult::Done),
+            ProgramStep::IO => Ok(StepResult::IO),
+            ProgramStep::Row => Ok(StepResult::Row),
+            ProgramStep::Interrupt => Ok(StepResult::Interrupt),
+            ProgramStep::Busy => Ok(StepResult::Busy),
+            ProgramStep::Yield => Ok(StepResult::Yield),
+            ProgramStep::Error(err) => Err(err),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -397,6 +425,9 @@ impl Register {
         #[inline(never)]
         fn set_int_over_other(register: &mut Register, val: i64) {
             match register {
+                Register::Value(null @ Value::Null) => {
+                    std::mem::forget(std::mem::replace(null, Value::from_i64(val)));
+                }
                 Register::Value(other_value_kind) => {
                     *other_value_kind = Value::from_i64(val);
                 }
@@ -464,6 +495,9 @@ impl Register {
     pub fn set_null(&mut self) {
         match self {
             Register::Value(Value::Null) => {}
+            Register::Value(number @ Value::Numeric(_)) => {
+                std::mem::forget(std::mem::replace(number, Value::Null));
+            }
             Register::Value(other_value_kind) => {
                 *other_value_kind = Value::Null;
             }
@@ -829,9 +863,12 @@ pub struct SequenceInnerTxState {
 }
 
 pub struct ProgramState {
-    /// Interrupt/progress-check gate mask for normal_step; re-derived from
-    /// the progress handler's interval each time the gate fires.
-    check_mask: u64,
+    /// Instructions left before the next interrupt/progress check of
+    /// normal_step; reloaded with `check_interval` each time it reaches zero.
+    check_countdown: u64,
+    /// The interval the countdown was last reloaded with, re-derived from
+    /// the progress handler's interval each time the check runs.
+    check_interval: u64,
     pub io_completions: Option<IOCompletions>,
     pub pc: InsnReference,
     pub(crate) cursors: Vec<Option<Cursor>>,
@@ -945,6 +982,8 @@ pub struct ProgramState {
     pub(crate) subprogram_stmt_cache: HashMap<usize, Box<Statement>>,
     /// RowSet objects stored by register index
     rowsets: HashMap<usize, RowSet>,
+    // Cache of unused allocated Vecs
+    pub(crate) spare_agg_payloads: Vec<crate::alloc::Vec<Value>>,
     /// Bloom filters stored by cursor ID for probabilistic set membership testing
     /// Used to avoid unnecessary seeks on ephemeral indexes and hash tables
     pub(crate) bloom_filters: HashMap<usize, BloomFilter>,
@@ -999,7 +1038,8 @@ impl ProgramState {
         let cursor_seqs = vec![0i64; max_cursors];
         let registers = vec![Register::Value(Value::Null); max_registers].into_boxed_slice();
         Self {
-            check_mask: MAX_CHECK_MASK,
+            check_countdown: 1,
+            check_interval: MAX_CHECK_INTERVAL,
             io_completions: None,
             pc: 0,
             cursors,
@@ -1037,6 +1077,7 @@ impl ProgramState {
             fk_deferred_violations_when_stmt_started: AtomicIsize::new(0),
             fk_immediate_violations_during_stmt: AtomicIsize::new(0),
             rowsets: HashMap::default(),
+            spare_agg_payloads: Vec::new(),
             bloom_filters: HashMap::default(),
             hash_tables: HashMap::default(),
             ephemeral_temp_files: HashMap::default(),
@@ -1139,8 +1180,10 @@ impl ProgramState {
             {
                 cursor.close(context);
             }
-            if let Some(Cursor::BTree(cursor)) = cursor.take() {
-                cursor.recycle();
+            match cursor.take() {
+                Some(Cursor::BTree(cursor)) => crate::storage::btree::CursorTrait::recycle(cursor),
+                Some(Cursor::Dyn(cursor)) => cursor.recycle(),
+                _ => {}
             }
             *context = None;
         }
@@ -1910,16 +1953,11 @@ impl Program {
         query_mode: QueryMode,
         waker: Option<&Waker>,
     ) -> Result<StepResult, Box<LimboError>> {
-        state.execution_state = ProgramExecutionState::Running;
-        let result = if let QueryMode::Normal = query_mode {
-            self.normal_step(state, pager, waker)
-        } else {
-            self.explain_step_for_mode(state, pager, query_mode)
-        };
-        // Rows are the common result and leave the execution state untouched.
-        if let Ok(StepResult::Row) = &result {
-            return result;
+        if let QueryMode::Normal = query_mode {
+            return self.normal_step(state, pager, waker).into();
         }
+        state.execution_state = ProgramExecutionState::Running;
+        let result = self.explain_step_for_mode(state, pager, query_mode);
         match &result {
             Ok(StepResult::Done) => {
                 state.execution_state = ProgramExecutionState::Done;
@@ -2180,23 +2218,50 @@ impl Program {
         state.pre_op_registers = Some(state.registers.clone());
     }
 
+    /// Step in [QueryMode::Normal]
     #[inline(always)]
-    fn normal_step(
+    pub(crate) fn normal_step(
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         waker: Option<&Waker>,
-    ) -> Result<StepResult, Box<LimboError>> {
+    ) -> ProgramStep {
+        state.execution_state = ProgramExecutionState::Running;
         let enable_tracing = tracing::enabled!(tracing::Level::TRACE);
         let vdbe_trace = self.connection.get_vdbe_trace();
-
-        return if enable_tracing || vdbe_trace {
-            dispatch_loop::<true>(self, state, pager, waker, enable_tracing, vdbe_trace)
+        let result = if enable_tracing || vdbe_trace {
+            dispatch_loop_traced(self, state, pager, waker, enable_tracing, vdbe_trace)
         } else {
             dispatch_loop::<false>(self, state, pager, waker, false, false)
         };
+        match &result {
+            ProgramStep::Row => {}
+            ProgramStep::Done => {
+                state.execution_state = ProgramExecutionState::Done;
+            }
+            ProgramStep::Interrupt => {
+                state.execution_state = ProgramExecutionState::Interrupted;
+            }
+            ProgramStep::Error(_) => {
+                state.execution_state = ProgramExecutionState::Failed;
+            }
+            _ => {}
+        }
+        return result;
 
         #[inline(never)]
+        fn dispatch_loop_traced(
+            program: &Program,
+            state: &mut ProgramState,
+            pager: &Arc<Pager>,
+            waker: Option<&Waker>,
+            enable_tracing: bool,
+            vdbe_trace: bool,
+        ) -> ProgramStep {
+            dispatch_loop::<true>(program, state, pager, waker, enable_tracing, vdbe_trace)
+        }
+
+        #[inline(always)]
         fn dispatch_loop<const TRACE: bool>(
             program: &Program,
             state: &mut ProgramState,
@@ -2204,8 +2269,8 @@ impl Program {
             waker: Option<&Waker>,
             enable_tracing: bool,
             vdbe_trace: bool,
-        ) -> Result<StepResult, Box<LimboError>> {
-            // Reborrow the instruction list once: reloading it through `self`
+        ) -> ProgramStep {
+            // Reborrow the instruction list once: reloading it through `program`
             // every iteration defeats LLVM's hoisting because the opcode call
             // below is opaque to it.
             let insns = program.insns.as_slice();
@@ -2218,20 +2283,21 @@ impl Program {
             // instructions without re-inspecting the completion slot every time.
             'io_check: loop {
                 if state.io_completions.is_some() {
-                    if let Some(result) = program.finish_pending_io(state, pager, waker)? {
-                        return Ok(result);
+                    if let Some(result) = program.finish_pending_io(state, pager, waker) {
+                        return result;
                     }
                 }
                 if state.pending_fail_prepare_error.is_some() {
-                    match program.prepare_pending_fail(state, pager, waker)? {
-                        Some(result) => return Ok(result),
+                    match program.prepare_pending_fail(state, pager, waker) {
+                        Some(result) => return result,
                         None => continue 'io_check,
                     }
                 }
                 loop {
-                    if state.metrics.vm_steps & state.check_mask == 0 {
-                        if let Some(result) = program.periodic_checks(state, pager)? {
-                            return Ok(result);
+                    state.check_countdown = state.check_countdown.wrapping_sub(1);
+                    if state.check_countdown == 0 {
+                        if let Some(result) = program.periodic_checks(state, pager) {
+                            return result;
                         }
                     }
 
@@ -2240,7 +2306,9 @@ impl Program {
                         program.trace_step(state, insn, enable_tracing, vdbe_trace);
                     }
 
+                    // Always increment VM steps for every loop iteration
                     state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
+
                     // The opcodes that run once per row of a scan are matched here
                     // so LLVM inlines them into the loop, and each one tests its
                     // own result right after its body, where the result is a
@@ -2258,7 +2326,7 @@ impl Program {
                                 Ok(InsnFunctionStepResult::Row) => {
                                     state.metrics.insn_executed =
                                         state.metrics.insn_executed.wrapping_add(1);
-                                    return Ok(StepResult::Row);
+                                    return ProgramStep::Row;
                                 }
                                 other => other,
                             }
@@ -2271,6 +2339,18 @@ impl Program {
                         Insn::ColumnRange { .. } => step_inline!(execute::op_column_range),
                         Insn::RowId { .. } => step_inline!(execute::op_row_id),
                         Insn::Prev { .. } => step_inline!(execute::op_prev),
+                        Insn::Eq { .. } => step_inline!(execute::op_eq),
+                        Insn::Ne { .. } => step_inline!(execute::op_ne),
+                        Insn::Lt { .. } => step_inline!(execute::op_lt),
+                        Insn::Le { .. } => step_inline!(execute::op_le),
+                        Insn::Gt { .. } => step_inline!(execute::op_gt),
+                        Insn::Ge { .. } => step_inline!(execute::op_ge),
+                        Insn::If { .. } => step_inline!(execute::op_if),
+                        Insn::IfNot { .. } => step_inline!(execute::op_if_not),
+                        Insn::Goto { .. } => step_inline!(execute::op_goto),
+                        Insn::Gosub { .. } => step_inline!(execute::op_gosub),
+                        Insn::Return { .. } => step_inline!(execute::op_return),
+                        Insn::Integer { .. } => step_inline!(execute::op_integer),
                         _ => insn.to_function()(program, state, insn, pager),
                     };
                     // The two outcomes of every row are tested here, one compare
@@ -2283,33 +2363,33 @@ impl Program {
                     if let Ok(InsnFunctionStepResult::Row) = result {
                         // Instruction completed (ResultRow already incremented PC)
                         state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                        return Ok(StepResult::Row);
+                        return ProgramStep::Row;
                     }
-                    match dispatch(program, state, pager, waker, result)? {
-                        Some(result) => return Ok(result),
+                    match dispatch_cold(program, state, pager, waker, result) {
+                        Some(result) => return result,
                         None => continue 'io_check,
                     }
                 }
             }
 
             #[inline(never)]
-            fn dispatch(
+            fn dispatch_cold(
                 program: &Program,
                 state: &mut ProgramState,
                 pager: &Arc<Pager>,
                 waker: Option<&Waker>,
                 result: execute::InsnResult,
-            ) -> Result<Option<StepResult>, Box<LimboError>> {
+            ) -> Option<ProgramStep> {
                 match result {
                     Ok(InsnFunctionStepResult::Done) => {
                         // Instruction completed execution
                         state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                         state.auto_txn_cleanup = TxnCleanup::None;
-                        Ok(Some(StepResult::Done))
+                        Some(ProgramStep::Done)
                     }
                     Ok(InsnFunctionStepResult::IO) => {
                         let io = state.take_suspended_io();
-                        Ok(program.park_on_io(state, io, waker))
+                        program.park_on_io(state, io, waker)
                     }
                     Err(boxed_err) => program.fail_step(state, pager, *boxed_err),
                     Ok(InsnFunctionStepResult::Step) | Ok(InsnFunctionStepResult::Row) => {
@@ -2329,14 +2409,14 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         waker: Option<&Waker>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         let io = state
             .io_completions
             .as_ref()
             .expect("the caller checked the completion slot");
         if !io.finished() {
             io.set_waker(waker);
-            return Ok(Some(StepResult::IO));
+            return Some(ProgramStep::IO);
         }
         if let Some(err) = io.get_error() {
             if pager.is_checkpointing() {
@@ -2353,16 +2433,16 @@ impl Program {
                     );
                 }
                 pager.cleanup_after_checkpoint_failure();
-                return Err(checkpoint_err.into());
+                return Some(ProgramStep::Error(checkpoint_err.into()));
             }
             let err = err.into();
             if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
                 tracing::error!("Abort failed during error handling: {abort_err}");
             }
-            return Err(err.into());
+            return Some(ProgramStep::Error(err.into()));
         }
         state.io_completions = None;
-        Ok(None)
+        None
     }
 
     /// A trigger returned FAIL before the parent program reached Halt. FAIL
@@ -2377,7 +2457,7 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         waker: Option<&Waker>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         let fail_error = state
             .pending_fail_prepare_error
             .take()
@@ -2387,20 +2467,20 @@ impl Program {
                 if let Err(abort_err) = self.abort(pager, Some(&fail_error), state, true) {
                     tracing::error!("Abort failed after preparing FAIL index methods: {abort_err}");
                 }
-                Err(fail_error.into())
+                Some(ProgramStep::Error(fail_error.into()))
             }
             Ok(IOResult::IO(io)) => {
                 state.pending_fail_prepare_error = Some(fail_error);
                 io.set_waker(waker);
                 if io.is_explicit_yield() {
-                    return Ok(Some(StepResult::Yield));
+                    return Some(ProgramStep::Yield);
                 }
                 let finished = io.finished();
                 state.io_completions = Some(io);
                 if !finished {
-                    return Ok(Some(StepResult::IO));
+                    return Some(ProgramStep::IO);
                 }
-                Ok(None)
+                None
             }
             Err(prepare_error) => {
                 // FAIL may keep earlier base-table rows only when every
@@ -2417,25 +2497,22 @@ impl Program {
                          {abort_err}"
                     );
                 }
-                Err(prepare_error)
+                Some(ProgramStep::Error(prepare_error))
             }
         }
     }
 
     #[inline(never)]
-    fn periodic_checks(
-        &self,
-        state: &mut ProgramState,
-        pager: &Arc<Pager>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    fn periodic_checks(&self, state: &mut ProgramState, pager: &Arc<Pager>) -> Option<ProgramStep> {
         let progress_ops = self.connection.progress_ops();
-        state.check_mask = if progress_ops == 0 || progress_ops >= MAX_CHECK_MASK {
-            MAX_CHECK_MASK
+        state.check_interval = if progress_ops == 0 || progress_ops >= MAX_CHECK_INTERVAL {
+            MAX_CHECK_INTERVAL
         } else {
-            progress_ops.next_power_of_two() - 1
+            progress_ops
         };
+        state.check_countdown = state.check_interval;
         if self.connection.is_closed() {
-            return Err(self.closed_during_step(pager));
+            return Some(ProgramStep::Error(self.closed_during_step(pager)));
         }
         // With no interrupt requested, no deadline and no progress handler
         // there is nothing to look at; the full test stays out of this
@@ -2445,7 +2522,7 @@ impl Program {
             && state.query_deadline.is_none()
             && progress_ops == 0;
         if quiet {
-            return Ok(None);
+            return None;
         }
         self.periodic_interrupt_checks(state, pager)
     }
@@ -2455,12 +2532,12 @@ impl Program {
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
-        let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_mask + 1);
+    ) -> Option<ProgramStep> {
+        let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_interval);
         if self.maybe_request_interrupt(state, pager.io.as_ref(), prev_steps) {
             return self.interrupted_during_step(state, pager);
         }
-        Ok(None)
+        None
     }
 
     #[cold]
@@ -2479,9 +2556,11 @@ impl Program {
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
-        self.abort(pager, None, state, true)?;
-        Ok(Some(StepResult::Interrupt))
+    ) -> Option<ProgramStep> {
+        Some(match self.abort(pager, None, state, true) {
+            Ok(()) => ProgramStep::Interrupt,
+            Err(err) => ProgramStep::Error(err.into()),
+        })
     }
 
     #[inline(never)]
@@ -2509,7 +2588,7 @@ impl Program {
         state: &mut ProgramState,
         io: IOCompletions,
         waker: Option<&Waker>,
-    ) -> Option<StepResult> {
+    ) -> Option<ProgramStep> {
         io.set_waker(waker);
         if io.is_explicit_yield() {
             // Yield: return control to the cooperative scheduler so
@@ -2517,12 +2596,12 @@ impl Program {
             // contended lock). Don't store in io_completions —
             // yields aren't pending I/O, so the instruction will
             // simply re-execute on the next step.
-            return Some(StepResult::Yield);
+            return Some(ProgramStep::Yield);
         }
         let finished = io.finished();
         state.io_completions = Some(io);
         if !finished {
-            return Some(StepResult::IO);
+            return Some(ProgramStep::IO);
         }
         None
     }
@@ -2537,9 +2616,9 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         err: LimboError,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         match err {
-            LimboError::Busy => Ok(Some(StepResult::Busy)),
+            LimboError::Busy => Some(ProgramStep::Busy),
             LimboError::BusySnapshot
                 if self.connection.transaction_state.get() == TransactionState::None =>
             {
@@ -2547,20 +2626,20 @@ impl Program {
                 // because the snapshot will continue to be stale no matter how many times we retry.
                 // However, for auto-commits or BEGIN IMMEDIATE, failing to promote to write transaction means it was rolled
                 // back, so auto-retrying can be useful.
-                Ok(Some(StepResult::Busy))
+                Some(ProgramStep::Busy)
             }
             err if (matches!(err, LimboError::Constraint(_))
                 && self.resolve_type == ResolveType::Fail)
                 || matches!(err, LimboError::Raise(ResolveType::Fail, _)) =>
             {
                 state.pending_fail_prepare_error = Some(err);
-                Ok(None)
+                None
             }
             err => {
                 if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
                     tracing::error!("Abort failed during error handling: {abort_err}");
                 }
-                Err(err.into())
+                Some(ProgramStep::Error(err.into()))
             }
         }
     }
@@ -3739,238 +3818,283 @@ pub trait ValueIteratorExt {
 impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
     #[inline(always)]
     fn nth_into_register(&mut self, n: usize, dest: &mut Register) -> Option<Result<()>> {
-        use crate::storage::sqlite3_ondisk::read_varint;
-        use crate::types::{get_serial_type_size, Extendable, Text};
-
         let mut header = self.header_section_ref();
         let mut data = self.data_section_ref();
 
-        // Skip n elements
-        let mut data_sum = 0;
-        for _ in 0..n {
-            if header.is_empty() {
-                return None;
-            }
-
-            let (serial_type, bytes_read) = match read_varint(header) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            header = &header[bytes_read..];
-
-            data_sum += match get_serial_type_size(serial_type) {
-                Ok(size) => size,
-                Err(e) => return Some(Err(e)),
-            };
+        if let Err(e) = skip_serial_types(&mut header, &mut data, n) {
+            return Some(Err(e));
         }
-
-        if data_sum > data.len() {
-            return Some(Err(LimboError::Corrupt(
-                "Data section too small for indicated serial type size".into(),
-            )));
-        }
-        data = &data[data_sum..];
-
-        // Read the serial type for the target element
         if header.is_empty() {
             return None;
         }
 
-        let (serial_type, bytes_read) = match read_varint(header) {
+        let serial_type = match read_serial_type(&mut header) {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
-
         // Update iterator state
-        self.set_header_section(&header[bytes_read..]);
-
-        // Decode directly into register based on serial type
-        match serial_type {
-            // NULL
-            0 => {
-                self.set_data_section(data);
-                dest.set_null();
-            }
-            // I8
-            1 => {
-                if unlikely(data.is_empty()) {
-                    return Some(Err(LimboError::Corrupt("Invalid 1-byte int".into())));
-                }
-                self.set_data_section(&data[1..]);
-                dest.set_int(data[0] as i8 as i64);
-            }
-            // I16
-            2 => {
-                if unlikely(data.len() < 2) {
-                    return Some(Err(LimboError::Corrupt("Invalid 2-byte int".into())));
-                }
-                self.set_data_section(&data[2..]);
-                dest.set_int(i16::from_be_bytes([data[0], data[1]]) as i64);
-            }
-            // I24
-            3 => {
-                if unlikely(data.len() < 3) {
-                    return Some(Err(LimboError::Corrupt("Invalid 3-byte int".into())));
-                }
-                self.set_data_section(&data[3..]);
-                let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
-                dest.set_int(
-                    i32::from_be_bytes([sign_extension, data[0], data[1], data[2]]) as i64,
-                );
-            }
-            // I32
-            4 => {
-                if unlikely(data.len() < 4) {
-                    return Some(Err(LimboError::Corrupt("Invalid 4-byte int".into())));
-                }
-                self.set_data_section(&data[4..]);
-                dest.set_int(i32::from_be_bytes([data[0], data[1], data[2], data[3]]) as i64);
-            }
-            // I48
-            5 => {
-                if unlikely(data.len() < 6) {
-                    return Some(Err(LimboError::Corrupt("Invalid 6-byte int".into())));
-                }
-                self.set_data_section(&data[6..]);
-                let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
-                dest.set_int(i64::from_be_bytes([
-                    sign_extension,
-                    sign_extension,
-                    data[0],
-                    data[1],
-                    data[2],
-                    data[3],
-                    data[4],
-                    data[5],
-                ]));
-            }
-            // I64
-            6 => {
-                if unlikely(data.len() < 8) {
-                    return Some(Err(LimboError::Corrupt("Invalid 8-byte int".into())));
-                }
-                self.set_data_section(&data[8..]);
-                dest.set_int(i64::from_be_bytes([
-                    data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                ]));
-            }
-            // F64
-            7 => {
-                if unlikely(data.len() < 8) {
-                    return Some(Err(LimboError::Corrupt("Invalid 8-byte float".into())));
-                }
-                self.set_data_section(&data[8..]);
-                let val = f64::from_be_bytes([
-                    data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                ]);
-                if let Some(nn) = NonNan::new(val) {
-                    dest.set_float(nn);
-                } else {
-                    dest.set_null();
-                }
-            }
-            // CONST_INT0
-            8 => {
-                self.set_data_section(data);
-                dest.set_int(0);
-            }
-            // CONST_INT1
-            9 => {
-                self.set_data_section(data);
-                dest.set_int(1);
-            }
-            // Reserved
-            10 | 11 => {
-                mark_unlikely();
-                return Some(Err(LimboError::Corrupt(format!(
-                    "Reserved serial type: {serial_type}"
-                ))));
-            }
-            // BLOB (n >= 12 && n & 1 == 0)
-            n if n >= 12 && n & 1 == 0 => crate::with_value_blob_allocation_site!(RecordDecode, {
-                let content_size = ((n - 12) / 2) as usize;
-                if unlikely(data.len() < content_size) {
-                    return Some(Err(LimboError::Corrupt("Invalid Blob value".into())));
-                }
-                self.set_data_section(&data[content_size..]);
-                let blob_data = &data[..content_size];
-                match dest {
-                    Register::Value(Value::Blob(existing_blob)) => {
-                        if let Err(err) = existing_blob.do_extend(&blob_data) {
-                            return Some(Err(err));
-                        }
-                    }
-                    _ => {
-                        let blob = match crate::types::value_blob_from_slice(blob_data) {
-                            Ok(blob) => blob,
-                            Err(err) => return Some(Err(err.into())),
-                        };
-                        if let Err(err) = dest.set_blob(blob) {
-                            return Some(Err(err));
-                        }
-                    }
-                }
-            }),
-            // TEXT (n >= 13 && n & 1 == 1)
-            n if n >= 13 && n & 1 == 1 => {
-                let content_size = ((n - 13) / 2) as usize;
-                if unlikely(data.len() < content_size) {
-                    return Some(Err(LimboError::Corrupt("Invalid Text value".into())));
-                }
-                self.set_data_section(&data[content_size..]);
-                let text_data = &data[..content_size];
-                let Some(text_str) = crate::types::validate_utf8(text_data) else {
-                    mark_unlikely();
-                    return Some(Err(LimboError::Corrupt(
-                        "TEXT value contains invalid UTF-8".into(),
-                    )));
-                };
-                match dest {
-                    Register::Value(Value::Text(existing_text)) => {
-                        if let Err(err) = existing_text.do_extend(&text_str) {
-                            return Some(Err(err));
-                        }
-                    }
-                    _ => {
-                        if let Err(err) = dest.set_text(Text::new(text_str.to_string())) {
-                            return Some(Err(err));
-                        }
-                    }
-                }
-            }
-            _ => {
-                mark_unlikely();
-                return Some(Err(LimboError::Corrupt(format!(
-                    "Invalid serial type: {serial_type}"
-                ))));
-            }
-        }
-
-        Some(Ok(()))
+        self.set_header_section(header);
+        let result = decode_serial_type_into_register(serial_type, &mut data, dest);
+        self.set_data_section(data);
+        Some(result)
     }
 
+    /// The header and data positions live in locals for the whole range and
+    /// go back into the iterator once at the end: written back per column,
+    /// they cost four stores for every value of every row.
     #[inline]
     fn decode_into_registers_after(
         &mut self,
         skip: usize,
         dests: &mut [Register],
     ) -> Result<usize> {
-        for (i, dest) in dests.iter_mut().enumerate() {
-            let n = if i == 0 { skip } else { 0 };
-            match self.nth_into_register(n, dest) {
-                Some(Ok(())) => {}
-                Some(Err(e)) => return Err(e),
-                None => return Ok(i),
+        let mut header = self.header_section_ref();
+        let mut data = self.data_section_ref();
+        skip_serial_types(&mut header, &mut data, skip)?;
+        let mut decoded = 0;
+        for dest in dests.iter_mut() {
+            if header.is_empty() {
+                break;
             }
+            let serial_type = read_serial_type(&mut header)?;
+            decode_serial_type_into_register(serial_type, &mut data, dest)?;
+            decoded += 1;
         }
-        Ok(dests.len())
+        self.set_header_section(header);
+        self.set_data_section(data);
+        Ok(decoded)
     }
+}
+
+/// Advance `header` and `data` past `n` serial types, stopping early if the header is shorter than
+/// expected.
+///
+/// If the header is short, returns `Ok(())` with an empty `header`.
+#[inline(always)]
+fn skip_serial_types(header: &mut &[u8], data: &mut &[u8], n: usize) -> Result<()> {
+    use crate::types::get_serial_type_size;
+    let mut data_sum = 0;
+    for _ in 0..n {
+        if header.is_empty() {
+            break;
+        }
+        let serial_type = read_serial_type(header)?;
+        data_sum += get_serial_type_size(serial_type)?;
+    }
+    if data_sum > data.len() {
+        return Err(LimboError::Corrupt(
+            "Data section too small for indicated serial type size".into(),
+        ));
+    }
+    *data = &data[data_sum..];
+    Ok(())
+}
+
+/// Reads the serial type at the front of `header` and moves past it.
+#[inline(always)]
+fn read_serial_type(header: &mut &[u8]) -> Result<u64> {
+    let (serial_type, bytes_read) = read_varint(header)?;
+    *header = &header[bytes_read..];
+    Ok(serial_type)
+}
+
+/// Decodes the value of `serial_type` at the front of `data` into `dest`
+/// and moves `data` past it.
+#[inline(always)]
+fn decode_serial_type_into_register(
+    serial_type: u64,
+    data: &mut &[u8],
+    dest: &mut Register,
+) -> Result<()> {
+    use crate::types::{Extendable, Text};
+    match serial_type {
+        // NULL
+        0 => {
+            dest.set_null();
+        }
+        // I8
+        1 => {
+            if unlikely(data.is_empty()) {
+                return Err(LimboError::Corrupt("Invalid 1-byte int".into()));
+            }
+            dest.set_int(data[0] as i8 as i64);
+            *data = &data[1..];
+        }
+        // I16
+        2 => {
+            if unlikely(data.len() < 2) {
+                return Err(LimboError::Corrupt("Invalid 2-byte int".into()));
+            }
+            dest.set_int(i16::from_be_bytes([data[0], data[1]]) as i64);
+            *data = &data[2..];
+        }
+        // I24
+        3 => {
+            if unlikely(data.len() < 3) {
+                return Err(LimboError::Corrupt("Invalid 3-byte int".into()));
+            }
+            let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
+            dest.set_int(i32::from_be_bytes([sign_extension, data[0], data[1], data[2]]) as i64);
+            *data = &data[3..];
+        }
+        // I32
+        4 => {
+            if unlikely(data.len() < 4) {
+                return Err(LimboError::Corrupt("Invalid 4-byte int".into()));
+            }
+            dest.set_int(i32::from_be_bytes([data[0], data[1], data[2], data[3]]) as i64);
+            *data = &data[4..];
+        }
+        // I48
+        5 => {
+            if unlikely(data.len() < 6) {
+                return Err(LimboError::Corrupt("Invalid 6-byte int".into()));
+            }
+            let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
+            dest.set_int(i64::from_be_bytes([
+                sign_extension,
+                sign_extension,
+                data[0],
+                data[1],
+                data[2],
+                data[3],
+                data[4],
+                data[5],
+            ]));
+            *data = &data[6..];
+        }
+        // I64
+        6 => {
+            if unlikely(data.len() < 8) {
+                return Err(LimboError::Corrupt("Invalid 8-byte int".into()));
+            }
+            dest.set_int(i64::from_be_bytes([
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ]));
+            *data = &data[8..];
+        }
+        // F64
+        7 => {
+            if unlikely(data.len() < 8) {
+                return Err(LimboError::Corrupt("Invalid 8-byte float".into()));
+            }
+            let val = f64::from_be_bytes([
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ]);
+            if let Some(nn) = NonNan::new(val) {
+                dest.set_float(nn);
+            } else {
+                dest.set_null();
+            }
+            *data = &data[8..];
+        }
+        // CONST_INT0
+        8 => {
+            dest.set_int(0);
+        }
+        // CONST_INT1
+        9 => {
+            dest.set_int(1);
+        }
+        // Reserved
+        10 | 11 => {
+            mark_unlikely();
+            return Err(LimboError::Corrupt(format!(
+                "Reserved serial type: {serial_type}"
+            )));
+        }
+        // BLOB (n >= 12 && n & 1 == 0)
+        n if n >= 12 && n & 1 == 0 => crate::with_value_blob_allocation_site!(RecordDecode, {
+            let content_size = ((n - 12) / 2) as usize;
+            if unlikely(data.len() < content_size) {
+                return Err(LimboError::Corrupt("Invalid Blob value".into()));
+            }
+            let blob_data = &data[..content_size];
+            match dest {
+                Register::Value(Value::Blob(existing_blob)) => {
+                    existing_blob.do_extend(&blob_data)?;
+                }
+                _ => {
+                    let blob = crate::types::value_blob_from_slice(blob_data)?;
+                    dest.set_blob(blob)?;
+                }
+            }
+            *data = &data[content_size..];
+        }),
+        // TEXT (n >= 13 && n & 1 == 1)
+        n if n >= 13 && n & 1 == 1 => {
+            let content_size = ((n - 13) / 2) as usize;
+            if unlikely(data.len() < content_size) {
+                return Err(LimboError::Corrupt("Invalid Text value".into()));
+            }
+            let text_data = &data[..content_size];
+            let Some(text_str) = crate::types::validate_utf8(text_data) else {
+                mark_unlikely();
+                return Err(LimboError::Corrupt(
+                    "TEXT value contains invalid UTF-8".into(),
+                ));
+            };
+            match dest {
+                Register::Value(Value::Text(existing_text)) => {
+                    existing_text.do_extend(&text_str)?;
+                }
+                _ => {
+                    dest.set_text(Text::new(text_str.to_string()))?;
+                }
+            }
+            *data = &data[content_size..];
+        }
+        _ => {
+            mark_unlikely();
+            return Err(LimboError::Corrupt(format!(
+                "Invalid serial type: {serial_type}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn program_step_conversion_preserves_error_allocation() {
+        let err = Box::new(LimboError::InternalError("test error".into()));
+        let original = std::ptr::from_ref(err.as_ref());
+        let result: Result<StepResult, Box<LimboError>> = ProgramStep::Error(err).into();
+        let returned = result.unwrap_err();
+        assert_eq!(std::ptr::from_ref(returned.as_ref()), original);
+        assert!(matches!(*returned, LimboError::InternalError(ref msg) if msg == "test error"));
+    }
+
+    #[test]
+    fn normal_step_preserves_execution_state_with_and_without_tracing() {
+        for trace in [false, true] {
+            let io = Arc::new(crate::MemoryIO::new());
+            let db =
+                crate::Database::open_file(io, ":memory:", Arc::new(crate::SqliteDialect)).unwrap();
+            let conn = db.connect().unwrap();
+            conn.set_vdbe_trace(trace);
+            let mut stmt = conn.prepare("SELECT 1 UNION ALL SELECT 2").unwrap();
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Init);
+            assert!(matches!(stmt.step().unwrap(), StepResult::Row));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Running);
+            assert!(matches!(stmt.step().unwrap(), StepResult::Row));
+            assert!(matches!(stmt.step().unwrap(), StepResult::Done));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Done);
+
+            let mut stmt = conn.prepare("SELECT abs(-9223372036854775808)").unwrap();
+            assert!(matches!(stmt.step(), Err(LimboError::IntegerOverflow)));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Failed);
+
+            conn.set_progress_handler(1, Some(Box::new(|| true)));
+            let mut stmt = conn.prepare("WITH RECURSIVE t(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM t WHERE x<1000) SELECT sum(x) FROM t").unwrap();
+            assert!(matches!(stmt.step().unwrap(), StepResult::Interrupt));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Interrupted);
+        }
+    }
 
     #[test]
     fn active_opcode_helpers_initialize_defaults() {

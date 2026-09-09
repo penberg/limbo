@@ -13,7 +13,7 @@ use crate::numeric::nonnan::NonNan;
 use crate::numeric::Numeric;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Index;
-use crate::storage::btree::CursorTrait;
+use crate::storage::btree::{BTreeCursor, CursorTrait};
 use crate::storage::sqlite3_ondisk::{
     read_integer, read_value, read_varint, varint_len, write_varint,
 };
@@ -121,7 +121,7 @@ impl Text {
 ///   4 KB:     ~25% slower without the cutoff; equal with it
 ///   multibyte fallback: pays the wasted OR scan (~15% at 64 B)
 ///   length branch: ~+0.1ns/call, visible only on 1-2 B values
-#[inline]
+#[inline(always)]
 pub(crate) fn validate_utf8(data: &[u8]) -> Option<&str> {
     const ASCII_SCAN_CUTOFF: usize = 512;
     if data.len() <= ASCII_SCAN_CUTOFF && is_ascii(data) {
@@ -3305,7 +3305,11 @@ impl Record {
 }
 
 pub enum Cursor {
-    BTree(Box<dyn CursorTrait>),
+    /// A b-tree cursor
+    BTree(Box<BTreeCursor>),
+    /// A cursor behind a trait object: currently, either the MVCC cursor or test doubles.
+    /// TODO it wouldn't be too hard to get rid of `dyn CursorTrait` everywhere.
+    Dyn(Box<dyn CursorTrait>),
     IndexMethod(Box<dyn IndexMethodCursor>),
     Pseudo(Box<PseudoCursor>),
     Sorter(Box<Sorter>),
@@ -3320,6 +3324,7 @@ impl Debug for Cursor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BTree(..) => f.debug_tuple("BTree").finish(),
+            Self::Dyn(..) => f.debug_tuple("BTreeDyn").finish(),
             Self::IndexMethod(..) => f.debug_tuple("IndexMethod").finish(),
             Self::Pseudo(..) => f.debug_tuple("Pseudo").finish(),
             Self::Sorter(..) => f.debug_tuple("Sorter").finish(),
@@ -3331,10 +3336,15 @@ impl Debug for Cursor {
 }
 
 impl Cursor {
-    pub fn new_btree(cursor: Box<dyn CursorTrait>) -> Self {
+    pub fn new_btree(cursor: Box<BTreeCursor>) -> Self {
         // Matches sqlite3BtreeCursor adding to BtShared.pCursor (btree.c:4699).
         cursor.register_with_pager();
         Self::BTree(cursor)
+    }
+
+    pub fn new_btree_dyn(cursor: Box<dyn CursorTrait>) -> Self {
+        cursor.register_with_pager();
+        Self::Dyn(cursor)
     }
 
     pub fn new_pseudo(cursor: PseudoCursor) -> Self {
@@ -3354,6 +3364,7 @@ impl Cursor {
     pub fn as_btree_mut(&mut self) -> &mut dyn CursorTrait {
         match self {
             Self::BTree(cursor) => cursor.as_mut(),
+            Self::Dyn(cursor) => cursor.as_mut(),
             _ => {
                 mark_unlikely();
                 panic!("Cursor is not a btree cursor");
@@ -3417,6 +3428,7 @@ impl Cursor {
     pub fn set_null_flag(&mut self, flag: bool) {
         match self {
             Self::BTree(cursor) => cursor.set_null_flag(flag),
+            Self::Dyn(cursor) => cursor.set_null_flag(flag),
             Self::Virtual(cursor) => cursor.set_null_flag(flag),
             // A pseudo cursor always decodes columns from its content
             // register. SQLite's OP_NullRow likewise leaves pseudo-cursor

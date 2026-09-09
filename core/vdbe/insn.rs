@@ -379,13 +379,160 @@ pub struct HashDistinctData {
     pub target_pc: BranchOffset,
 }
 
-// There are currently 190 opcodes in sqlite
+// The opcodes the dispatch loop matches directly come first.
 #[repr(u8)]
 #[derive(Description, Debug, Clone, EnumDiscriminants)]
 #[strum_discriminants(vis(pub(crate)))]
 #[strum_discriminants(derive(VariantArray, EnumCount, FromRepr))]
 #[strum_discriminants(name(InsnVariants))]
 pub enum Insn {
+    /// Advance the cursor to the next row.
+    Next {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
+        /// True when this step is part of a full table scan (a loop over the
+        /// whole table with no index or rowid constraint). Only these steps
+        /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
+        /// which tags the opcode with P5 at codegen time.
+        fullscan: bool,
+        is_index: bool,
+    },
+
+    /// Emit a row of results.
+    ResultRow {
+        start_reg: usize, // P1
+        count: usize,     // P2
+    },
+
+    /// Read a column from the current row of the cursor.
+    Column {
+        cursor_id: CursorID,
+        column: usize,
+        dest: usize,
+        default: Option<Value>,
+    },
+
+    /// Read `defaults.len()` consecutive columns starting at `start_column` from the current row
+    /// of the cursor into consecutive registers starting at `dest`.
+    ColumnRange {
+        cursor_id: CursorID,
+        start_column: usize,
+        dest: usize,
+        // this can't be a SmallVec because it would make the enum too large.
+        defaults: Vec<Option<Value>>,
+    },
+
+    /// Read the rowid of the current row.
+    RowId {
+        cursor_id: CursorID,
+        dest: usize,
+    },
+
+    Prev {
+        cursor_id: CursorID,
+        pc_if_prev: BranchOffset,
+        /// See [Insn::Next::fullscan].
+        fullscan: bool,
+        /// See [Insn::Next::is_index].
+        is_index: bool,
+    },
+    /// Compare two registers and jump to the given PC if they are equal.
+    Eq {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
+        /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
+        /// <JUMP TO NEXT ROW IF id != NULL>
+        /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
+        /// This flag indicates that if either is null we should still jump.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if they are not equal.
+    Ne {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
+    Lt {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    Le {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
+    Gt {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
+    Ge {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
+    If {
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
+        jump_if_null: bool,
+    },
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
+    IfNot {
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
+        jump_if_null: bool,
+    },
+    /// Branch to the given PC.
+    Goto {
+        target_pc: BranchOffset,
+    },
+    /// Stores the current program counter into register 'return_reg' then jumps to address target_pc.
+    Gosub {
+        target_pc: BranchOffset,
+        return_reg: usize,
+    },
+    /// Returns to the program counter stored in register 'return_reg'.
+    /// If can_fallthrough is true, fall through to the next instruction
+    /// if return_reg does not contain an integer value. Otherwise raise an error.
+    Return {
+        return_reg: usize,
+        can_fallthrough: bool,
+    },
+    /// Write an integer value into a register.
+    Integer {
+        value: i64,
+        dest: usize,
+    },
+
     /// Initialize the program state and jump to the given PC.
     Init {
         target_pc: BranchOffset,
@@ -498,21 +645,6 @@ pub enum Insn {
         reg: usize,
         target_pc: BranchOffset,
     },
-    /// Compare two registers and jump to the given PC if they are equal.
-    Eq {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
-        ///
-        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
-        /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
-        /// <JUMP TO NEXT ROW IF id != NULL>
-        /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
-        /// This flag indicates that if either is null we should still jump.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
     /// Compute a hash on num_keys registers starting with r[key_reg]. Check to see if that hash
     /// is found in the bloom filter associated with the cursor/hash_table. If it is not present
     /// then jump to target_pc. Otherwise fall through.
@@ -536,67 +668,7 @@ pub enum Insn {
         key_reg: usize,
         num_keys: usize,
     },
-    /// Compare two registers and jump to the given PC if they are not equal.
-    Ne {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
-        ///
-        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
-    Lt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
     // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
-    Le {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
-    Gt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
-    Ge {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
-    If {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
-        jump_if_null: bool,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
-    IfNot {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
-        jump_if_null: bool,
-    },
     /// Open a cursor for reading.
     OpenRead {
         cursor_id: CursorID,
@@ -682,24 +754,6 @@ pub enum Insn {
     Last {
         cursor_id: CursorID,
         pc_if_empty: BranchOffset,
-    },
-
-    /// Read a column from the current row of the cursor.
-    Column {
-        cursor_id: CursorID,
-        column: usize,
-        dest: usize,
-        default: Option<Value>,
-    },
-
-    /// Read `defaults.len()` consecutive columns starting at `start_column` from the current row
-    /// of the cursor into consecutive registers starting at `dest`.
-    ColumnRange {
-        cursor_id: CursorID,
-        start_column: usize,
-        dest: usize,
-        // this can't be a SmallVec because it would make the enum too large.
-        defaults: Vec<Option<Value>>,
     },
 
     /// Jump to `target_pc` if the cursor's current record contains a field at
@@ -917,33 +971,6 @@ pub enum Insn {
         affinity_str: Option<String>,
     },
 
-    /// Emit a row of results.
-    ResultRow {
-        start_reg: usize, // P1
-        count: usize,     // P2
-    },
-
-    /// Advance the cursor to the next row.
-    Next {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-        /// True when this step is part of a full table scan (a loop over the
-        /// whole table with no index or rowid constraint). Only these steps
-        /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
-        /// which tags the opcode with P5 at codegen time.
-        fullscan: bool,
-        is_index: bool,
-    },
-
-    Prev {
-        cursor_id: CursorID,
-        pc_if_prev: BranchOffset,
-        /// See [Insn::Next::fullscan].
-        fullscan: bool,
-        /// See [Insn::Next::is_index].
-        is_index: bool,
-    },
-
     /// Halt the program.
     Halt {
         err_code: usize,
@@ -981,25 +1008,6 @@ pub enum Insn {
         name: String,
     },
 
-    /// Branch to the given PC.
-    Goto {
-        target_pc: BranchOffset,
-    },
-
-    /// Stores the current program counter into register 'return_reg' then jumps to address target_pc.
-    Gosub {
-        target_pc: BranchOffset,
-        return_reg: usize,
-    },
-
-    /// Returns to the program counter stored in register 'return_reg'.
-    /// If can_fallthrough is true, fall through to the next instruction
-    /// if return_reg does not contain an integer value. Otherwise raise an error.
-    Return {
-        return_reg: usize,
-        can_fallthrough: bool,
-    },
-
     /// Invoke a trigger or foreign-key action subprogram.
     ///
     /// According to SQLite documentation (https://sqlite.org/opcode.html):
@@ -1027,12 +1035,6 @@ pub enum Insn {
     /// Emitted at the end of INSERT/UPDATE/DELETE programs when PRAGMA count_changes is on,
     /// followed by a ResultRow that returns the count to the caller.
     ChangeCount {
-        dest: usize,
-    },
-
-    /// Write an integer value into a register.
-    Integer {
-        value: i64,
         dest: usize,
     },
 
@@ -1065,11 +1067,6 @@ pub enum Insn {
         dest: usize,
     },
 
-    /// Read the rowid of the current row.
-    RowId {
-        cursor_id: CursorID,
-        dest: usize,
-    },
     /// Read the rowid of the current row from an index cursor.
     IdxRowId {
         cursor_id: CursorID,
@@ -2450,21 +2447,6 @@ pub enum Cookie {
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray;
-
-    #[test]
-    fn test_make_sure_correct_insn_table() {
-        for variant in super::InsnVariants::VARIANTS {
-            let func1 = variant.to_function();
-            let func2 = variant.to_function_fast();
-            assert_eq!(
-                func1 as usize, func2 as usize,
-                "Variant {:?} does not match in fast table at index {}",
-                variant, *variant as usize
-            );
-        }
-    }
-
     #[test]
     fn test_insn_size_does_not_grow() {
         // Interpreter dispatch is sensitive to instruction size. Widening a

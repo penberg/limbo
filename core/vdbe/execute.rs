@@ -125,6 +125,27 @@ fn btree_cursor_with_yield_context(
     }
 }
 
+enum OpenedBTree {
+    Plain(Box<BTreeCursor>),
+    Mvcc(Box<dyn CursorTrait>),
+}
+
+impl OpenedBTree {
+    fn into_cursor(self) -> Cursor {
+        match self {
+            Self::Plain(cursor) => Cursor::new_btree(cursor),
+            Self::Mvcc(cursor) => Cursor::new_btree_dyn(cursor),
+        }
+    }
+
+    fn into_dyn(self) -> Box<dyn CursorTrait> {
+        match self {
+            Self::Plain(cursor) => cursor,
+            Self::Mvcc(cursor) => cursor,
+        }
+    }
+}
+
 use super::{
     array::{
         array_values_from_blob, compare_arrays, compute_array_length, compute_array_length_at_dim,
@@ -200,16 +221,24 @@ macro_rules! return_if_io {
     };
 }
 
-macro_rules! check_arg_count {
-    ($actual:expr, $expected:expr) => {
-        if unlikely($actual != $expected) {
-            return Err(LimboError::InternalError(format!(
-                "expected {} argument(s), got {}",
-                $expected, $actual
-            ))
-            .into());
-        }
-    };
+use arg_count::check_arg_count;
+mod arg_count {
+    use crate::LimboError;
+
+    macro_rules! check_arg_count {
+        ($actual:expr, $expected:expr) => {
+            if unlikely($actual != $expected) {
+                return Err(arg_count::wrong_arg_count($expected, $actual));
+            }
+        };
+    }
+    pub(super) use check_arg_count;
+
+    #[cold]
+    #[inline(never)]
+    pub(super) fn wrong_arg_count(expected: usize, actual: usize) -> Box<LimboError> {
+        LimboError::InternalError(format!("expected {expected} argument(s), got {actual}")).into()
+    }
 }
 
 /// Errors are boxed so an op's whole return value stays small: a LimboError
@@ -941,10 +970,8 @@ pub fn op_move(
     let dest_reg = *dest_reg;
     let count = *count;
     for i in 0..count {
-        state.registers[dest_reg + i] = std::mem::replace(
-            &mut state.registers[source_reg + i],
-            Register::Value(Value::Null),
-        );
+        state.registers.swap(source_reg + i, dest_reg + i);
+        state.registers[source_reg + i].set_null();
     }
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
@@ -972,7 +999,9 @@ pub fn op_if_pos(
     match state.registers[reg].get_value() {
         Value::Numeric(Numeric::Integer(n)) if *n > 0 => {
             state.pc = target_pc.as_offset_int();
-            state.registers[reg].set_int(*n - *decrement_by as i64);
+            if *decrement_by != 0 {
+                state.registers[reg].set_int(*n - *decrement_by as i64);
+            }
         }
         Value::Numeric(Numeric::Integer(_)) => {
             state.pc += 1;
@@ -1013,6 +1042,7 @@ pub fn op_not_null(
 
 macro_rules! comparison_opcode {
     ($name:ident, $variant:ident, $op:expr, $jumps:expr) => {
+        #[inline(always)]
         pub fn $name(
             program: &Program,
             state: &mut ProgramState,
@@ -1030,7 +1060,7 @@ macro_rules! comparison_opcode {
                 insn
             );
             let crate::vdbe::BranchOffset::Offset(target_pc) = *target_pc else {
-                crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
+                return Err(unresolved_branch_target(*target_pc));
             };
 
             // Two integers compare directly: no NULL handling, affinity or collation.
@@ -1173,6 +1203,7 @@ fn op_comparison_slow(
     take_jump_if!(should_jump);
 }
 
+#[inline(always)]
 pub fn op_if(
     _program: &Program,
     state: &mut ProgramState,
@@ -1201,6 +1232,7 @@ pub fn op_if(
     Ok(InsnFunctionStepResult::Step)
 }
 
+#[inline(always)]
 pub fn op_if_not(
     _program: &Program,
     state: &mut ProgramState,
@@ -1310,26 +1342,25 @@ pub fn op_open_read(
         _ => unreachable!("This should not have happened"),
     };
 
-    let maybe_promote_to_mvcc_cursor = |btree_cursor: Box<dyn CursorTrait>,
-                                        mv_cursor_type: MvccCursorType|
-     -> Result<Box<dyn CursorTrait>> {
-        // Without an MvStore there is no MVCC transaction to look up.
-        let Some(mv_store) = mv_store.as_ref() else {
-            return Ok(btree_cursor);
+    let maybe_promote_to_mvcc_cursor =
+        |btree_cursor: Box<BTreeCursor>, mv_cursor_type: MvccCursorType| -> Result<OpenedBTree> {
+            // Without an MvStore there is no MVCC transaction to look up.
+            let Some(mv_store) = mv_store.as_ref() else {
+                return Ok(OpenedBTree::Plain(btree_cursor));
+            };
+            if let Some(tx_id) = program.connection.get_mv_tx_id_for_db(*db) {
+                Ok(OpenedBTree::Mvcc(Box::new(MvCursor::new(
+                    mv_store.clone(),
+                    &program.connection,
+                    tx_id,
+                    *root_page,
+                    mv_cursor_type,
+                    btree_cursor,
+                )?)))
+            } else {
+                Ok(OpenedBTree::Plain(btree_cursor))
+            }
         };
-        if let Some(tx_id) = program.connection.get_mv_tx_id_for_db(*db) {
-            Ok(Box::new(MvCursor::new(
-                mv_store.clone(),
-                &program.connection,
-                tx_id,
-                *root_page,
-                mv_cursor_type,
-                btree_cursor,
-            )?))
-        } else {
-            Ok(btree_cursor)
-        }
-    };
 
     match cursor_type {
         CursorType::MaterializedView(_, view_mutex) => {
@@ -1353,7 +1384,7 @@ pub fn op_open_read(
 
             // Create materialized view cursor with this view's transaction state
             let mv_cursor = crate::incremental::cursor::MaterializedViewCursor::new(
-                cursor,
+                cursor.into_dyn(),
                 view_mutex.clone(),
                 pager,
                 tx_state,
@@ -1372,7 +1403,7 @@ pub fn op_open_read(
                 )
                 .into());
             }
-            let btree_cursor: Box<dyn CursorTrait> = if table.has_rowid {
+            let btree_cursor: Box<BTreeCursor> = if table.has_rowid {
                 BTreeCursor::new_table(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), *root_page),
@@ -1392,7 +1423,7 @@ pub fn op_open_read(
             cursors
                 .get_mut(*cursor_id)
                 .expect("cursor_id should be valid")
-                .replace(Cursor::new_btree(cursor));
+                .replace(cursor.into_cursor());
         }
         CursorType::BTreeIndex(index) => {
             let btree_cursor = BTreeCursor::new_index(
@@ -1412,7 +1443,7 @@ pub fn op_open_read(
             cursors
                 .get_mut(*cursor_id)
                 .expect("cursor_id should be valid")
-                .replace(Cursor::new_btree(cursor));
+                .replace(cursor.into_cursor());
         }
         CursorType::Pseudo(_) => {
             panic!("OpenRead on pseudo cursor");
@@ -1814,7 +1845,8 @@ pub fn op_rewind(
     let is_empty = {
         let cursor = state.get_cursor(*cursor_id);
         match cursor {
-            Cursor::BTree(btree_cursor) => {
+            Cursor::BTree(_) | Cursor::Dyn(_) => {
+                let btree_cursor = cursor.as_btree_mut();
                 return_if_io!(state, btree_cursor.rewind());
                 btree_cursor.is_empty()
             }
@@ -2028,6 +2060,7 @@ fn op_column_deferred(
                     let index_cursor = state.get_cursor(index_cursor_id);
                     match index_cursor {
                         Cursor::BTree(cursor) => return_if_io!(state, cursor.rowid()),
+                        Cursor::Dyn(cursor) => return_if_io!(state, cursor.rowid()),
                         Cursor::IndexMethod(cursor) => return_if_io!(state, cursor.query_rowid()),
                         _ => panic!("unexpected cursor type"),
                     }
@@ -3348,6 +3381,7 @@ fn blob_btree_cursor<'a>(
 ) -> Result<&'a mut dyn crate::storage::btree::CursorTrait> {
     match state.get_cursor(cursor) {
         Cursor::BTree(btree) => Ok(btree.as_mut()),
+        Cursor::Dyn(btree) => Ok(btree.as_mut()),
         _ => Err(LimboError::InternalError(format!(
             "{opcode} requires a b-tree cursor"
         ))),
@@ -3529,12 +3563,9 @@ pub fn op_next(
         state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         // Only steps codegen marked as part of a full table scan count as
         // fullscan steps, matching SQLITE_STMTSTATUS_FULLSCAN_STEP.
-        if *fullscan {
-            state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(1);
-        }
-        if *is_index {
-            state.metrics.index_steps = state.metrics.index_steps.wrapping_add(1);
-        }
+        // Added as 0 or 1 so neither counter costs a branch per row.
+        state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(*fullscan as u64);
+        state.metrics.index_steps = state.metrics.index_steps.wrapping_add(*is_index as u64);
         state.pc = pc_if_next.as_offset_int();
     } else {
         state.pc += 1;
@@ -3544,6 +3575,12 @@ pub fn op_next(
     #[inline(never)]
     fn next_row_of_other_cursor(cursor: &mut Cursor) -> IOResultOr<bool> {
         match cursor {
+            Cursor::Dyn(btree_cursor) => match btree_cursor.next_row() {
+                CursorStep::Row => Ok(IOResult::Done(true)),
+                CursorStep::Empty => Ok(IOResult::Done(false)),
+                CursorStep::Error(err) => Err(err),
+                CursorStep::IO(io) => Ok(IOResult::IO(io)),
+            },
             Cursor::MaterializedView(mv_cursor) => mv_cursor.next(),
             Cursor::IndexMethod(_) => cursor.as_index_method_mut().query_next(),
             _ => panic!("Next on non-btree/materialized-view cursor"),
@@ -3585,12 +3622,9 @@ pub fn op_prev(
         state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         // Only steps codegen marked as part of a full table scan count as
         // fullscan steps, matching SQLITE_STMTSTATUS_FULLSCAN_STEP.
-        if *fullscan {
-            state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(1);
-        }
-        if *is_index {
-            state.metrics.index_steps = state.metrics.index_steps.wrapping_add(1);
-        }
+        // Added as 0 or 1 so neither counter costs a branch per row.
+        state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(*fullscan as u64);
+        state.metrics.index_steps = state.metrics.index_steps.wrapping_add(*is_index as u64);
         state.pc = pc_if_prev.as_offset_int();
     } else {
         state.pc += 1;
@@ -5592,6 +5626,7 @@ fn check_deferred_fk_on_commit(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+#[inline(always)]
 pub fn op_goto(
     _program: &Program,
     state: &mut ProgramState,
@@ -5606,6 +5641,7 @@ pub fn op_goto(
     Ok(InsnFunctionStepResult::Step)
 }
 
+#[inline(always)]
 pub fn op_gosub(
     _program: &Program,
     state: &mut ProgramState,
@@ -5627,6 +5663,7 @@ pub fn op_gosub(
     Ok(InsnFunctionStepResult::Step)
 }
 
+#[inline(always)]
 pub fn op_return(
     _program: &Program,
     state: &mut ProgramState,
@@ -5641,21 +5678,29 @@ pub fn op_return(
         insn
     );
     if let Value::Numeric(Numeric::Integer(pc)) = state.registers[*return_reg].get_value() {
-        let pc: u32 = (*pc)
-            .try_into()
-            .unwrap_or_else(|_| panic!("Return register is negative: {pc}"));
-        state.pc = pc;
+        state.pc = u32::try_from(*pc).unwrap_or_else(|_| negative_return_address(*pc));
     } else {
         if unlikely(!*can_fallthrough) {
-            return Err(
-                LimboError::InternalError("Return register is not an integer".to_string()).into(),
-            );
+            return Err(return_register_not_an_integer());
         }
         state.pc += 1;
     }
     Ok(InsnFunctionStepResult::Step)
 }
 
+#[cold]
+#[inline(never)]
+fn negative_return_address(pc: i64) -> ! {
+    panic!("Return register is negative: {pc}")
+}
+
+#[cold]
+#[inline(never)]
+fn return_register_not_an_integer() -> Box<LimboError> {
+    LimboError::InternalError("Return register is not an integer".to_string()).into()
+}
+
+#[cfg_attr(not(test), inline(always))]
 pub fn op_integer(
     _program: &Program,
     state: &mut ProgramState,
@@ -6067,7 +6112,8 @@ fn op_row_id_deferred(state: &mut ProgramState, cursor_id: usize, dest: usize) -
                 let rowid = {
                     let index_cursor = state.get_cursor(index_cursor_id);
                     match index_cursor {
-                        Cursor::BTree(index_cursor) => {
+                        Cursor::BTree(_) | Cursor::Dyn(_) => {
+                            let index_cursor = index_cursor.as_btree_mut();
                             let record = return_if_io!(state, index_cursor.record());
                             let record =
                                 record.as_ref().expect("index cursor should have a record");
@@ -6130,6 +6176,7 @@ fn op_row_id_read(state: &mut ProgramState, cursor_id: usize, dest: usize) -> In
         .expect("cursor_id should be valid");
     let rowid = match cursor {
         Some(Cursor::BTree(btree_cursor)) => return_if_io!(state, btree_cursor.rowid()),
+        Some(Cursor::Dyn(btree_cursor)) => return_if_io!(state, btree_cursor.rowid()),
         _ => return_if_io!(state, row_id_of_other_cursor(cursor)),
     };
     match rowid {
@@ -6177,6 +6224,7 @@ pub fn op_idx_row_id(
 
     let rowid = match cursor {
         Cursor::BTree(cursor) => return_if_io!(state, cursor.rowid()),
+        Cursor::Dyn(cursor) => return_if_io!(state, cursor.rowid()),
         Cursor::IndexMethod(cursor) => return_if_io!(state, cursor.query_rowid()),
         Cursor::NullRow => None,
         _ => panic!("unexpected cursor type"),
@@ -6236,7 +6284,8 @@ pub fn op_seek_rowid(
                     None => (target_pc.as_offset_int(), false),
                 }
             }
-            Cursor::BTree(btree_cursor) => {
+            Cursor::BTree(_) | Cursor::Dyn(_) => {
+                let btree_cursor = cursor.as_btree_mut();
                 let rowid = match state.registers[*src_reg].get_value() {
                     Value::Numeric(Numeric::Integer(rowid)) => Some(*rowid),
                     Value::Null => None,
@@ -7140,9 +7189,14 @@ fn kbn_init_from_int(acc: &mut Value, i: i64, state: &mut SumAggState) {
 /// - JsonGroupObject/JsonbGroupObject: [Blob([])]
 /// - JsonGroupArray/JsonbGroupArray: [Blob([])]
 fn init_agg_payload(func: &AggFunc, payload: &mut crate::alloc::Vec<Value>) -> Result<()> {
+    // This initializes `payload` at exactly the right size.
     match func {
-        AggFunc::Count | AggFunc::Count0 => payload.push(Value::from_i64(0)),
+        AggFunc::Count | AggFunc::Count0 => {
+            payload.try_reserve_exact(1)?;
+            payload.push(Value::from_i64(0));
+        }
         AggFunc::Sum | AggFunc::Total => {
+            payload.try_reserve_exact(5)?;
             let acc = if matches!(func, AggFunc::Total) {
                 Value::from_f64(0.0)
             } else {
@@ -7155,12 +7209,17 @@ fn init_agg_payload(func: &AggFunc, payload: &mut crate::alloc::Vec<Value>) -> R
             payload.push(Value::from_i64(0));
         }
         AggFunc::Avg => {
+            payload.try_reserve_exact(3)?;
             payload.push(Value::from_f64(0.0));
             payload.push(Value::from_f64(0.0));
             payload.push(Value::from_i64(0));
         }
-        AggFunc::Min | AggFunc::Max => payload.push(Value::Null),
+        AggFunc::Min | AggFunc::Max => {
+            payload.try_reserve_exact(1)?;
+            payload.push(Value::Null);
+        }
         AggFunc::GroupConcat | AggFunc::StringAgg => {
+            payload.try_reserve_exact(4)?;
             // Use Null as sentinel to distinguish "no values yet" from an
             // accumulated empty string. SQLite normally remembers one
             // separator length and only materializes the per-separator queue
@@ -7170,38 +7229,42 @@ fn init_agg_payload(func: &AggFunc, payload: &mut crate::alloc::Vec<Value>) -> R
             payload.push(Value::from_i64(0));
             payload.push(Value::Blob(crate::alloc::vec![]));
         }
-        AggFunc::External(_) => {
-            mark_unlikely();
-            // External aggregates use ExternalAggState, not flat payload
-            return Err(LimboError::InternalError(
-                "External aggregate not supported in init_agg_payload".to_string(),
-            ));
-        }
         AggFunc::ArrayAgg => {
+            payload.try_reserve_exact(1)?;
             // payload[0] = element count (Integer), remaining slots = accumulated values.
             // We serialize to a record blob only in finalize, avoiding O(n²) re-serialization.
             payload.push(Value::from_i64(0));
         }
         AggFunc::Mode => {
+            payload.try_reserve_exact(2)?;
             // [0] = collation bits, [1] = count, [2..] = buffered values.
-            payload.push(Value::from_i64(0)); // collation (recorded at step time)
-            payload.push(Value::from_i64(0)); // count
+            payload.push(Value::from_i64(0));
+            payload.push(Value::from_i64(0));
         }
         AggFunc::PercentileCont | AggFunc::PercentileDisc => {
+            payload.try_reserve_exact(3)?;
             // [0] = collation bits, [1] = count, [2] = fraction, [3..] = buffered values.
-            payload.push(Value::from_i64(0)); // collation (recorded at step time)
-            payload.push(Value::from_i64(0)); // count
-            payload.push(Value::Null); // fraction (set on first step)
+            payload.push(Value::from_i64(0));
+            payload.push(Value::from_i64(0));
+            payload.push(Value::Null);
         }
         #[cfg(feature = "json")]
         AggFunc::JsonGroupObject | AggFunc::JsonbGroupObject => {
+            payload.try_reserve_exact(1)?;
             payload.push(Value::Blob(crate::alloc::vec![]));
         }
         #[cfg(feature = "json")]
         AggFunc::JsonGroupArray | AggFunc::JsonbGroupArray => {
+            payload.try_reserve_exact(1)?;
             payload.push(Value::Blob(crate::alloc::vec![]));
         }
-    };
+        AggFunc::External(_) => {
+            mark_unlikely();
+            return Err(LimboError::InternalError(
+                "External aggregate not supported in init_agg_payload".to_string(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -7595,6 +7658,10 @@ fn update_agg_payload(
     }
     Ok(())
 }
+
+/// Max limit of aggregate Vecs we keep around to reuse their allocations. This is a very naive
+/// strategy, but it works well for now.
+const SPARE_AGG_PAYLOADS: usize = 8;
 
 /// Convert the intermediate aggregate state in `payload` into the final result value.
 ///
@@ -8856,7 +8923,10 @@ fn op_agg_step_slow(program: &Program, state: &mut ProgramState, data: &AggStepD
             },
             _ => {
                 // Built-in aggregates use flat payload
-                let mut payload = crate::alloc::vec![];
+                let mut payload = state
+                    .spare_agg_payloads
+                    .pop()
+                    .unwrap_or_else(|| crate::alloc::vec![]);
                 init_agg_payload(func, &mut payload)?;
                 Register::Aggregate(AggContext::Builtin(payload))
             }
@@ -9008,6 +9078,18 @@ pub fn op_agg_final(
                     finalize_agg_payload(func, payload)?
                 }
             };
+            if acc_reg == dest_reg {
+                // The result will replace the allocator, so we hold on to the allocated Vec so that
+                // another group can reuse the allocation.
+                let accumulator =
+                    std::mem::replace(&mut state.registers[acc_reg], Register::Value(Value::Null));
+                if let Register::Aggregate(AggContext::Builtin(mut payload)) = accumulator {
+                    if state.spare_agg_payloads.len() < SPARE_AGG_PAYLOADS {
+                        payload.clear();
+                        state.spare_agg_payloads.push(payload);
+                    }
+                }
+            }
             state.registers[dest_reg].set_value(value);
         }
         Register::Value(Value::Null) => {
@@ -9958,25 +10040,13 @@ pub fn op_function(
                     if is_null_result {
                         state.registers[*dest].set_null();
                     } else {
-                        // 3. Prepare Pattern and Text
-                        let pattern_cow = match pattern_value {
-                            Value::Text(s) => std::borrow::Cow::Borrowed(s.as_str()),
-                            v => match v.exec_cast("TEXT")? {
-                                Value::Text(s) => std::borrow::Cow::Owned(s.to_string()),
-                                _ => unreachable!("Cast to TEXT should yield Text"),
-                            },
+                        // 3. and 4. Prepare Pattern and Text, then execute Like.
+                        let matches = match (pattern_value, match_value) {
+                            (Value::Text(pattern), Value::Text(text)) => {
+                                Value::exec_like(pattern.as_str(), text.as_str(), escape_char)?
+                            }
+                            _ => exec_like_converted(pattern_value, match_value, escape_char)?,
                         };
-
-                        let match_cow = match match_value {
-                            Value::Text(s) => std::borrow::Cow::Borrowed(s.as_str()),
-                            v => match v.exec_cast("TEXT")? {
-                                Value::Text(s) => std::borrow::Cow::Owned(s.to_string()),
-                                _ => unreachable!("Cast to TEXT should yield Text"),
-                            },
-                        };
-
-                        // 4. Execute Like
-                        let matches = Value::exec_like(&pattern_cow, &match_cow, escape_char)?;
                         state.registers[*dest].set_int(matches as i64);
                     }
                 }
@@ -12014,6 +12084,30 @@ pub fn op_function(
 
 pub(crate) type OpAttachState = crate::connection::AttachDatabaseState;
 
+/// LIKE with an operand that is not TEXT: both are converted to TEXT first.
+#[inline(never)]
+fn exec_like_converted(
+    pattern_value: &Value,
+    match_value: &Value,
+    escape_char: Option<char>,
+) -> Result<bool> {
+    let pattern_cow = match pattern_value {
+        Value::Text(s) => std::borrow::Cow::Borrowed(s.as_str()),
+        v => match v.exec_cast("TEXT")? {
+            Value::Text(s) => std::borrow::Cow::Owned(s.to_string()),
+            _ => unreachable!("Cast to TEXT should yield Text"),
+        },
+    };
+    let match_cow = match match_value {
+        Value::Text(s) => std::borrow::Cow::Borrowed(s.as_str()),
+        v => match v.exec_cast("TEXT")? {
+            Value::Text(s) => std::borrow::Cow::Owned(s.to_string()),
+            _ => unreachable!("Cast to TEXT should yield Text"),
+        },
+    };
+    Value::exec_like(&pattern_cow, &match_cow, escape_char)
+}
+
 pub fn op_sequence(
     _program: &Program,
     state: &mut ProgramState,
@@ -13535,38 +13629,36 @@ pub fn op_open_write(
         _ => None,
     };
 
-    // Check if we can reuse the existing cursor
-    let can_reuse_cursor = if let Some(Some(Cursor::BTree(btree_cursor))) = cursors.get(*cursor_id)
-    {
-        // Reuse if the root_page matches (same table/index)
-        btree_cursor.root_page() == root_page
-    } else {
-        false
+    // Reuse the existing cursor if the root_page matches (same table/index)
+    let can_reuse_cursor = match cursors.get(*cursor_id) {
+        Some(Some(Cursor::BTree(btree_cursor))) => btree_cursor.root_page() == root_page,
+        Some(Some(Cursor::Dyn(btree_cursor))) => btree_cursor.root_page() == root_page,
+        _ => false,
     };
 
     if !can_reuse_cursor {
-        let maybe_promote_to_mvcc_cursor = |btree_cursor: Box<dyn CursorTrait>,
+        let maybe_promote_to_mvcc_cursor = |btree_cursor: Box<BTreeCursor>,
                                             mv_cursor_type: MvccCursorType|
-         -> Result<Box<dyn CursorTrait>> {
+         -> Result<OpenedBTree> {
             if let Some(tx_id) = program.connection.get_mv_tx_id_for_db(*db) {
                 let mv_store = mv_store
                     .as_ref()
                     .expect("mv_store should be Some when MVCC transaction is active")
                     .clone();
-                Ok(Box::new(MvCursor::new(
+                Ok(OpenedBTree::Mvcc(Box::new(MvCursor::new(
                     mv_store,
                     &program.connection,
                     tx_id,
                     root_page,
                     mv_cursor_type,
                     btree_cursor,
-                )?))
+                )?)))
             } else if mv_store.is_some() {
                 Err(LimboError::InternalError(
                     "OpenWrite requires an active MVCC transaction".to_string(),
                 ))
             } else {
-                Ok(btree_cursor)
+                Ok(OpenedBTree::Plain(btree_cursor))
             }
         };
         if let Some(index) = maybe_index {
@@ -13590,7 +13682,7 @@ pub fn op_open_write(
             cursors
                 .get_mut(*cursor_id)
                 .expect("cursor_id should be valid")
-                .replace(Cursor::new_btree(cursor));
+                .replace(cursor.into_cursor());
         } else {
             if matches!(cursor_type, CursorType::BTreeTable(table_rc) if !table_rc.has_rowid)
                 && program.connection.get_mv_tx_id_for_db(*db).is_some()
@@ -13608,7 +13700,7 @@ pub fn op_open_write(
                 ),
             };
 
-            let btree_cursor: Box<dyn CursorTrait> = match cursor_type {
+            let btree_cursor: Box<BTreeCursor> = match cursor_type {
                 CursorType::BTreeTable(table_rc) if !table_rc.has_rowid => {
                     btree_cursor_with_yield_context(
                         Box::new(BTreeCursor::new_without_rowid_table(
@@ -13633,7 +13725,7 @@ pub fn op_open_write(
             cursors
                 .get_mut(*cursor_id)
                 .expect("cursor_id should be valid")
-                .replace(Cursor::new_btree(cursor));
+                .replace(cursor.into_cursor());
         }
     }
     state.pc += 1;
@@ -13984,7 +14076,8 @@ fn op_clear_btree_inner(
                 let cleared = cursor.write().clear_btree();
                 return_if_io!(state, cleared);
                 for other_cursor_opt in state.cursors.iter_mut().flatten() {
-                    if let Cursor::BTree(ref mut btree_cursor) = other_cursor_opt {
+                    if let Cursor::BTree(_) | Cursor::Dyn(_) = other_cursor_opt {
+                        let btree_cursor = other_cursor_opt.as_btree_mut();
                         if Arc::ptr_eq(&btree_cursor.get_pager(), pager) {
                             btree_cursor.invalidate_btree_cache();
                         }
@@ -15411,6 +15504,7 @@ pub fn op_populate_materialized_views(
 
             let root_page = match cursor {
                 crate::types::Cursor::BTree(btree_cursor) => btree_cursor.root_page(),
+                crate::types::Cursor::Dyn(btree_cursor) => btree_cursor.root_page(),
                 _ => {
                     return Err(LimboError::InternalError(
                         "Expected BTree cursor for materialized view".into(),
@@ -15445,7 +15539,9 @@ pub fn op_populate_materialized_views(
 
             // Extract the BTreeCursor
             let btree_cursor = match cursor {
-                crate::types::Cursor::BTree(btree_cursor) => btree_cursor,
+                crate::types::Cursor::BTree(_) | crate::types::Cursor::Dyn(_) => {
+                    cursor.as_btree_mut()
+                }
                 _ => {
                     return Err(LimboError::InternalError(
                         "Expected BTree cursor for materialized view population".into(),
@@ -15455,10 +15551,7 @@ pub fn op_populate_materialized_views(
             };
 
             // Now populate it with the cursor for writing
-            return_if_io!(
-                state,
-                view.populate_from_table(&conn, pager, btree_cursor.as_mut())
-            );
+            return_if_io!(state, view.populate_from_table(&conn, pager, btree_cursor));
         }
     }
 
@@ -15840,7 +15933,7 @@ pub enum OpOpenEphemeralState {
     // clippy complains this variant is too big when compared to the rest of the variants
     // so it says we need to box it here
     Rewind {
-        cursor: Box<dyn CursorTrait>,
+        cursor: Box<BTreeCursor>,
         temp_file: Option<TempFile>,
     },
 }
@@ -16081,7 +16174,7 @@ pub fn op_open_dup(
                 )
                 .into());
             }
-            let cursor: Box<dyn CursorTrait> = if table.has_rowid {
+            let cursor: Box<BTreeCursor> = if table.has_rowid {
                 Box::new(BTreeCursor::new_table(
                     pager,
                     maybe_transform_root_page_to_positive(mv_store.as_ref(), root_page),
@@ -16095,31 +16188,31 @@ pub fn op_open_dup(
                     table.columns().len(),
                 ))
             };
-            let cursor: Box<dyn CursorTrait> = if !is_ephemeral {
+            let cursor = if !is_ephemeral {
                 if let Some(tx_id) = program.connection.get_mv_tx_id() {
                     let mv_store = mv_store
                         .as_ref()
                         .expect("mv_store should be Some when MVCC transaction is active")
                         .clone();
-                    Box::new(MvCursor::new(
+                    OpenedBTree::Mvcc(Box::new(MvCursor::new(
                         mv_store,
                         &program.connection,
                         tx_id,
                         root_page,
                         MvccCursorType::Table,
                         cursor,
-                    )?)
+                    )?))
                 } else {
-                    cursor
+                    OpenedBTree::Plain(cursor)
                 }
             } else {
-                cursor
+                OpenedBTree::Plain(cursor)
             };
             let cursors = &mut state.cursors;
             cursors
                 .get_mut(*new_cursor_id)
                 .expect("cursor_id should be valid")
-                .replace(Cursor::new_btree(cursor));
+                .replace(cursor.into_cursor());
         }
         CursorType::BTreeIndex(_) => {
             return Err(LimboError::InternalError(
@@ -17593,7 +17686,8 @@ pub fn op_hash_build(
     if op_state.rowid.is_none() {
         let cursor = state.get_cursor(data.cursor_id);
         let rowid_val = match cursor {
-            Cursor::BTree(btree_cursor) => {
+            Cursor::BTree(_) | Cursor::Dyn(_) => {
+                let btree_cursor = cursor.as_btree_mut();
                 let rowid_opt = match btree_cursor.rowid() {
                     Ok(IOResult::Done(v)) => v,
                     Ok(IOResult::IO(io)) => {
@@ -20077,6 +20171,38 @@ mod tests {
                     panic!("'{input}' should remain text, got {other:?}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_init_agg_payload_reserves_exact_capacity() {
+        let funcs = [
+            AggFunc::Count,
+            AggFunc::Count0,
+            AggFunc::Sum,
+            AggFunc::Total,
+            AggFunc::Avg,
+            AggFunc::Min,
+            AggFunc::Max,
+            AggFunc::GroupConcat,
+            AggFunc::StringAgg,
+            AggFunc::ArrayAgg,
+            AggFunc::Mode,
+            AggFunc::PercentileCont,
+            AggFunc::PercentileDisc,
+            #[cfg(feature = "json")]
+            AggFunc::JsonGroupObject,
+            #[cfg(feature = "json")]
+            AggFunc::JsonbGroupObject,
+            #[cfg(feature = "json")]
+            AggFunc::JsonGroupArray,
+            #[cfg(feature = "json")]
+            AggFunc::JsonbGroupArray,
+        ];
+        for func in funcs {
+            let mut payload = crate::alloc::vec![];
+            init_agg_payload(&func, &mut payload).unwrap();
+            assert_eq!(payload.capacity(), payload.len(), "{func:?}");
         }
     }
 
