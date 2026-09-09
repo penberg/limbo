@@ -47,3 +47,19 @@ fn large_indexed_in_list_uses_seek_loop() {
         "large IN-list regressed to residual scan:\n{plan}"
     );
 }
+
+#[test]
+fn indexed_real_column_in_list_does_not_lose_precision() {
+    let tmp_db = TempDatabase::new_empty();
+    let conn = tmp_db.connect_limbo();
+
+    limbo_exec_rows(&conn, "CREATE TABLE t(x REAL)");
+    limbo_exec_rows(&conn, "INSERT INTO t VALUES(9007199254740992)");
+    limbo_exec_rows(&conn, "CREATE INDEX t_x ON t(x)");
+
+    let rows = limbo_exec_rows(
+        &conn,
+        "SELECT count(*) FROM t WHERE x IN (9007199254740993)",
+    );
+    assert_eq!(rows, vec![vec![Value::Integer(0)]]);
+}
