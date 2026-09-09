@@ -13,11 +13,18 @@ path = "src/main.rs"
 name = "stack-report"
 path = "src/stack_report.rs"
 
+[[bin]]
+name = "fts-memory"
+path = "src/fts_memory.rs"
+required-features = ["fts"]
+
 [features]
 stacker = ["turso/stacker"]
+fts = ["turso/fts", "dep:tempfile", "dep:turso_core"]
 
 [dependencies]
 turso = { path = "../../bindings/rust", default-features = false }
+turso_core = { path = "../../core", optional = true, default-features = false, features = ["fs", "fts", "test_helper"] }
 turso_parser = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, default-features = true, features = ["full"] }
@@ -30,3 +37,4 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 rand = { workspace = true }
+tempfile = { workspace = true, optional = true }
