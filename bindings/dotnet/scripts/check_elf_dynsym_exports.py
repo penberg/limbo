@@ -4,6 +4,13 @@ import struct
 import sys
 from pathlib import Path
 
+NAME = 0
+TYPE = 1
+OFFSET = 4
+SIZE = 5
+LINK = 6
+ENTRY_SIZE = 9
+
 
 def main() -> None:
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
@@ -52,18 +59,33 @@ def elf64_with_dynsym(symbol: str) -> bytes:
     dynsym_offset += dynsym_pad
     section_offset = dynsym_offset + len(dynsym)
 
-    def section(name: int, typ: int, flags: int, offset: int, size: int, link: int, info: int, align: int, entsize: int) -> bytes:
-        return struct.pack("<IIQQQQIIQQ", name, typ, flags, 0, offset, size, link, info, align, entsize)
-
     sections = (
         bytes(64)
-        + section(1, 3, 0, shstrtab_offset, len(shstrtab), 0, 0, 1, 0)
-        + section(11, 3, 2, dynstr_offset, len(dynstr), 0, 0, 1, 0)
-        + section(19, 11, 2, dynsym_offset, len(dynsym), 2, 1, 8, 24)
+        + elf64_section(1, 3, 0, shstrtab_offset, len(shstrtab), 0, 0, 1, 0)
+        + elf64_section(11, 3, 2, dynstr_offset, len(dynstr), 0, 0, 1, 0)
+        + elf64_section(19, 11, 2, dynsym_offset, len(dynsym), 2, 1, 8, 24)
     )
     header = bytes([0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    header += struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, 0, section_offset, 0, 64, 0, 0, 64, 4, 1)
+    header += struct.pack(
+        "<HHIQQQIHHHHHH", 3, 62, 1, 0, 0, section_offset, 0, 64, 0, 0, 64, 4, 1
+    )
     return header + shstrtab + dynstr + (b"\0" * dynsym_pad) + dynsym + sections
+
+
+def elf64_section(
+    name: int,
+    typ: int,
+    flags: int,
+    offset: int,
+    size: int,
+    link: int,
+    info: int,
+    align: int,
+    entsize: int,
+) -> bytes:
+    return struct.pack(
+        "<IIQQQQIIQQ", name, typ, flags, 0, offset, size, link, info, align, entsize
+    )
 
 
 def dynsym_names(path: Path) -> set[str]:
@@ -71,79 +93,78 @@ def dynsym_names(path: Path) -> set[str]:
     if data[:4] != b"\x7fELF":
         raise SystemExit(f"{path} is not an ELF file")
 
-    little = data[5] == 1
-    endian = "<" if little else ">"
+    layout = elf_layout(data, path)
+    dynsym = find_dynsym(data, layout, path)
+    return names_from_dynsym(data, layout, dynsym)
+
+
+def elf_layout(data: bytes, path: Path) -> dict:
+    endian = "<" if data[5] == 1 else ">"
     elf_class = data[4]
     if elf_class == 2:
-        section_header_offset = struct.unpack_from(endian + "Q", data, 40)[0]
-        section_header_size, section_count, string_table_index = struct.unpack_from(
-            endian + "HHH", data, 58
-        )
-        section_format = endian + "IIQQQQIIQQ"
-        name_index, type_index, offset_index, size_index, link_index, entry_size_index = (
-            0,
-            1,
-            4,
-            5,
-            6,
-            9,
-        )
-        symbol_format = endian + "IBBHQQ"
-        symbol_name_index = 0
-    elif elf_class == 1:
-        section_header_offset = struct.unpack_from(endian + "I", data, 32)[0]
-        section_header_size, section_count, string_table_index = struct.unpack_from(
-            endian + "HHH", data, 46
-        )
-        section_format = endian + "IIIIIIIIII"
-        name_index, type_index, offset_index, size_index, link_index, entry_size_index = (
-            0,
-            1,
-            4,
-            5,
-            6,
-            9,
-        )
-        symbol_format = endian + "IIIBBH"
-        symbol_name_index = 0
-    else:
-        raise SystemExit(f"{path} has unsupported ELF class {elf_class}")
+        return {
+            "endian": endian,
+            "section_header_offset": struct.unpack_from(endian + "Q", data, 40)[0],
+            "section_header_size": struct.unpack_from(endian + "H", data, 58)[0],
+            "section_count": struct.unpack_from(endian + "H", data, 60)[0],
+            "string_table_index": struct.unpack_from(endian + "H", data, 62)[0],
+            "section_format": endian + "IIQQQQIIQQ",
+            "symbol_format": endian + "IBBHQQ",
+        }
+    if elf_class == 1:
+        return {
+            "endian": endian,
+            "section_header_offset": struct.unpack_from(endian + "I", data, 32)[0],
+            "section_header_size": struct.unpack_from(endian + "H", data, 46)[0],
+            "section_count": struct.unpack_from(endian + "H", data, 48)[0],
+            "string_table_index": struct.unpack_from(endian + "H", data, 50)[0],
+            "section_format": endian + "IIIIIIIIII",
+            "symbol_format": endian + "IIIBBH",
+        }
+    raise SystemExit(f"{path} has unsupported ELF class {elf_class}")
 
-    def section_header(index: int):
-        return struct.unpack_from(
-            section_format, data, section_header_offset + index * section_header_size
-        )
 
-    string_header = section_header(string_table_index)
-    section_names = data[
-        string_header[offset_index] : string_header[offset_index] + string_header[size_index]
-    ]
-
-    dynsym = None
-    for index in range(section_count):
-        header = section_header(index)
-        name = section_names[header[name_index] :].split(b"\x00", 1)[0]
+def find_dynsym(data: bytes, layout: dict, path: Path):
+    string_header = section_header(data, layout, layout["string_table_index"])
+    names = slice_bytes(data, string_header[OFFSET], string_header[SIZE])
+    named = None
+    typed = None
+    for index in range(layout["section_count"]):
+        header = section_header(data, layout, index)
+        name = names[header[NAME] :].split(b"\x00", 1)[0]
         if name == b".dynsym":
-            dynsym = header
+            named = header
             break
-        if dynsym is None and header[type_index] == 11:
-            dynsym = header
+        if typed is None and header[TYPE] == 11:
+            typed = header
+    dynsym = named or typed
     if dynsym is None:
         raise SystemExit(f"{path} has no .dynsym section")
+    return dynsym
 
-    string_table_header = section_header(dynsym[link_index])
-    string_table = data[
-        string_table_header[offset_index] : string_table_header[offset_index]
-        + string_table_header[size_index]
-    ]
-    entry_size = dynsym[entry_size_index] or struct.calcsize(symbol_format)
+
+def names_from_dynsym(data: bytes, layout: dict, dynsym) -> set[str]:
+    strings = section_header(data, layout, dynsym[LINK])
+    string_table = slice_bytes(data, strings[OFFSET], strings[SIZE])
+    entry_size = dynsym[ENTRY_SIZE] or struct.calcsize(layout["symbol_format"])
     names: set[str] = set()
-    for index in range(dynsym[size_index] // entry_size):
-        symbol = struct.unpack_from(symbol_format, data, dynsym[offset_index] + index * entry_size)
-        name = string_table[symbol[symbol_name_index] :].split(b"\x00", 1)[0].decode("utf-8", "replace")
+    for index in range(dynsym[SIZE] // entry_size):
+        offset = dynsym[OFFSET] + index * entry_size
+        symbol = struct.unpack_from(layout["symbol_format"], data, offset)
+        raw = string_table[symbol[0] :].split(b"\x00", 1)[0]
+        name = raw.decode("utf-8", "replace")
         if name:
             names.add(name)
     return names
+
+
+def section_header(data: bytes, layout: dict, index: int):
+    offset = layout["section_header_offset"] + index * layout["section_header_size"]
+    return struct.unpack_from(layout["section_format"], data, offset)
+
+
+def slice_bytes(data: bytes, offset: int, size: int) -> bytes:
+    return data[offset : offset + size]
 
 
 if __name__ == "__main__":
