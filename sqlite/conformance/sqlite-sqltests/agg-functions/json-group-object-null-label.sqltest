@@ -1,0 +1,27 @@
+@database :memory:
+
+test json_group_object_skips_null_label {
+    CREATE TABLE t(k TEXT, n INT);
+    INSERT INTO t VALUES('a', 1), (NULL, 2), ('b', 3);
+    SELECT json_group_object(k, n) FROM t;
+}
+expect {
+    {"a":1,"b":3}
+}
+
+test jsonb_group_object_skips_null_label {
+    CREATE TABLE t(k TEXT, n INT);
+    INSERT INTO t VALUES('a', 1), (NULL, 2), ('b', 3);
+    SELECT json(jsonb_group_object(k, n)) FROM t;
+}
+expect {
+    {"a":1,"b":3}
+}
+
+test json_group_object_null_label_only {
+    SELECT json_group_object(NULL, 1), json(jsonb_group_object(NULL, 1)),
+           json_group_object('a', NULL), json_group_array(NULL);
+}
+expect {
+    {}|{}|{"a":null}|[null]
+}
