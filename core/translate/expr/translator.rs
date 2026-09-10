@@ -2244,7 +2244,11 @@ pub fn translate_expr(
                             resolver,
                         )
                     }
-                    Some(SelfTableContext::ForDML { dml_ctx, .. }) => {
+                    Some(SelfTableContext::ForDML { dml_ctx, table }) => {
+                        let Some(table_column) = table.columns().get(*column) else {
+                            crate::bail_parse_error!("column index out of bounds");
+                        };
+                        program.set_collation(Some((table_column.collation(), false)));
                         let src_reg = dml_ctx.to_column_reg(*column);
                         program.emit_insn(Insn::Copy {
                             src_reg,
