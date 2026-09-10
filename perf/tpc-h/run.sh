@@ -65,14 +65,22 @@ run_query_with_limbo() {
     local query_file=$1
     local query_sql
     query_sql=$(load_query_sql "$query_file")
-    { time -p RUST_LOG=off "$LIMBO_BIN" "$DB_FILE" --quiet --output-mode list -- "$query_sql" 2>&1; } 2>&1
+    RUST_LOG=off run_timed "$LIMBO_BIN" "$DB_FILE" --quiet --output-mode list -- "$query_sql"
 }
 
 run_query_with_sqlite() {
     local query_file=$1
     local query_sql
     query_sql=$(load_query_sql "$query_file")
-    { time -p "$SQLITE_BIN" "$DB_FILE" "$query_sql" 2>&1; } 2>&1
+    run_timed "$SQLITE_BIN" "$DB_FILE" "$query_sql"
+}
+
+run_timed() {
+    local start end
+    start=$EPOCHREALTIME
+    "$@" 2>&1
+    end=$EPOCHREALTIME
+    awk -v s="$start" -v e="$end" 'BEGIN { printf "real %.2f\n", e - s }'
 }
 
 log_query_outputs() {
