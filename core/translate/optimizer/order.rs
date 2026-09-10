@@ -259,7 +259,12 @@ pub fn plan_satisfies_order_target(
             hash_join_build_tables
                 .set(*build_table_idx)
                 .expect("a plan cannot contain more than the table limit");
-            // Materialization can absorb and prune every loop before the probe.
+            // We bail out early because as soon as there's a hash join that materializes its
+            // build side, we can't rely on any of the relations to the left of its probe table
+            // in the join order. This is because translation retransforms the join order later on
+            // (see `prune_join_order_for_materialized_inputs`)
+            // Eventually, we could narrow down this check to consider the ordering of the relations
+            // at, or to the right of, the rightmost probe table, but for now this'll do.
             if *materialize_build_input {
                 return false;
             }
