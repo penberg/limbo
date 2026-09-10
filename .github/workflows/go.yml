@@ -104,7 +104,13 @@ jobs:
           fetch-depth: 0
 
       - name: Ensure tooling (jq, coreutils)
+        shell: bash
         run: |
+          set -euo pipefail
+          if command -v jq >/dev/null && command -v sha256sum >/dev/null; then
+            echo "jq and coreutils are already installed."
+            exit 0
+          fi
           sudo apt-get update
           sudo apt-get install -y jq coreutils
 
