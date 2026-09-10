@@ -14,15 +14,20 @@ use crate::{
         journal_mode::JournalMode,
     },
     translate::emitter::TransactionMode,
-    types::{IOResult, IndexInfo, KeyInfo},
+    types::IOResult,
     vdbe::Register,
     Connection, LimboError, MvCursor, Result, Value,
 };
 
 pub mod backing_btree;
+pub mod backing_store;
 #[cfg(all(feature = "fts", not(target_family = "wasm")))]
 pub mod fts;
 pub mod toy_vector_sparse_ivf;
+
+pub use backing_store::{
+    BackingColumn, BackingIndex, BackingSchema, BackingStore, BackingStoreOp, BackingTable,
+};
 
 pub const BACKING_BTREE_INDEX_METHOD_NAME: &str = "backing_btree";
 pub const TOY_VECTOR_SPARSE_IVF_INDEX_METHOD_NAME: &str = "toy_vector_sparse_ivf";
@@ -377,19 +382,6 @@ impl IndexMethodContext {
     pub fn open_table_cursor(&self, table: &str) -> Result<Box<dyn CursorTrait>> {
         open_table_cursor(&self.connection()?, self.database.id, table)
     }
-
-    pub fn open_index_cursor<I, E>(
-        &self,
-        table: &str,
-        index: &str,
-        keys: I,
-    ) -> Result<Box<dyn CursorTrait>>
-    where
-        I: IntoIterator<Item = KeyInfo, IntoIter = E>,
-        E: ExactSizeIterator<Item = KeyInfo>,
-    {
-        open_index_cursor(&self.connection()?, self.database.id, table, index, keys)
-    }
 }
 
 #[cfg(any(test, injected_yields))]
@@ -723,44 +715,6 @@ pub(crate) fn open_table_cursor(
         root_page,
         cursor,
         MvccCursorType::Table,
-    )
-}
-
-/// Helper method to open an index cursor in an index method implementation.
-pub(crate) fn open_index_cursor<I, E>(
-    connection: &Arc<Connection>,
-    database_id: usize,
-    table: &str,
-    index: &str,
-    keys: I,
-) -> Result<Box<dyn CursorTrait>>
-where
-    I: IntoIterator<Item = KeyInfo, IntoIter = E>,
-    E: ExactSizeIterator<Item = KeyInfo>,
-{
-    let pager = connection.get_pager_from_database_index(&database_id)?;
-    let Some(scratch) = connection.with_schema(database_id, |schema| {
-        schema.get_index(table, index).cloned()
-    }) else {
-        return Err(LimboError::InternalError(format!(
-            "index {index} for table {table} not found",
-        )));
-    };
-    let keys = keys.into_iter();
-    let num_cols = keys.len();
-    let index_info = Arc::new(IndexInfo::new(keys, false, num_cols, scratch.unique)?);
-    let mut cursor = BTreeCursor::new(
-        pager,
-        btree_root_page(connection, database_id, scratch.root_page),
-        num_cols,
-    );
-    cursor.index_info = Some(index_info.clone());
-    promote_to_mvcc_cursor(
-        connection,
-        database_id,
-        scratch.root_page,
-        Box::new(cursor),
-        MvccCursorType::Index(index_info),
     )
 }
 
