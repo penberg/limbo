@@ -133,6 +133,7 @@ expect {
     0
 }
 
+@skip-if sqlite "sqlite errors on an invalid regexp pattern instead of returning NULL"
 test simple-count-regexp-invalid-pattern-correctness {
     CREATE TABLE t(x TEXT NOT NULL);
     INSERT INTO t VALUES ('a'),('b');
