@@ -1867,12 +1867,6 @@ fn parse_table(
         resolver.with_schema(database_id, |schema| schema.get_view(table_name.as_str()));
     if let Some(view) = regular_view {
         // Views are essentially query aliases, so just Expand the view as a subquery.
-        // A view whose body references itself (directly or transitively) is
-        // circularly defined; the in-progress set is tracked per-translation.
-        if program.is_view_being_expanded(database_id, &view.name) {
-            crate::bail_parse_error!("view {} is circularly defined", view.name);
-        }
-        program.push_view_being_expanded(database_id, view.name.clone());
         let mut view_select = view.select_stmt.clone();
         if let ast::OneSelect::Select {
             ref mut columns, ..
@@ -1893,24 +1887,17 @@ fn parse_table(
             .cloned()
             .or_else(|| Some(ast::As::As(table_name.clone())));
 
-        // Views are pre-defined definitions — their body resolves against the
-        // schema only, not against CTEs from the calling query context.
-        // Pass empty cte_definitions and temporarily clear the ctes_being_defined
-        // stack so that e.g. `WITH t AS (...) SELECT * FROM v` where view v
-        // references table t will correctly use the real table, not the CTE.
-        let saved_ctes = program.take_ctes_being_defined();
-        let result = parse_from_clause_table(
-            ast::SelectTable::Select(*subselect, view_alias),
-            resolver,
-            program,
-            table_references,
-            vtab_predicates,
-            &[],
-            connection,
-        );
-        program.restore_ctes_being_defined(saved_ctes);
-        program.pop_view_being_expanded();
-        return result;
+        return program.with_view_expansion(database_id, &view.name, |program| {
+            parse_from_clause_table(
+                ast::SelectTable::Select(*subselect, view_alias),
+                resolver,
+                program,
+                table_references,
+                vtab_predicates,
+                &[],
+                connection,
+            )
+        });
     }
 
     let view = resolver.with_schema(database_id, |schema| {
