@@ -1438,7 +1438,7 @@ impl<IO: SyncEngineIo> DatabaseSyncEngine<IO> {
             WAL_FRAME_HEADER as u64 + WAL_FRAME_SIZE as u64 * main_wal_frames
         };
         Ok(SyncEngineStats {
-            cdc_operations: count_local_changes(coro, &main_conn, change_id).await?,
+            cdc_operations: count_local_changes(coro, &main_conn, &self.opts, change_id).await?,
             main_wal_size,
             revert_wal_size,
             last_pull_unix_time,
@@ -2166,7 +2166,8 @@ impl<IO: SyncEngineIo> DatabaseSyncEngine<IO> {
             let (_, local_last_change_id) =
                 read_last_change_id(coro, &conn, &self.client_unique_id).await?;
             let pending_local_changes =
-                count_local_changes(coro, &conn, local_last_change_id.unwrap_or(0)).await?;
+                count_local_changes(coro, &conn, &self.opts, local_last_change_id.unwrap_or(0))
+                    .await?;
             if pending_local_changes != 0 {
                 return Err(Error::DatabaseSyncEngineError(format!(
                     "replace-base page apply with pending local CDC changes is not wired yet: {pending_local_changes} local changes need replay"
@@ -4260,9 +4261,10 @@ mod tests {
                     read_last_change_id(&coro, &conn, &engine.client_unique_id)
                         .await
                         .unwrap();
-                let pending_local_changes = count_local_changes(&coro, &conn, change_id.unwrap())
-                    .await
-                    .unwrap();
+                let pending_local_changes =
+                    count_local_changes(&coro, &conn, &engine.opts, change_id.unwrap())
+                        .await
+                        .unwrap();
                 let meta = engine.meta.lock().unwrap().clone();
                 (rows, meta, pull_gen, change_id, pending_local_changes)
             }
@@ -4460,7 +4462,7 @@ mod tests {
                         .await
                         .unwrap();
                 let pending_local_changes =
-                    count_local_changes(&coro, &conn, synced_change_id.unwrap())
+                    count_local_changes(&coro, &conn, &engine.opts, synced_change_id.unwrap())
                         .await
                         .unwrap();
                 let meta = engine.meta.lock().unwrap().clone();
