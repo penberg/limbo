@@ -85,7 +85,7 @@ libc = { version = "0.2.172" }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libloading = "0.8.6"
-tantivy = { version = "0.26.0", optional = true }
+tantivy = { version = "0.26.2", optional = true }
 crc32fast = { version = "1", optional = true }
 
 [dependencies]
