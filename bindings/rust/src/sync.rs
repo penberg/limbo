@@ -1773,6 +1773,57 @@ mod tests {
         }
     }
 
+    /// A partial-sync replica on a real file uses `SparseLinuxIo`, unlike the
+    /// `:memory:` replicas the other partial-sync tests build. Checkpointing
+    /// twice must work: the first call folds the WAL frames and truncates the
+    /// WAL file to zero bytes, the second call runs with an empty WAL.
+    ///
+    /// Linux-only: elsewhere a file-backed partial replica gets `PlatformIO`,
+    /// whose `has_hole` panics, so partial sync needs a memory database there.
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    pub async fn test_sync_partial_checkpoint_with_empty_wal() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let server = TursoServer::new().await.unwrap();
+        server.db_sql("CREATE TABLE t(x)").await.unwrap();
+        server
+            .db_sql("INSERT INTO t SELECT randomblob(1024) FROM generate_series(1, 2000)")
+            .await
+            .unwrap();
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("partial.db");
+        let wal_path = dir.path().join("partial.db-wal");
+        let db = crate::sync::Builder::new_remote(path.to_str().unwrap())
+            .with_remote_url(server.db_url())
+            .with_partial_sync_opts_experimental(PartialSyncOpts {
+                bootstrap_strategy: Some(PartialBootstrapStrategy::Prefix { length: 128 * 1024 }),
+                segment_size: 128 * 1024,
+                prefetch: false,
+            })
+            .build()
+            .await
+            .unwrap();
+
+        let conn = db.connect().await.unwrap();
+        conn.execute("INSERT INTO t VALUES (randomblob(1024))", ())
+            .await
+            .unwrap();
+        assert!(
+            std::fs::metadata(&wal_path).unwrap().len() > 0,
+            "local write must leave frames in the main WAL"
+        );
+
+        db.checkpoint().await.unwrap();
+        assert_eq!(
+            std::fs::metadata(&wal_path).unwrap().len(),
+            0,
+            "checkpoint must leave an empty main WAL file"
+        );
+
+        db.checkpoint().await.unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "flaky, see https://github.com/tursodatabase/turso/issues/7087"]
     pub async fn test_sync_parallel_writes_with_sync_ops() {

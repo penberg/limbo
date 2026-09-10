@@ -80,9 +80,7 @@ impl File for SparseLinuxFile {
             let r = c.as_read();
             let buf = r.buf();
             let buf = buf.as_mut_slice();
-            file.read_exact_at(buf, pos)
-                .map_err(|e| io_error(e, "pread"))?;
-            buf.len() as i32
+            read_at_until_end_of_file(&file, pos, buf)?
         };
         c.complete(nr);
         Ok(c)
@@ -171,6 +169,25 @@ impl File for SparseLinuxFile {
     }
 }
 
+/// Reports a short read at end of file instead of failing, matching
+/// `UnixFile::pread` (see core/io/unix.rs) — callers read fixed-size headers
+/// from files that can be shorter than one header (an empty WAL file) and
+/// treat the short read as "absent", so `read_exact_at` must not be used here.
+/// The `Interrupted` retry is what `read_exact_at` did internally; `read_at`
+/// alone does not retry.
+fn read_at_until_end_of_file(file: &std::fs::File, pos: u64, buf: &mut [u8]) -> Result<i32> {
+    let mut read = 0;
+    while read < buf.len() {
+        match file.read_at(&mut buf[read..], pos + read as u64) {
+            Ok(0) => break,
+            Ok(n) => read += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(io_error(e, "pread")),
+        }
+    }
+    Ok(read as i32)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -215,5 +232,44 @@ mod tests {
         file.punch_hole(2 * 4096, 4096).unwrap();
         assert!(file.has_hole(4096 * 2, 4096).unwrap());
         assert!(file.has_hole(4096, 4097).unwrap());
+    }
+    #[test]
+    pub fn pread_reports_short_read_at_end_of_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let tmp_path = tmp.into_temp_path();
+        let tmp_path = tmp_path.as_os_str().to_str().unwrap();
+        let io = SparseLinuxIo::new().unwrap();
+        let file = io.open_file(tmp_path, OpenFlags::default(), false).unwrap();
+
+        for (file_len, expected_read) in [(0, 0), (10, 10), (32, 32)] {
+            #[expect(clippy::let_underscore_future)]
+            let _ = file
+                .truncate(file_len, Completion::new_trunc(|_| {}))
+                .unwrap();
+
+            let buffer = Arc::new(Buffer::new_temporary(32));
+            let read = Arc::new(std::sync::atomic::AtomicI32::new(-1));
+            let c = file
+                .pread(
+                    0,
+                    Completion::new_read(buffer.clone(), {
+                        let read = read.clone();
+                        move |result| {
+                            read.store(
+                                result.expect("read past end of file must not fail").1,
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+                            None
+                        }
+                    }),
+                )
+                .unwrap();
+            assert!(c.succeeded());
+            assert_eq!(
+                read.load(std::sync::atomic::Ordering::SeqCst),
+                expected_read,
+                "32 byte read of a {file_len} byte file"
+            );
+        }
     }
 }
