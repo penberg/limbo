@@ -1,18 +1,14 @@
-use std::{
-    collections::{BTreeSet, HashSet, VecDeque},
-    sync::atomic::Ordering,
-};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 use crate::types::IOResultOr;
 use turso_parser::ast::{self, SortOrder};
 
 use crate::numeric::Numeric;
-use crate::util::quote_identifier;
 use crate::{
     index_method::{
-        parse_patterns, IndexMethod, IndexMethodAttachment, IndexMethodConfiguration,
-        IndexMethodContext, IndexMethodCursor, IndexMethodDefinition,
-        BACKING_BTREE_INDEX_METHOD_NAME, TOY_VECTOR_SPARSE_IVF_INDEX_METHOD_NAME,
+        parse_patterns, BackingIndex, BackingSchema, BackingStoreOp, IndexMethod,
+        IndexMethodAttachment, IndexMethodConfiguration, IndexMethodContext, IndexMethodCursor,
+        IndexMethodDefinition, TOY_VECTOR_SPARSE_IVF_INDEX_METHOD_NAME,
     },
     return_if_io,
     storage::btree::{BTreeKey, CursorTrait},
@@ -307,11 +303,11 @@ pub struct VectorSparseInvertedIndexMethodCursor {
     delta: f64,
     scan_portion: f64,
     scan_order: ScanOrder,
-    inverted_index_btree: String,
+    schema: BackingSchema,
     inverted_index_cursor: Option<Box<dyn CursorTrait>>,
-    stats_btree: String,
     stats_cursor: Option<Box<dyn CursorTrait>>,
     main_btree: Option<Box<dyn CursorTrait>>,
+    pending_store_ops: VecDeque<BackingStoreOp>,
     insert_state: VectorSparseInvertedIndexInsertState,
     delete_state: VectorSparseInvertedIndexDeleteState,
     search_state: VectorSparseInvertedIndexSearchState,
@@ -359,8 +355,30 @@ impl IndexMethodAttachment for VectorSparseInvertedIndexMethodAttachment {
 
 impl VectorSparseInvertedIndexMethodCursor {
     pub fn new(configuration: IndexMethodConfiguration) -> Self {
-        let inverted_index_btree = format!("{}_inverted_index", configuration.index_name);
-        let stats_btree = format!("{}_stats", configuration.index_name);
+        let columns = configuration
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
+        let schema = BackingSchema::new(
+            Vec::new(),
+            vec![
+                BackingIndex::on_table(
+                    &configuration.table_name,
+                    format!("{}_inverted_index", configuration.index_name),
+                    columns.clone(),
+                    // component, length, rowid
+                    vec![key_info(), key_info(), key_info()],
+                ),
+                BackingIndex::on_table(
+                    &configuration.table_name,
+                    format!("{}_stats", configuration.index_name),
+                    columns,
+                    // component
+                    vec![key_info()],
+                ),
+            ],
+        );
         let delta = match configuration.parameters.get("delta") {
             Some(&Value::Numeric(Numeric::Float(delta))) => f64::from(delta),
             _ => 0.0,
@@ -383,17 +401,43 @@ impl VectorSparseInvertedIndexMethodCursor {
             delta,
             scan_portion,
             scan_order,
-            inverted_index_btree,
+            schema,
             inverted_index_cursor: None,
-            stats_btree,
             stats_cursor: None,
             main_btree: None,
+            pending_store_ops: VecDeque::new(),
             search_result: VecDeque::new(),
             insert_state: VectorSparseInvertedIndexInsertState::Init,
             delete_state: VectorSparseInvertedIndexDeleteState::Init,
             search_state: VectorSparseInvertedIndexSearchState::Init,
         }
     }
+
+    fn drive_pending_store_ops(&mut self) -> IOResultOr<()> {
+        while let Some(op) = self.pending_store_ops.front_mut() {
+            return_if_io!(op.step());
+            self.pending_store_ops.pop_front();
+        }
+        Ok(IOResult::Done(()))
+    }
+
+    fn open_store_cursors(&mut self, context: &IndexMethodContext) -> Result<()> {
+        self.inverted_index_cursor = Some(open_store_cursor(context, &self.schema.indexes[0])?);
+        self.stats_cursor = Some(open_store_cursor(context, &self.schema.indexes[1])?);
+        Ok(())
+    }
+}
+
+fn open_store_cursor(
+    context: &IndexMethodContext,
+    index: &BackingIndex,
+) -> Result<Box<dyn CursorTrait>> {
+    context
+        .backing_store(index)?
+        .ok_or_else(|| {
+            LimboError::InternalError(format!("backing store {} not found", index.name))
+        })?
+        .open_cursor()
 }
 
 fn key_info() -> KeyInfo {
@@ -406,108 +450,29 @@ fn key_info() -> KeyInfo {
 
 impl IndexMethodCursor for VectorSparseInvertedIndexMethodCursor {
     fn create(&mut self, context: &IndexMethodContext) -> IOResultOr<()> {
-        // we need to properly track subprograms and propagate result to the root program to make this execution async
-        let connection = context.connection()?;
-        let database_id = context.database().id;
-
-        let columns = &self.configuration.columns;
-        let columns = columns.iter().map(|x| x.name.as_str()).collect::<Vec<_>>();
-        let db_prefix = connection
-            .get_database_name_by_index(database_id)
-            .filter(|name| name != "main")
-            .map(|name| format!("{}.", quote_identifier(&name)))
-            .unwrap_or_default();
-        let quoted_table = quote_identifier(&self.configuration.table_name);
-        let quoted_cols = columns
-            .iter()
-            .map(|c| quote_identifier(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let inverted_index_create = format!(
-            "CREATE INDEX {db_prefix}{} ON {quoted_table} USING {BACKING_BTREE_INDEX_METHOD_NAME} ({quoted_cols})",
-            quote_identifier(&self.inverted_index_btree),
-        );
-        let stats_index_create = format!(
-            "CREATE INDEX {db_prefix}{} ON {quoted_table} USING {BACKING_BTREE_INDEX_METHOD_NAME} ({quoted_cols})",
-            quote_identifier(&self.stats_btree),
-        );
-        for sql in [inverted_index_create, stats_index_create] {
-            let mut stmt = connection.prepare(&sql)?;
-            // by default we set needs_stmt_subtransactions = true to all write transaction
-            // this will lead to Busy error here - because Transaction opcode will be unable to acquire ownership to the subjournal as it already owned by parent statement which is still active
-            //
-            // as we run nested statement - we actually don't need subjournal as it already started before in the parent statement
-            // so, this is hacky way to fix the situation for toy index for now, but we need to implement proper helpers in order to avoid similar errors in other code later
-            stmt.program
-                .prepared
-                .needs_stmt_subtransactions
-                .store(false, Ordering::Relaxed);
-            connection.start_nested();
-            let result = stmt.run_ignore_rows();
-            connection.end_nested();
-            result?;
+        if self.pending_store_ops.is_empty() {
+            self.pending_store_ops
+                .push_back(context.create_backing_schema(&self.schema)?);
         }
-
-        Ok(IOResult::Done(()))
+        self.drive_pending_store_ops()
     }
 
     fn destroy(&mut self, context: &IndexMethodContext) -> IOResultOr<()> {
-        let connection = context.connection()?;
-        let database_id = context.database().id;
-        let db_prefix = connection
-            .get_database_name_by_index(database_id)
-            .filter(|name| name != "main")
-            .map(|name| format!("{}.", quote_identifier(&name)))
-            .unwrap_or_default();
-        let inverted_index_drop = format!(
-            "DROP INDEX {db_prefix}{}",
-            quote_identifier(&self.inverted_index_btree)
-        );
-        let stats_index_drop = format!(
-            "DROP INDEX {db_prefix}{}",
-            quote_identifier(&self.stats_btree)
-        );
-        for sql in [inverted_index_drop, stats_index_drop] {
-            let mut stmt = connection.prepare(&sql)?;
-            connection.start_nested();
-            let result = stmt.run_ignore_rows();
-            connection.end_nested();
-            result?;
+        if self.pending_store_ops.is_empty() {
+            self.pending_store_ops
+                .push_back(context.drop_backing_schema(&self.schema)?);
         }
-
-        Ok(IOResult::Done(()))
+        self.drive_pending_store_ops()
     }
 
     fn open_read(&mut self, context: &IndexMethodContext) -> IOResultOr<()> {
-        self.inverted_index_cursor = Some(context.open_index_cursor(
-            &self.configuration.table_name,
-            &self.inverted_index_btree,
-            // component, length, rowid
-            [key_info(), key_info(), key_info()],
-        )?);
-        self.stats_cursor = Some(context.open_index_cursor(
-            &self.configuration.table_name,
-            &self.stats_btree,
-            // component
-            [key_info()],
-        )?);
+        self.open_store_cursors(context)?;
         self.main_btree = Some(context.open_table_cursor(&self.configuration.table_name)?);
         Ok(IOResult::Done(()))
     }
 
     fn open_write(&mut self, context: &IndexMethodContext) -> IOResultOr<()> {
-        self.inverted_index_cursor = Some(context.open_index_cursor(
-            &self.configuration.table_name,
-            &self.inverted_index_btree,
-            // component, length, rowid
-            [key_info(), key_info(), key_info()],
-        )?);
-        self.stats_cursor = Some(context.open_index_cursor(
-            &self.configuration.table_name,
-            &self.stats_btree,
-            // component
-            [key_info()],
-        )?);
+        self.open_store_cursors(context)?;
         Ok(IOResult::Done(()))
     }
 
