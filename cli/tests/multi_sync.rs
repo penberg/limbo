@@ -206,8 +206,8 @@ fn rejects_unsafe_database_names() {
         ("/db//v2/pipeline", 400),
         ("/db/.hidden/v2/pipeline", 400),
         ("/db/../v2/pipeline", 400),
-        ("/db/nul/v2/pipeline", 400),
-        ("/db/COM1/v2/pipeline", 400),
+        ("/db/Db1/v2/pipeline", 400),
+        ("/db/DB1/v2/pipeline", 400),
     ] {
         let (status, _) = post(srv.port, path, &sql("SELECT 1"));
         assert_eq!(status, expected_status, "unexpected status for {path}");
