@@ -445,6 +445,18 @@ jobs:
             rm "$package_entries"
           done < <(find src -path '*/bin/Release/*.nupkg' -type f)
 
+          android_native=$(mktemp)
+          unzip -p "$native_package" runtimes/android-arm64/native/libturso_sdk_kit.so > "$android_native"
+          python3 scripts/check_elf_dynsym_exports.py "$android_native" \
+            turso_sync_database_new \
+            turso_sync_database_create \
+            turso_sync_database_open \
+            turso_sync_database_connect \
+            turso_sync_database_stats \
+            turso_sync_database_checkpoint \
+            turso_sync_database_deinit
+          rm "$android_native"
+
           static_packages=(
             "win-x64:turso_sdk_kit.lib"
             "win-arm64:turso_sdk_kit.lib"
@@ -717,22 +729,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk=$(find samples/MobilePackageConsumer/Android/bin/Release -name '*-Signed.apk' -print -quit)
+          apk=$(find samples/MobilePackageConsumer/Android/bin/Release -path '*android-arm64*' -name '*-Signed.apk' -print -quit)
+          if [ -z "$apk" ]; then
+            apk=$(find samples/MobilePackageConsumer/Android/bin/Release -name '*-Signed.apk' -print -quit)
+          fi
           if [ -z "$apk" ]; then
             echo "Android package consumer did not produce a signed APK"
             exit 1
           fi
+          echo "Checking Android APK $apk"
 
           native_entry=lib/arm64-v8a/libturso_sdk_kit.so
           if ! unzip -Z1 "$apk" | grep -Fxq "$native_entry"; then
             echo "$apk does not contain $native_entry"
+            unzip -Z1 "$apk" | grep -E 'lib/|\.so$' || true
             exit 1
           fi
 
           mkdir -p artifacts/mobile-android
           unzip -p "$apk" "$native_entry" > artifacts/mobile-android/libturso_sdk_kit.so
-          readelf="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          for symbol in \
+          echo "Extracted $native_entry ($(wc -c < artifacts/mobile-android/libturso_sdk_kit.so) bytes)"
+          python3 scripts/check_elf_dynsym_exports.py artifacts/mobile-android/libturso_sdk_kit.so \
             turso_sync_database_new \
             turso_sync_database_create \
             turso_sync_database_open \
@@ -740,12 +757,6 @@ jobs:
             turso_sync_database_stats \
             turso_sync_database_checkpoint \
             turso_sync_database_deinit
-          do
-            if ! "$readelf" --dyn-syms --wide artifacts/mobile-android/libturso_sdk_kit.so | grep -Eq "[[:space:]]${symbol}$"; then
-              echo "Android package asset does not export $symbol"
-              exit 1
-            fi
-          done
 
   validate-ios-package:
     needs: publish
