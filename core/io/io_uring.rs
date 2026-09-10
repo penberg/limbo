@@ -13,7 +13,7 @@ use crate::storage::wal::CKPT_BATCH_PAGES;
 use crate::sync::Mutex;
 use crate::turso_assert;
 use crate::{CompletionError, LimboError, Result};
-use rustix::fs::{self, FlockOperation, OFlags};
+use rustix::fs::{self, FlockOperation};
 use std::ptr::NonNull;
 use std::{
     collections::{HashMap, VecDeque},
@@ -434,7 +434,7 @@ impl IO for UringIO {
         true
     }
 
-    fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Arc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags, _direct: bool) -> Result<Arc<dyn File>> {
         trace!("open_file(path = {})", path);
         let mut file = std::fs::File::options();
         file.read(true);
@@ -445,15 +445,6 @@ impl IO for UringIO {
         }
 
         let file = file.open(path).map_err(|e| io_error(e, "open"))?;
-        // Let's attempt to enable direct I/O. Not all filesystems support it
-        // so ignore any errors.
-        let fd = file.as_fd();
-        if direct {
-            match fs::fcntl_setfl(fd, OFlags::DIRECT) {
-                Ok(_) => {}
-                Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
-            }
-        }
         let uring_file = Arc::new(UringFile {
             ring: self.ring.clone(),
             state: self.state.clone(),
