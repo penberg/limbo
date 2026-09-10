@@ -1136,8 +1136,7 @@ mod tests {
         host: String,
         db_prefix: String,
         server: Option<Child>,
-        // Keeps the directory alive while the spawned server may still write to it.
-        _sync_dir: Option<TempDir>,
+        _sync_dir_created_by_harness: Option<TempDir>,
         client: Client,
     }
 
@@ -1179,7 +1178,7 @@ mod tests {
                     host: format!("{name}--{name}--{name}.localhost"),
                     db_prefix: String::new(),
                     server: None,
-                    _sync_dir: None,
+                    _sync_dir_created_by_harness: None,
                     client,
                 })
             } else {
@@ -1227,7 +1226,7 @@ mod tests {
                     loop {
                         if client.get(&user_url).send().await.is_ok() {
                             let db_prefix = if sync_dir.is_some() {
-                                format!("/db/{}", random_str())
+                                format!("/db/{}", random_str().to_ascii_lowercase())
                             } else {
                                 String::new()
                             };
@@ -1238,7 +1237,7 @@ mod tests {
                                 host: String::new(),
                                 db_prefix,
                                 server: Some(child),
-                                _sync_dir: sync_dir,
+                                _sync_dir_created_by_harness: sync_dir,
                                 client,
                             });
                         }

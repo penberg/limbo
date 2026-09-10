@@ -96,7 +96,7 @@ pub struct Opts {
         long,
         requires = "sync_dir",
         default_value_t = 256,
-        help = "Maximum databases kept open at once under --sync-dir"
+        help = "Most databases held open at once under --sync-dir, one connection each; more may exist on disk"
     )]
     pub sync_max_databases: usize,
     #[clap(long, help = "Enable experimental encryption feature")]

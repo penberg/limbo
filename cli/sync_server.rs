@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -54,12 +53,17 @@ struct DbHandle {
     path: String,
 }
 
+struct OpenHandles {
+    handles: HashMap<String, Arc<DbHandle>>,
+    capacity: usize,
+}
+
 enum DbSource {
     Single(Arc<DbHandle>),
     Dir {
         base: PathBuf,
         config: OpenConfig,
-        open_handles: Mutex<HashMap<String, Arc<DbHandle>>>,
+        open_handles: Mutex<OpenHandles>,
     },
 }
 
@@ -96,16 +100,17 @@ impl TursoSyncServer {
     ) -> Result<Self> {
         if !base.is_dir() {
             return Err(anyhow!(
-                "--sync-dir path does not exist or is not a directory: {}",
+                "sync dir path does not exist or is not a directory: {}",
                 base.display()
             ));
         }
+        let open_handles = Mutex::new(OpenHandles::new(config.max_open));
         Ok(Self {
             address,
             source: DbSource::Dir {
                 base: base.canonicalize()?,
                 config,
-                open_handles: Mutex::new(HashMap::new()),
+                open_handles,
             },
             interrupt_count,
         })
@@ -130,43 +135,35 @@ impl TursoSyncServer {
                 if !validate_db_name(name) {
                     return Err(text_response(400, "Invalid database name"));
                 }
-                let mut open = open_handles.lock().unwrap();
-                let at_capacity = open.len() >= config.max_open;
-                let entry = match open.entry(name.to_string()) {
-                    Entry::Occupied(entry) => return Ok(entry.get().clone()),
-                    Entry::Vacant(_) if at_capacity => {
-                        error!(
-                            "refusing to open {name}: {} databases are open",
-                            config.max_open
-                        );
-                        return Err(text_response(503, "Too many open databases"));
+                let mut open_handles = open_handles.lock().unwrap();
+                open_handles.get_or_open(name, || {
+                    let path = db_path_for(base, name);
+                    let dir = path.parent().expect("database path has a parent directory");
+                    if !config.flags.contains(OpenFlags::ReadOnly) {
+                        if let Err(err) = std::fs::create_dir_all(dir) {
+                            error!("failed to create directory for database {name}: {err}");
+                            return Err(text_response(
+                                500,
+                                &format!("Internal Server Error: {err}"),
+                            ));
+                        }
                     }
-                    Entry::Vacant(entry) => entry,
-                };
-                let path = db_path_for(base, name);
-                let dir = path.parent().expect("database path has a parent directory");
-                if !config.flags.contains(OpenFlags::ReadOnly) {
-                    if let Err(err) = std::fs::create_dir_all(dir) {
-                        error!("failed to create directory for database {name}: {err}");
-                        return Err(text_response(500, &format!("Internal Server Error: {err}")));
-                    }
-                }
-                if !dir.canonicalize().is_ok_and(|dir| dir.starts_with(base)) {
-                    return Err(text_response(404, "Not Found"));
-                }
-                let handle = match open_db_handle(&path, config) {
-                    Ok(handle) => handle,
-                    // Sync clients retry a 500 forever but can act on a 404.
-                    Err(err) if path.exists() => {
-                        error!("failed to open database {name}: {err}");
-                        return Err(text_response(500, &format!("Internal Server Error: {err}")));
-                    }
-                    Err(err) => {
-                        debug!("no database named {name}: {err}");
+                    if !dir.canonicalize().is_ok_and(|dir| dir.starts_with(base)) {
                         return Err(text_response(404, "Not Found"));
                     }
-                };
-                Ok(entry.insert(handle).clone())
+                    match open_db_handle(&path, config) {
+                        Ok(handle) => Ok(handle),
+                        // Sync clients retry a 500 forever but can act on a 404.
+                        Err(err) if path.exists() => {
+                            error!("failed to open database {name}: {err}");
+                            Err(text_response(500, &format!("Internal Server Error: {err}")))
+                        }
+                        Err(err) => {
+                            debug!("no database named {name}: {err}");
+                            Err(text_response(404, "Not Found"))
+                        }
+                    }
+                })
             }
         }
     }
@@ -1377,24 +1374,12 @@ fn parse_route<'a>(method: &str, path: &'a str) -> Route<'a> {
     }
 }
 
-const WINDOWS_RESERVED_DEVICE_NAMES: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-];
-
 fn validate_db_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && name
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        && !is_windows_reserved_device_name(name)
-}
-
-fn is_windows_reserved_device_name(name: &str) -> bool {
-    WINDOWS_RESERVED_DEVICE_NAMES
-        .iter()
-        .any(|reserved| name.eq_ignore_ascii_case(reserved))
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
 fn db_path_for(base: &Path, name: &str) -> PathBuf {
@@ -1403,13 +1388,42 @@ fn db_path_for(base: &Path, name: &str) -> PathBuf {
     base.join(name).join("data")
 }
 
+impl OpenHandles {
+    fn new(capacity: usize) -> Self {
+        Self {
+            handles: HashMap::new(),
+            capacity,
+        }
+    }
+
+    fn get_or_open(
+        &mut self,
+        name: &str,
+        open: impl FnOnce() -> std::result::Result<Arc<DbHandle>, HttpResponse>,
+    ) -> std::result::Result<Arc<DbHandle>, HttpResponse> {
+        if let Some(handle) = self.handles.get(name) {
+            return Ok(handle.clone());
+        }
+        if self.handles.len() >= self.capacity {
+            error!(
+                "refusing to open {name}: {} databases are open",
+                self.capacity
+            );
+            return Err(text_response(503, "Too many open databases"));
+        }
+        let handle = open()?;
+        self.handles.insert(name.to_string(), handle.clone());
+        Ok(handle)
+    }
+}
+
 fn open_db_handle(path: &Path, config: &OpenConfig) -> Result<Arc<DbHandle>> {
     let path_str = path.to_string_lossy().to_string();
     let (_io, db) = Database::open_new(
         &path_str,
         config.vfs.as_deref(),
         config.flags,
-        config.db_opts.turso_cli(),
+        config.db_opts,
         None,
         Arc::new(SqliteDialect),
     )?;
@@ -1467,19 +1481,7 @@ mod tests {
 
     #[test]
     fn validates_database_names() {
-        for ok in [
-            "db1",
-            "a-b_c",
-            "A1",
-            "x",
-            "console",
-            "common",
-            "com",
-            "com10",
-            "lpt",
-            "nullable",
-            &"n".repeat(128),
-        ] {
+        for ok in ["db1", "a-b_c", "x", "nul", "con", &"n".repeat(128)] {
             assert!(validate_db_name(ok), "expected {ok:?} to be valid");
         }
         for bad in [
@@ -1492,13 +1494,9 @@ mod tests {
             "a.b",
             "a%2fb",
             "a b",
-            "nul",
-            "NUL",
-            "Con",
-            "aux",
-            "prn",
-            "com1",
-            "lpt9",
+            "A1",
+            "Db1",
+            "DB1",
             &"n".repeat(129),
         ] {
             assert!(!validate_db_name(bad), "expected {bad:?} to be rejected");
@@ -1595,25 +1593,16 @@ mod tests {
 
     #[test]
     fn refuses_new_databases_once_the_open_map_is_full() {
-        let base = std::env::temp_dir().join(format!("turso-sync-cap-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-        let server = dir_server(&base);
+        let base = tempfile::TempDir::new().unwrap();
+        let server = dir_server(base.path());
 
-        let handle = match server.resolve_db(Some("db0")) {
-            Ok(handle) => handle,
-            Err(resp) => panic!("first open must succeed, got {}", resp.status),
-        };
-        let DbSource::Dir {
-            open_handles: open, ..
-        } = &server.source
-        else {
-            unreachable!("dir_server builds a directory source");
-        };
-        {
-            let mut open = open.lock().unwrap();
-            for i in 1..TEST_MAX_OPEN {
-                open.insert(format!("db{i}"), handle.clone());
+        for i in 0..TEST_MAX_OPEN {
+            let name = format!("db{i}");
+            if let Err(resp) = server.resolve_db(Some(&name)) {
+                panic!(
+                    "opening {name} under the cap must succeed, got {}",
+                    resp.status
+                );
             }
         }
 
@@ -1626,38 +1615,28 @@ mod tests {
         };
         assert_eq!(refused.status, 503);
         assert!(
-            !base.join("overflow").exists(),
+            !base.path().join("overflow").exists(),
             "a refused database must not reach the filesystem"
         );
-
-        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
     fn refuses_a_database_directory_that_escapes_the_served_tree() {
-        let base = std::env::temp_dir().join(format!("turso-sync-escape-{}", std::process::id()));
-        let outside =
-            std::env::temp_dir().join(format!("turso-sync-outside-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let _ = std::fs::remove_dir_all(&outside);
-        std::fs::create_dir_all(&base).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
+        let base = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, base.join("escaped")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), base.path().join("escaped")).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside, base.join("escaped")).unwrap();
+        std::os::windows::fs::symlink_dir(outside.path(), base.path().join("escaped")).unwrap();
 
-        let server = dir_server(&base);
+        let server = dir_server(base.path());
         let Err(refused) = server.resolve_db(Some("escaped")) else {
             panic!("a symlinked database directory must be refused");
         };
         assert_eq!(refused.status, 404);
         assert!(
-            !outside.join("data").exists(),
+            !outside.path().join("data").exists(),
             "a refused name must not create files outside the served tree"
         );
-
-        std::fs::remove_dir_all(&base).unwrap();
-        std::fs::remove_dir_all(&outside).unwrap();
     }
 }

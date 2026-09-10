@@ -113,15 +113,13 @@ Start a local HTTP server that implements the Turso sync protocol. The `@tursoda
 npx turso myapp.db --sync-server "0.0.0.0:8080"
 ```
 
-Serve a whole directory of databases instead of a single file with `--sync-dir`. `PATH` must already exist, and each database is addressed by name beneath `/db/{name}`:
+To serve a directory of databases instead of a single file, pass `--sync-dir`. Each database is addressed by name at `/db/{name}` and created on first request:
 
 ```bash
 npx turso --sync-server "127.0.0.1:8080" --sync-dir ./dbs
 ```
 
-A client syncing against `http://localhost:8080/db/db1` reads and writes `./dbs/db1/data` (with its WAL alongside as `data-wal`, matching `sqld`'s layout), created on first request — except under `--readonly`, where a database that doesn't already exist can't be created and the request fails with `404 Not Found`. Names must match `^[A-Za-z0-9_-]+$` and are capped at 128 characters; anything else gets `400 Bad Request`, as do the Windows reserved device names (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`, in any case), which Windows resolves as devices from any directory whatever the extension. `--sync-dir` requires `--sync-server` and can't be combined with a positional database argument. `--readonly`, `--vfs`, and `--experimental-*` flags apply to every database served this way; with `--experimental-attach`, a client can `ATTACH DATABASE` an arbitrary filesystem path and reach files outside the served directory, so the name restrictions above don't confine it.
-
-Requests are handled one at a time across all databases in a directory, so distinct databases don't progress independently, and opened database handles are cached for the life of the process without eviction, up to `--sync-max-databases` at once (default 256) — past that, a request for a database that isn't already open gets `503 Service Unavailable`. Any client that can reach the port can create a database by requesting a new valid name, so disk space and inodes still accumulate without a cap. This mode has no authentication or multi-tenancy and is intended for local and development use.
+A client syncing against `http://localhost:8080/db/db1` reads and writes `./dbs/db1/data`. Names must match `^[a-z0-9_-]+$`. This mode has no authentication and is meant for local development; see the [CLI documentation](https://docs.turso.tech) for the full details and limits.
 
 ### MCP Server
 
