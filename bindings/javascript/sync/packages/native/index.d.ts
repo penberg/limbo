@@ -230,6 +230,7 @@ export declare class JsProtocolRequestBytes {
 
 export declare class SyncEngine {
   constructor(opts: SyncEngineOpts)
+  filePaths(): Array<string>
   connect(): GeneratorHolder
   ioLoopSync(): void
   /** Runs the I/O loop asynchronously, returning a Promise. */

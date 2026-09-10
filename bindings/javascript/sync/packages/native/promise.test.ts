@@ -1,4 +1,4 @@
-import { unlinkSync } from "node:fs";
+import { statSync, unlinkSync } from "node:fs";
 import { test as baseTest, expect } from 'vitest'
 import { connect, Database, DatabaseRowMutation, DatabaseRowTransformResult, retryFetch } from './promise.js'
 import { TursoServer } from './turso-server.js'
@@ -220,6 +220,51 @@ test.skipIf(process.env.LOCAL_SYNC_SERVER)('partial sync (query bootstrap strate
     expect(await (await db.prepare("SELECT length(value) as length FROM partial_keyed WHERE key = 1000")).all()).toEqual([{ length: 1024 }]);
     const n2 = await db.stats();
     expect(n1.networkReceivedBytes).toEqual(n2.networkReceivedBytes);
+})
+
+// A partial-sync replica stored in a file uses the sparse IO backend, unlike
+// the ':memory:' replicas of the tests above. Checkpointing twice must work:
+// the first call folds the WAL frames and truncates the WAL file to zero
+// bytes, the second one runs with an empty WAL.
+test('partial sync (checkpoint with empty WAL)', async ({ server }) => {
+    {
+        const db = await connect({
+            path: ':memory:',
+            url: server.dbUrl(),
+            longPollTimeoutMs: 100,
+        });
+        await db.exec("CREATE TABLE IF NOT EXISTS partial(value BLOB)");
+        await db.exec("DELETE FROM partial");
+        await db.exec("INSERT INTO partial SELECT randomblob(1024) FROM generate_series(1, 2000)");
+        await db.push();
+        await db.close();
+    }
+
+    const path = `partial-checkpoint-${(Math.random() * 10000) | 0}.db`;
+    try {
+        const db = await connect({
+            path,
+            url: server.dbUrl(),
+            longPollTimeoutMs: 100,
+            partialSyncExperimental: {
+                bootstrapStrategy: { kind: 'prefix', length: 128 * 1024 },
+                segmentSize: 128 * 1024,
+            },
+        });
+
+        await (await db.prepare("INSERT INTO partial VALUES (randomblob(1024))")).run();
+        expect((await db.stats()).mainWalSize).toBeGreaterThan(0);
+
+        await db.checkpoint();
+        expect((await db.stats()).mainWalSize).toBe(0);
+        expect(statSync(`${path}-wal`).size).toBe(0);
+
+        await db.checkpoint();
+        await db.close();
+    }
+    finally {
+        cleanup(path);
+    }
 })
 
 test('concurrent-actions-consistency', async ({ server }) => {
