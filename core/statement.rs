@@ -520,14 +520,10 @@ impl Statement {
         }
         let timeout = match self.query_timeout_override {
             Some(timeout_override) => timeout_override,
-            None => {
-                let connection_timeout = self.program.connection.get_query_timeout();
-                if connection_timeout.is_zero() {
-                    None
-                } else {
-                    Some(connection_timeout)
-                }
-            }
+            None => match self.program.connection.get_query_timeout_ms() {
+                0 => None,
+                millis => Some(Duration::from_millis(millis)),
+            },
         };
         let Some(timeout) = timeout else {
             return;

@@ -1187,8 +1187,11 @@ impl ProgramState {
             }
             *context = None;
         }
-        for (mut cursor, context) in self.closed_index_method_cursors.drain(..) {
-            cursor.close(&context);
+        if !self.closed_index_method_cursors.is_empty() {
+            // for performance reasons
+            for (mut cursor, context) in self.closed_index_method_cursors.drain(..) {
+                cursor.close(&context);
+            }
         }
         self.index_method_finalize_cursor = 0;
         self.index_method_finalize_subprogram_keys = None;
@@ -1249,7 +1252,7 @@ impl ProgramState {
         *self.n_change.get_mut() = 0;
         *self.n_total_change.get_mut() = 0;
         // reset has exclusive access, so no lock or atomic store is needed.
-        *self.explain_state.get_mut() = ExplainState::default();
+        self.explain_state.get_mut().clear();
         self.pending_fail_error = None;
         self.pending_fail_prepare_error = None;
         self.halt_in_progress = false;
@@ -1800,6 +1803,14 @@ impl ExplainState {
         if self.queued_subprograms.insert(subprogram_id) {
             self.pending.push_back(subprogram);
         }
+    }
+
+    fn clear(&mut self) {
+        // optimization to skip the drop glue
+        if self.pending.is_empty() && self.queued_subprograms.is_empty() && self.current.is_none() {
+            return;
+        }
+        *self = Self::default();
     }
 }
 

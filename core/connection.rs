@@ -4832,8 +4832,8 @@ impl Connection {
     }
 
     /// Get the query timeout duration.
-    pub fn get_query_timeout(&self) -> Duration {
-        Duration::from_millis(self.query_timeout_ms.load(Ordering::SeqCst))
+    pub fn get_query_timeout_ms(&self) -> u64 {
+        self.query_timeout_ms.load(Ordering::SeqCst)
     }
 
     /// Get a reference to the busy handler.

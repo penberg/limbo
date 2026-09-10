@@ -572,7 +572,7 @@ impl PageInner {
     pub fn cell_table_leaf_read_header(&self, idx: usize) -> crate::Result<TableLeafCellHeader> {
         turso_debug_assert!(matches!(self.page_type(), Ok(PageType::TableLeaf)));
         let buf = self.as_ptr();
-        let cell_pointer_array_start = self.header_size();
+        let cell_pointer_array_start = LEAF_PAGE_HEADER_SIZE_BYTES;
         let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
         // Bound-check the array entry: `idx` is the untrusted on-disk cell count.
         crate::assert_or_bail_corrupt!(
