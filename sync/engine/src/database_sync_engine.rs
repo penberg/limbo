@@ -3258,8 +3258,8 @@ mod tests {
         },
         database_sync_engine_io::{DataCompletion, DataPollResult, SyncEngineIo},
         database_sync_operations::{
-            count_local_changes, max_local_change_id, read_last_change_id, read_wal_salt,
-            update_last_change_id, MutexSlot, PullUpdatesV1Result, SyncEngineIoStats,
+            count_local_changes, max_local_change_id, read_last_change_id, update_last_change_id,
+            MutexSlot, PullUpdatesV1Result, SyncEngineIoStats,
         },
         database_tape::{run_stmt_once, DatabaseTape, DatabaseTapeOpts},
         errors::Error,
@@ -3271,8 +3271,7 @@ mod tests {
         types::{
             Coro, DatabaseMetadata, DatabasePullRevision, DatabaseSavedConfiguration,
             DatabaseSyncEngineProtocolVersion, DbChangesStatus, DbChangesStreamKind,
-            PartialBootstrapStrategy, PartialSyncOpts, RemotePullProtocol, SyncEngineIoResult,
-            DATABASE_METADATA_VERSION,
+            PartialSyncOpts, RemotePullProtocol, SyncEngineIoResult, DATABASE_METADATA_VERSION,
         },
         Result,
     };
@@ -5221,8 +5220,9 @@ mod tests {
     /// Reported bug: on a partial-sync database `checkpoint()` succeeds while
     /// the main WAL holds frames, and then fails with
     /// `I/O error (pread): unexpected end of file` on every checkpoint that
-    /// runs while the WAL is empty.
+    /// runs while the WAL is empty. Linux-only, because `SparseLinuxIo` is.
     #[test]
+    #[cfg(target_os = "linux")]
     fn partial_sync_checkpoint_succeeds_when_main_wal_is_empty() {
         let io: Arc<dyn turso_core::IO> = Arc::new(crate::sparse_io::SparseLinuxIo::new().unwrap());
         // A prefix covering the whole remote database leaves no holes, so the
@@ -5230,7 +5230,7 @@ mod tests {
         let result = bootstrap_and_checkpoint_twice(
             io,
             Some(PartialSyncOpts {
-                bootstrap_strategy: Some(PartialBootstrapStrategy::Prefix {
+                bootstrap_strategy: Some(crate::types::PartialBootstrapStrategy::Prefix {
                     length: usize::MAX / 2,
                 }),
                 segment_size: 128 * 1024,
@@ -5246,8 +5246,8 @@ mod tests {
     }
 
     /// Control for [`partial_sync_checkpoint_succeeds_when_main_wal_is_empty`]:
-    /// the very same sequence over a full-sync replica never fails, because
-    /// `PlatformIO` reports a short read where `SparseLinuxIo` errors out.
+    /// the very same sequence over a full-sync replica, which always worked
+    /// because `PlatformIO` reports a short read at end of file.
     #[test]
     fn full_sync_checkpoint_succeeds_when_main_wal_is_empty() {
         let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
@@ -5259,8 +5259,10 @@ mod tests {
     /// written for a WAL file that may be shorter than one header: a short
     /// read means "no salt". Every IO backend must report that short read
     /// rather than an error, otherwise partial sync (the only user of
-    /// `SparseLinuxIo`) cannot checkpoint an empty WAL.
+    /// `SparseLinuxIo`) cannot checkpoint an empty WAL. Linux-only, because
+    /// `SparseLinuxIo` is.
     #[test]
+    #[cfg(target_os = "linux")]
     fn read_wal_salt_of_empty_wal_file_is_none_on_every_io() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let wal_path = temp_dir
@@ -5281,7 +5283,7 @@ mod tests {
                 move |coro| async move {
                     let coro: Coro<()> = coro.into();
                     let wal = io.try_open(&wal_path)?.expect("wal file exists");
-                    read_wal_salt(&coro, &wal).await
+                    super::read_wal_salt(&coro, &wal).await
                 }
             });
             let result = loop {

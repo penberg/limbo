@@ -225,8 +225,9 @@ test.skipIf(process.env.LOCAL_SYNC_SERVER)('partial sync (query bootstrap strate
 // A partial-sync replica stored in a file uses the sparse IO backend, unlike
 // the ':memory:' replicas of the tests above. Checkpointing twice must work:
 // the first call folds the WAL frames and truncates the WAL file to zero
-// bytes, the second one runs with an empty WAL.
-test('partial sync (checkpoint with empty WAL)', async ({ server }) => {
+// bytes, the second one runs with an empty WAL. Linux-only: the sparse backend
+// exists there only, and elsewhere a file-backed partial replica panics.
+test.runIf(process.platform === 'linux')('partial sync (checkpoint with empty WAL)', async ({ server }) => {
     {
         const db = await connect({
             path: ':memory:',

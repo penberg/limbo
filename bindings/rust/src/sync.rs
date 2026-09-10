@@ -1777,7 +1777,11 @@ mod tests {
     /// `:memory:` replicas the other partial-sync tests build. Checkpointing
     /// twice must work: the first call folds the WAL frames and truncates the
     /// WAL file to zero bytes, the second call runs with an empty WAL.
+    ///
+    /// Linux-only: elsewhere a file-backed partial replica gets `PlatformIO`,
+    /// whose `has_hole` panics, so partial sync needs a memory database there.
     #[tokio::test]
+    #[cfg(target_os = "linux")]
     pub async fn test_sync_partial_checkpoint_with_empty_wal() {
         let _ = tracing_subscriber::fmt::try_init();
         let server = TursoServer::new().await.unwrap();
