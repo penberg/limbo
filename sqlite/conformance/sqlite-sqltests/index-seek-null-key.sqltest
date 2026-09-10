@@ -54,3 +54,23 @@ test json-arrow-existing-path-still-uses-index {
 expect {
     1
 }
+
+@skip-if sqlite "@> isn't supported by sqlite"
+@requires custom_types "array operators require --experimental-custom-types"
+@setup schema
+test array-contains-non-array-operand-select {
+    SELECT count(*) FROM t3 WHERE c > (5 @> 5);
+}
+expect {
+    0
+}
+
+@skip-if sqlite "&& isn't supported by sqlite"
+@requires custom_types "array operators require --experimental-custom-types"
+@setup schema
+test array-overlap-non-array-operand-select {
+    SELECT count(*) FROM t3 WHERE c > (5 && 5);
+}
+expect {
+    0
+}
