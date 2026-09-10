@@ -10,23 +10,27 @@ Performance comparison of Turso vs SQLite using the [TPC-H](http://www.tpc.org/t
 
 That builds `tursodb` in release mode, installs a local `sqlite3`,
 downloads the 1.2 GB TPC-H database if it is not there yet, times every
-query on both engines with the page cache dropped before each one, and
-draws the figure. It takes about ten minutes and asks for sudo once.
-You need Rust, `uv` for the plot, and `wget` or `curl` for the download.
+query on both engines with the page cache dropped before each one, five
+passes over all the queries, and draws the figure. It takes about half an
+hour and asks for sudo once. You need Rust, `uv` for the plot, and `wget`
+or `curl` for the download. `REPEATS=1 ./scripts/run.sh` makes one pass
+for a quick look.
 
 ## What it writes
 
 Everything goes into `plot/`:
 
-- `results_<timestamp>.txt`, the raw timings as one CSV block.
-- `results.csv`, the same block converted by `plot/results2csv.sh` for
-  the plot script.
+- `results_<timestamp>-r<pass>.txt`, the raw timings of one pass as one
+  CSV block.
+- `results-r<pass>.csv`, the same block converted by `plot/results2csv.sh`
+  for the plot script.
 - `tpch.png`, `tpch.pdf` and `tpch.tikz`, a grouped bar chart of
   per-query runtime for Limbo and SQLite on a log scale, in the same style
-  as the `perf/latency` and `perf/throughput` plots. The `.tikz` is a
-  pgfplots picture to `\input` into a LaTeX document that loads pgfplots
-  with `\pgfplotsset{compat=1.18}`. A query an engine did not run is
-  marked `n/a` in the table under the bars.
+  as the `perf/latency` and `perf/throughput` plots. Each bar is the
+  median over the passes and its whiskers reach the fastest and the
+  slowest one. The `.tikz` is a pgfplots picture to `\input` into a LaTeX
+  document that loads pgfplots with `\pgfplotsset{compat=1.18}`. A query
+  an engine did not run is marked `n/a` in the table under the bars.
 
 ## Running the benchmark on its own
 
@@ -43,12 +47,14 @@ which takes as long again, and appends those timings and the difference
 between the two passes. `ANALYZE=0` skips the second pass and
 `RESULTS_FILE` names the output file.
 
-To draw a figure from an existing results file:
+To draw a figure from existing results files, convert each one and give
+the plot script all of them; with a single file the bars have no whiskers:
 
 ```bash
 cd perf/tpc-h/plot
-./results2csv.sh ../results_20260216_143000.txt > results.csv
-uv run plot-tpch.py results.csv
+./results2csv.sh ../results_20260216_143000.txt > results-r1.csv
+./results2csv.sh ../results_20260216_151200.txt > results-r2.csv
+uv run plot-tpch.py results-r1.csv results-r2.csv
 ```
 
 Pass `analyze` after the file name to convert the `ANALYZE` block, and
