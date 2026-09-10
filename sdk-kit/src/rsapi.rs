@@ -1183,7 +1183,7 @@ impl TursoConnection {
     }
     /// Get the current per-statement query timeout (`Duration::ZERO` when disabled).
     pub fn get_query_timeout(&self) -> Duration {
-        self.connection.get_query_timeout()
+        Duration::from_millis(self.connection.get_query_timeout_ms())
     }
     pub fn get_auto_commit(&self) -> bool {
         self.connection.get_auto_commit()

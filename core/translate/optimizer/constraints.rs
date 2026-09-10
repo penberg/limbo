@@ -518,6 +518,168 @@ fn expression_matches_table(
     }
 }
 
+pub(super) fn add_implied_column_equalities(
+    where_clause: &mut Vec<WhereTerm>,
+    table_references: &TableReferences,
+) -> Result<()> {
+    let mut columns = Vec::new();
+    let mut parents = Vec::new();
+    let mut direct_pairs = Vec::new();
+
+    for term in where_clause
+        .iter()
+        .filter(|term| term.from_outer_join.is_none())
+    {
+        let Some((left, operator, right)) = as_binary_components(&term.expr)? else {
+            continue;
+        };
+        if operator.as_ast_operator() != Some(ast::Operator::Equals) {
+            continue;
+        }
+        let (Some((left_table, left_column)), Some((right_table, right_column))) =
+            (plain_column(left), plain_column(right))
+        else {
+            continue;
+        };
+        if left_table == right_table {
+            continue;
+        }
+
+        let left_affinity = get_expr_affinity(left, Some(table_references), None);
+        let right_affinity = get_expr_affinity(right, Some(table_references), None);
+        let left_collation = get_collseq_from_expr(left, table_references)?.unwrap_or_default();
+        let right_collation = get_collseq_from_expr(right, table_references)?.unwrap_or_default();
+        if left_affinity != right_affinity
+            || left_collation != right_collation
+            || !matches!(
+                left_collation,
+                CollationSeq::Binary | CollationSeq::NoCase | CollationSeq::Rtrim
+            )
+        {
+            continue;
+        }
+
+        let left_index = find_or_add_equal_column(
+            &mut columns,
+            &mut parents,
+            left_table,
+            left_column,
+            left.clone(),
+        );
+        let right_index = find_or_add_equal_column(
+            &mut columns,
+            &mut parents,
+            right_table,
+            right_column,
+            right.clone(),
+        );
+        direct_pairs.push(ordered_pair(left_index, right_index));
+        union_equal_columns(&mut parents, left_index, right_index);
+    }
+
+    let mut inferred = Vec::new();
+    for member in 0..columns.len() {
+        let representative = equal_column_root(&mut parents, member);
+        if representative == member
+            || columns[representative].table == columns[member].table
+            || direct_pairs.contains(&ordered_pair(representative, member))
+            || both_columns_are_rowid_aliases(&columns[representative].expr, &columns[member].expr)
+        {
+            continue;
+        }
+        inferred.push(WhereTerm {
+            expr: ast::Expr::Binary(
+                Box::new(columns[representative].expr.clone()),
+                ast::Operator::Equals,
+                Box::new(columns[member].expr.clone()),
+            ),
+            from_outer_join: None,
+            // The inferred term can select an access path. The original
+            // equalities still verify the result during execution.
+            consumed: true,
+        });
+    }
+
+    where_clause.extend(inferred);
+    Ok(())
+}
+
+fn both_columns_are_rowid_aliases(left: &ast::Expr, right: &ast::Expr) -> bool {
+    matches!(
+        left,
+        ast::Expr::Column {
+            is_rowid_alias: true,
+            ..
+        }
+    ) && matches!(
+        right,
+        ast::Expr::Column {
+            is_rowid_alias: true,
+            ..
+        }
+    )
+}
+
+struct EqualColumn {
+    table: TableInternalId,
+    column: usize,
+    expr: ast::Expr,
+}
+
+fn plain_column(expr: &ast::Expr) -> Option<(TableInternalId, usize)> {
+    let ast::Expr::Column { table, column, .. } = expr else {
+        return None;
+    };
+    Some((*table, *column))
+}
+
+fn find_or_add_equal_column(
+    columns: &mut Vec<EqualColumn>,
+    parents: &mut Vec<usize>,
+    table: TableInternalId,
+    column: usize,
+    expr: ast::Expr,
+) -> usize {
+    if let Some(index) = columns
+        .iter()
+        .position(|item| item.table == table && item.column == column)
+    {
+        return index;
+    }
+    let index = columns.len();
+    columns.push(EqualColumn {
+        table,
+        column,
+        expr,
+    });
+    parents.push(index);
+    index
+}
+
+fn ordered_pair(left: usize, right: usize) -> (usize, usize) {
+    (left.min(right), left.max(right))
+}
+
+fn union_equal_columns(parents: &mut [usize], left: usize, right: usize) {
+    let left_root = equal_column_root(parents, left);
+    let right_root = equal_column_root(parents, right);
+    if left_root != right_root {
+        let representative = left_root.min(right_root);
+        parents[left_root] = representative;
+        parents[right_root] = representative;
+    }
+}
+
+fn equal_column_root(parents: &mut [usize], column: usize) -> usize {
+    let parent = parents[column];
+    if parent == column {
+        return column;
+    }
+    let root = equal_column_root(parents, parent);
+    parents[column] = root;
+    root
+}
+
 /// Precompute all potentially usable [Constraints] from a WHERE clause.
 /// The resulting list of [TableConstraints] is then used to evaluate the best access methods for various join orders.
 ///
@@ -1302,7 +1464,7 @@ pub fn usable_constraints_for_lhs_mask(
         if other_side_refers_to_self {
             // Self-referential constraints cannot seed a lookup, but if they are
             // on a later index column they also terminate the usable prefix.
-            if cref.index_col_pos != current_required_column_pos {
+            if cref.index_col_pos > current_required_column_pos {
                 break;
             }
             continue;
@@ -1311,7 +1473,7 @@ pub fn usable_constraints_for_lhs_mask(
             // Join-dependent constraints are only usable when every referenced
             // outer table is already on the left side of the join order. As
             // above, a missing earlier prefix column terminates the prefix.
-            if cref.index_col_pos != current_required_column_pos {
+            if cref.index_col_pos > current_required_column_pos {
                 break;
             }
             continue;

@@ -4,9 +4,9 @@ This directory contains the script that runs inside the `limbo-sim` Docker image
 
 ## What it does
 
-1. The limbo-sim image is built and pushed to ECR by [.github/workflows/build-sim.yaml](../.github/workflows/build-sim.yaml) on every main commit
+1. The limbo-sim image is built and pushed to ECR by [.github/workflows/build-sim.yml](../../../.github/workflows/build-sim.yml) on every main commit
 2. When the container starts, this script:
-   - Runs the [limbo-sim](../simulator/) program with a random seed
+   - Runs the [limbo-sim](../Cargo.toml) program with a random seed
    - If a panic occurs:
      - Captures the seed value and commit hash
      - Creates a GitHub issue with reproduction steps

@@ -485,6 +485,7 @@ pub(crate) fn emit_materialized_build_inputs(
             true,
             crate::translate::eqp::EqpDetail::HashBuild {
                 table: crate::translate::eqp::EqpTable::from_joined(build_table),
+                estimate: build_table.plan_estimate,
             }
         );
         program.emit_insn(Insn::OpenEphemeral {

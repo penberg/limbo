@@ -96,6 +96,7 @@ pub enum SpillResult {
 /// Sweep order follows next: tail (LRU) -> head (MRU) -> .. -> tail
 /// New pages are inserted after the clock hand in the `next` direction,
 /// which places them at head (MRU) (i.e. `tail.next` is the head).
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct PageCache {
     /// Capacity in pages
     capacity: usize,
@@ -106,9 +107,11 @@ pub struct PageCache {
     /// Clock hand cursor for SIEVE eviction (pointer to an entry in the queue, or null)
     clock_hand: *mut PageCacheEntry,
     /// Threshold number of pages at which we start spilling dirty pages.
+    #[cfg_attr(feature = "aristo-instr", inspect)]
     spill_threshold: usize,
     spill_enabled: bool,
     /// Conservative estimation of pages that are evictable based on dirty/spilled state.
+    #[cfg_attr(feature = "aristo-instr", inspect)]
     evictable_count: usize,
 }
 
@@ -336,17 +339,17 @@ impl PageCache {
 
         if page.is_locked() {
             return Err(CacheError::Locked {
-                pgno: page.get().id,
+                pgno: page.get().id(),
             });
         }
         if page.is_dirty() {
             return Err(CacheError::Dirty {
-                pgno: page.get().id,
+                pgno: page.get().id(),
             });
         }
         if page.is_pinned() {
             return Err(CacheError::Pinned {
-                pgno: page.get().id,
+                pgno: page.get().id(),
             });
         }
 
@@ -355,7 +358,7 @@ impl PageCache {
 
         if clean_page {
             page.clear_loaded();
-            let _ = page.get().buffer.take();
+            let _ = page.get().take_buffer();
         }
 
         // Remove from map first
@@ -481,6 +484,15 @@ impl PageCache {
 
     #[inline]
     /// Count pages that can be evicted without spilling.
+    ///
+    /// Verification-only: `expose_pub` raises this to a public
+    /// `inspect_count_evictable_pages()` so the aretta-books harness can read
+    /// the O(n) ground-truth evictable count (aretta-books accessor A-05).
+    /// NEVER use in production.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        aristo::instrument::expose_pub(as = "inspect_count_evictable_pages")
+    )]
     fn count_evictable_pages(&self) -> usize {
         self.map
             .values()
@@ -509,7 +521,7 @@ impl PageCache {
             && !page.is_locked()
             && !page.is_pinned()
             && Arc::strong_count(page) == 1
-            && page.get().id.ne(&DatabaseHeader::PAGE_ID)
+            && page.get().id().ne(&DatabaseHeader::PAGE_ID)
             && page.get().overflow_cells.is_empty()
     }
 
@@ -519,7 +531,7 @@ impl PageCache {
     /// since those are typically short-lived. We track based on dirty/spilled state.
     fn counted_as_evictable(page: &PageRef) -> bool {
         // Page 1 is never evictable
-        if page.get().id == DatabaseHeader::PAGE_ID {
+        if page.get().id() == DatabaseHeader::PAGE_ID {
             return false;
         }
         // A page is evictable if it's clean OR spilled
@@ -535,7 +547,7 @@ impl PageCache {
             let page = &entry.page;
             // Page was evictable (clean or spilled) before becoming dirty,
             // now it's dirty && !spilled, so not evictable
-            if page.get().id != DatabaseHeader::PAGE_ID {
+            if page.get().id() != DatabaseHeader::PAGE_ID {
                 // Only decrement if we were counting it as evictable
                 // (it was clean or spilled before this call)
                 self.evictable_count = self.evictable_count.saturating_sub(1);
@@ -551,7 +563,7 @@ impl PageCache {
             let entry = unsafe { &*entry_ptr };
             let page = &entry.page;
             // Page was dirty && !spilled (not evictable), now it's spilled (evictable)
-            if page.get().id != DatabaseHeader::PAGE_ID {
+            if page.get().id() != DatabaseHeader::PAGE_ID {
                 self.evictable_count += 1;
             }
         }
@@ -582,7 +594,7 @@ impl PageCache {
                 break;
             }
         }
-        spillable.sort_by_key(|pg| pg.get().id);
+        spillable.sort_by_key(|pg| pg.get().id());
         spillable
     }
 
@@ -612,6 +624,16 @@ impl PageCache {
     /// their ref_bit and leaving them in place; only pages with ref_bit == 0 are evicted.
     ///
     /// Returns `CacheError::Full` if not enough pages can be evicted
+    ///
+    /// Verification-only: the `aristo-instr` `expose_pub` raises this to a public
+    /// `inspect_make_room_for()` so the aretta-books page-cache conformance harness
+    /// can drive the real SIEVE eviction sweep directly (aretta-books accessor A-29).
+    /// This exposes an existing internal eviction primitive; it adds no new
+    /// behaviour. NEVER use in production.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        aristo::instrument::expose_pub(as = "inspect_make_room_for")
+    )]
     fn make_room_for(&mut self, n: usize, bypass_capacity: bool) -> Result<(), CacheError> {
         if bypass_capacity {
             return Ok(());
@@ -632,7 +654,7 @@ impl PageCache {
         (!page.is_dirty() || page.is_spilled())
             && !page.is_locked()
             && !page.is_pinned()
-            && page.get().id.ne(&DatabaseHeader::PAGE_ID)
+            && page.get().id().ne(&DatabaseHeader::PAGE_ID)
             && Arc::strong_count(page) == 1
     }
 
@@ -678,7 +700,7 @@ impl PageCache {
                 self.map.remove(&key);
                 // Clean the page
                 page.clear_loaded();
-                let _ = page.get().buffer.take();
+                let _ = page.get().take_buffer();
 
                 // Remove from queue
                 unsafe {
@@ -711,7 +733,7 @@ impl PageCache {
             let entry = unsafe { &*entry_ptr };
             if entry.page.is_dirty() && !clear_dirty {
                 return Err(CacheError::Dirty {
-                    pgno: entry.page.get().id,
+                    pgno: entry.page.get().id(),
                 });
             }
         }
@@ -720,7 +742,7 @@ impl PageCache {
         for &entry_ptr in self.map.values() {
             let entry = unsafe { &*entry_ptr };
             entry.page.clear_loaded();
-            let _ = entry.page.get().buffer.take();
+            let _ = entry.page.get().take_buffer();
         }
 
         self.map.clear();
@@ -798,6 +820,11 @@ impl PageCache {
         self.map.keys().copied().collect()
     }
 
+    // The `aristo-instr` feature widens this module to `pub`
+    // (see core/storage/mod.rs), which promotes `len` to true public API and
+    // trips `clippy::len_without_is_empty`. The cache has no `is_empty`
+    // caller, so allow the lint rather than grow an unused method.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -844,6 +871,60 @@ impl PageCache {
         }
     }
 
+    /// Non-panicking twin of `verify_cache_integrity`: returns whether
+    /// every cache invariant holds instead of asserting. Used by the
+    /// aretta-books differential-testing harness, which needs a boolean it
+    /// can compare against the model rather than a panic. Exposed publicly
+    /// through `expose_pub` as `inspect_cache_integrity_ok` (aretta-books
+    /// accessor A-04). NEVER use in production.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_cache_integrity_ok")]
+    fn cache_integrity_ok(&self) -> bool {
+        use rustc_hash::FxHashSet as HashSet;
+
+        let map_len = self.map.len();
+
+        // Walk the queue: count entries and collect distinct keys.
+        let mut queue_len = 0;
+        let mut cursor = self.queue.front();
+        let mut seen_keys = HashSet::default();
+        while let Some(entry) = cursor.get() {
+            queue_len += 1;
+            seen_keys.insert(entry.key);
+            cursor.move_next();
+        }
+
+        // map.len() == queue length.
+        if map_len != queue_len {
+            return false;
+        }
+        // map.len() == count of distinct keys seen in queue (no duplicates).
+        if map_len != seen_keys.len() {
+            return false;
+        }
+        // Every map key present in the queue.
+        for &key in self.map.keys() {
+            if !seen_keys.contains(&key) {
+                return false;
+            }
+        }
+        // clock_hand consistency: non-null => map non-empty AND hand key
+        // in map; null => map empty.
+        if !self.clock_hand.is_null() {
+            if map_len == 0 {
+                return false;
+            }
+            let hand_key = unsafe { (*self.clock_hand).key };
+            if !self.map.contains_key(&hand_key) {
+                return false;
+            }
+        } else if map_len != 0 {
+            return false;
+        }
+
+        true
+    }
+
     #[cfg(test)]
     fn ref_of(&self, key: &PageCacheKey) -> Option<u8> {
         self.map.get(key).map(|&ptr| unsafe { (*ptr).ref_bit })
@@ -875,7 +956,7 @@ mod tests {
         let page = Arc::new(Page::new(page_id as i64));
         {
             let inner = page.get();
-            inner.buffer = Some(Arc::new(crate::Buffer::new_temporary(4096)));
+            inner.set_buffer(Arc::new(crate::Buffer::new_temporary(4096)));
         }
         page.set_loaded();
         page
@@ -985,14 +1066,14 @@ mod tests {
         let key3 = insert_page(&mut cache, 3);
 
         // With capacity=1, inserting key3 should evict key2
-        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id, 3);
+        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id(), 3);
         assert!(
             cache.get(&key2).unwrap().is_none(),
             "key2 should be evicted"
         );
 
         // key3 should still be accessible
-        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id, 3);
+        assert_eq!(cache.get(&key3).unwrap().unwrap().get().id(), 3);
         assert!(
             cache.get(&key2).unwrap().is_none(),
             "capacity=1 should have evicted the older page"
@@ -1187,8 +1268,8 @@ mod tests {
         let key1 = insert_page(&mut cache, 1);
         let key2 = insert_page(&mut cache, 2);
 
-        assert_eq!(cache.get(&key1).unwrap().unwrap().get().id, 1);
-        assert_eq!(cache.get(&key2).unwrap().unwrap().get().id, 2);
+        assert_eq!(cache.get(&key1).unwrap().unwrap().get().id(), 1);
+        assert_eq!(cache.get(&key2).unwrap().unwrap().get().id(), 2);
         cache.verify_cache_integrity();
     }
 
@@ -1443,8 +1524,8 @@ mod tests {
             // Verify all pages in reference_map are in cache
             for (key, page) in &reference_map {
                 let cached_page = cache.peek(key, false).expect("Page should be in cache");
-                assert_eq!(cached_page.get().id, key.0);
-                assert_eq!(page.get().id, key.0);
+                assert_eq!(cached_page.get().id(), key.0);
+                assert_eq!(page.get().id(), key.0);
             }
         }
     }

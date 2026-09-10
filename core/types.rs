@@ -13,9 +13,9 @@ use crate::numeric::nonnan::NonNan;
 use crate::numeric::Numeric;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Index;
-use crate::storage::btree::CursorTrait;
+use crate::storage::btree::{BTreeCursor, CursorTrait};
 use crate::storage::sqlite3_ondisk::{
-    read_integer, read_value, read_varint, varint_len, write_varint,
+    read_integer, read_value, read_value_serial_type, read_varint, varint_len, write_varint,
 };
 use crate::translate::collate::CollationSeq;
 use crate::translate::plan::IterationDirection;
@@ -100,6 +100,61 @@ impl Text {
     pub fn as_str(&self) -> &str {
         &self.value
     }
+}
+
+/// UTF-8 validation tuned for record decoding. TEXT values are usually short
+/// ASCII read at arbitrary offsets inside a b-tree page: simdutf8 only uses
+/// SIMD from 64 bytes up, and core's `from_utf8` word-at-a-time path is
+/// alignment-sensitive, so both are slow here. OR-ing every byte together is
+/// alignment-independent and branch-light; if no byte had the high bit set
+/// the value is pure ASCII and needs no further validation. Non-ASCII and
+/// values longer than the cutoff fall back to full simdutf8 validation —
+/// above the cutoff the scalar OR loop loses to real SIMD.
+///
+/// Measured by `core/benches/text_validate_benchmark.rs` (varying slice
+/// alignment, ASCII content) on an Apple M2, macOS 15.7, vs
+/// `simdutf8::basic::from_utf8` alone:
+///
+///   1-128 B:  1.4-4x faster (peak 4.1x at 16 B)
+///   256-512 B: 1.1-1.2x faster
+///   1-2 KB:   parity
+///   4 KB:     ~25% slower without the cutoff; equal with it
+///   multibyte fallback: pays the wasted OR scan (~15% at 64 B)
+///   length branch: ~+0.1ns/call, visible only on 1-2 B values
+#[inline(always)]
+pub(crate) fn validate_utf8(data: &[u8]) -> Option<&str> {
+    const ASCII_SCAN_CUTOFF: usize = 512;
+    if data.len() <= ASCII_SCAN_CUTOFF && is_ascii(data) {
+        // SAFETY: all bytes are ASCII, which is valid UTF-8.
+        return Some(unsafe { core::str::from_utf8_unchecked(data) });
+    }
+    simdutf8::basic::from_utf8(data).ok()
+}
+
+/// ORs the bytes together a word at a time: eight, then four, two and one
+/// for the rest, so a value of any length takes at most `len / 8 + 3`
+/// loads. The loads are unaligned, so the slice's position on the page
+/// does not matter.
+#[inline(always)]
+pub(crate) fn is_ascii(data: &[u8]) -> bool {
+    let mut acc = 0u64;
+    let mut rest = data;
+    while let Some((word, tail)) = rest.split_first_chunk::<8>() {
+        acc |= u64::from_ne_bytes(*word);
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<4>() {
+        acc |= u64::from(u32::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<2>() {
+        acc |= u64::from(u16::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some(&byte) = rest.first() {
+        acc |= u64::from(byte);
+    }
+    acc & 0x8080_8080_8080_8080 == 0
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -424,6 +479,8 @@ impl TryClone for Value {
                 dst.clear();
                 dst.try_extend(src.iter().copied())?;
             }
+            (dst, Self::Null) => *dst = Self::Null,
+            (dst, Self::Numeric(n)) => *dst = Self::Numeric(*n),
             (dst, src) => {
                 *dst = src.try_clone()?;
             }
@@ -1274,36 +1331,64 @@ mod immutable_record {
         }
     }
 
-    struct AppendWriter<'a> {
-        buf: &'a mut ValueBlob,
-        pos: usize,
-        buf_capacity_start: usize,
-        buf_ptr_start: *const u8,
+    /// [`write_varint`] with the one-byte case inline.
+    #[inline(always)]
+    fn write_short_varint(out: &mut [u8], value: u64) -> usize {
+        if value <= 0x7f {
+            out[0] = value as u8;
+            return 1;
+        }
+        write_varint(out, value)
     }
 
-    impl<'a> AppendWriter<'a> {
-        fn new(buf: &'a mut ValueBlob, pos: usize) -> Self {
-            let buf_ptr_start = buf.as_ptr();
-            let buf_capacity_start = buf.capacity();
-            Self {
-                buf,
-                pos,
-                buf_capacity_start,
-                buf_ptr_start,
+    /// Writes the bytes of `value` for `serial_type` at the start of `out`
+    /// and returns how many it wrote.
+    #[inline(always)]
+    fn write_value(out: &mut [u8], value: ValueRef<'_>, serial_type: SerialType) -> usize {
+        let bytes: &[u8] = match value {
+            ValueRef::Null => return 0,
+            ValueRef::Numeric(Numeric::Integer(i)) => {
+                return match serial_type.kind() {
+                    SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => 0,
+                    SerialTypeKind::I8 => {
+                        out[0] = i as u8;
+                        1
+                    }
+                    SerialTypeKind::I16 => {
+                        out[..2].copy_from_slice(&(i as i16).to_be_bytes());
+                        2
+                    }
+                    // Without the most significant byte.
+                    SerialTypeKind::I24 => {
+                        out[..3].copy_from_slice(&(i as i32).to_be_bytes()[1..]);
+                        3
+                    }
+                    SerialTypeKind::I32 => {
+                        out[..4].copy_from_slice(&(i as i32).to_be_bytes());
+                        4
+                    }
+                    // Without the two most significant bytes.
+                    SerialTypeKind::I48 => {
+                        out[..6].copy_from_slice(&i.to_be_bytes()[2..]);
+                        6
+                    }
+                    SerialTypeKind::I64 => {
+                        out[..8].copy_from_slice(&i.to_be_bytes());
+                        8
+                    }
+                    other => panic!("Serial type is not an integer: {other:?}"),
+                };
             }
-        }
-
-        #[inline]
-        fn extend_from_slice(&mut self, slice: &[u8]) {
-            self.buf[self.pos..self.pos + slice.len()].copy_from_slice(slice);
-            self.pos += slice.len();
-        }
-
-        fn assert_finish_capacity(&self) {
-            // let's make sure we didn't reallocate anywhere else
-            assert_eq!(self.buf_capacity_start, self.buf.capacity());
-            assert_eq!(self.buf_ptr_start, self.buf.as_ptr());
-        }
+            ValueRef::Numeric(Numeric::Float(f)) => {
+                let fval: f64 = f.into();
+                out[..8].copy_from_slice(&fval.to_be_bytes());
+                return 8;
+            }
+            ValueRef::Text(t) => t.value.as_bytes(),
+            ValueRef::Blob(b) => b,
+        };
+        out[..bytes.len()].copy_from_slice(bytes);
+        bytes.len()
     }
 
     #[inline(always)]
@@ -1695,6 +1780,7 @@ mod immutable_record {
         }
 
         /// Like [Self::from_registers], but serializes into `buf`; see [Self::build].
+        #[inline]
         pub fn build_from_registers<'a, I: Iterator<Item = &'a Register> + Clone>(
             registers: impl IntoIterator<Item = &'a Register, IntoIter = I>,
             buf: RecordBuf,
@@ -1714,6 +1800,7 @@ mod immutable_record {
         /// register's previous record buffer, making steady-state record
         /// construction allocation-free.
         #[turso_macros::allocation_site(crate::alloc::ValueBlobAllocationSite::RecordBuild)]
+        #[inline]
         pub fn build<'a>(
             values: impl IntoIterator<Item = impl AsValueRef + 'a> + Clone,
             buf: RecordBuf,
@@ -1722,9 +1809,8 @@ mod immutable_record {
             let mut size_header = 0;
             let mut size_values = 0;
 
-            let mut serial_type_buf = [0; 9];
-            // Sizing pass: the cloneable iterator is re-walked below to write
-            // the serial types, so no scratch buffer is needed.
+            // Sizing pass: the cloneable iterator is walked again below to
+            // write the serial types and the values.
             for value in values.clone() {
                 let serial_type = SerialType::from(value.as_value_ref());
                 size_header += varint_len(serial_type.into());
@@ -1732,63 +1818,25 @@ mod immutable_record {
             }
 
             let header_size = Record::calc_header_size(size_header);
-
-            // 1. write header size
             let total_size = header_size + size_values;
             buf.try_reserve_exact(total_size)?;
-            let n = write_varint(&mut serial_type_buf, header_size as u64);
-
             buf.resize(total_size, 0);
-            let mut writer = AppendWriter::new(&mut buf, 0);
-            writer.extend_from_slice(&serial_type_buf[..n]);
 
-            // 2. Write serial types
-            for value in values.clone() {
-                let serial_type = SerialType::from(value.as_value_ref());
-                let n = write_varint(&mut serial_type_buf[0..], serial_type.into());
-                writer.extend_from_slice(&serial_type_buf[..n]);
-            }
-
-            // write content
+            // Writing pass: each serial type goes into the header and each
+            // value after it, the varints straight into their place.
+            let mut header_pos = write_short_varint(&mut buf[..header_size], header_size as u64);
+            let mut value_pos = header_size;
             for value in values {
                 let value = value.as_value_ref();
-                match value {
-                    ValueRef::Null => {}
-                    ValueRef::Numeric(Numeric::Integer(i)) => {
-                        let serial_type = SerialType::from(value);
-                        match serial_type.kind() {
-                            SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => {}
-                            SerialTypeKind::I8 => {
-                                writer.extend_from_slice(&(i as i8).to_be_bytes())
-                            }
-                            SerialTypeKind::I16 => {
-                                writer.extend_from_slice(&(i as i16).to_be_bytes())
-                            }
-                            SerialTypeKind::I24 => {
-                                writer.extend_from_slice(&(i as i32).to_be_bytes()[1..])
-                            } // remove most significant byte
-                            SerialTypeKind::I32 => {
-                                writer.extend_from_slice(&(i as i32).to_be_bytes())
-                            }
-                            SerialTypeKind::I48 => writer.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
-                            SerialTypeKind::I64 => writer.extend_from_slice(&i.to_be_bytes()),
-                            other => panic!("Serial type is not an integer: {other:?}"),
-                        }
-                    }
-                    ValueRef::Numeric(Numeric::Float(f)) => {
-                        let fval: f64 = f.into();
-                        writer.extend_from_slice(&fval.to_be_bytes());
-                    }
-                    ValueRef::Text(t) => {
-                        writer.extend_from_slice(t.value.as_bytes());
-                    }
-                    ValueRef::Blob(b) => {
-                        writer.extend_from_slice(b);
-                    }
-                };
+                let serial_type = SerialType::from(value);
+                header_pos +=
+                    write_short_varint(&mut buf[header_pos..header_size], serial_type.into());
+                value_pos += write_value(&mut buf[value_pos..], value, serial_type);
             }
-
-            writer.assert_finish_capacity();
+            crate::turso_assert!(
+                header_pos == header_size && value_pos == total_size,
+                "record sizing pass and writing pass disagree"
+            );
             Ok(Self {
                 payload: Value::Blob(buf),
             })
@@ -2063,6 +2111,49 @@ impl<'a> Iterator for ValueIterator<'a> {
         acc
     }
 
+    #[inline(always)]
+    fn last(self) -> Option<Self::Item> {
+        let mut header = self.header_section.get();
+        if unlikely(header.is_empty()) {
+            return None;
+        }
+        let mut data_offset = 0;
+        let last_serial_type = loop {
+            let (serial_type, bytes_read) = match read_varint(header) {
+                Ok(v) => v,
+                Err(e) => {
+                    mark_unlikely();
+                    return Some(Err(e));
+                }
+            };
+            header = &header[bytes_read..];
+            if header.is_empty() {
+                break serial_type;
+            }
+            data_offset += match get_serial_type_size(serial_type) {
+                Ok(size) => size,
+                Err(e) => {
+                    mark_unlikely();
+                    return Some(Err(e));
+                }
+            };
+        };
+
+        let data = self.data_section.get();
+        if unlikely(data_offset > data.len()) {
+            return Some(Err(LimboError::Corrupt(
+                "Data section too small for indicated serial type size".into(),
+            )));
+        }
+        match read_value_serial_type(&data[data_offset..], last_serial_type) {
+            Ok((value, _)) => Some(Ok(value)),
+            Err(e) => {
+                mark_unlikely();
+                Some(Err(e))
+            }
+        }
+    }
+
     /// Returns the nth element of the iterator.
     #[inline(always)]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -2129,7 +2220,7 @@ impl<'a> Iterator for ValueIterator<'a> {
 
         let data_section = self.data_section.get();
 
-        match crate::storage::sqlite3_ondisk::read_value_serial_type(data_section, serial_type) {
+        match read_value_serial_type(data_section, serial_type) {
             Ok((value, n)) => {
                 self.data_section.set(&data_section[n..]);
                 Some(Ok(value))
@@ -2557,18 +2648,38 @@ pub fn cmp_with_sort(cmp: Ordering, a: &ValueRef, b: &ValueRef, key: &KeyInfo) -
 
 #[derive(Debug, Clone, Copy)]
 pub enum RecordCompare {
-    Int,
+    /// Optimization: the first rhs value is this integer.
+    Int {
+        rhs_first_value: i64,
+    },
     String,
     Generic,
 }
 
+pub fn compare_record<V, I>(
+    left_payload: &[u8],
+    right_values: I,
+    index_info: &IndexInfo,
+    tie_breaker: std::cmp::Ordering,
+) -> Result<std::cmp::Ordering>
+where
+    V: AsValueRef,
+    I: ExactSizeIterator<Item = V> + Clone,
+{
+    let comparer = find_compare(right_values.clone().peekable(), index_info);
+    comparer.compare_payload(left_payload, right_values, index_info, tie_breaker)
+}
+
 impl RecordCompare {
-    pub fn compare<V, E, I>(
+    /// The comparison on the serialized bytes of a record. The seek loops
+    /// compare the cells of a page where they lie, without a copy into the
+    /// cursor's record buffer.
+    #[inline(always)]
+    pub fn compare_payload<V, E, I>(
         &self,
-        serialized: &ImmutableRecord,
-        unpacked: I,
+        left_payload: &[u8],
+        right_values: I,
         index_info: &IndexInfo,
-        skip: usize,
         tie_breaker: std::cmp::Ordering,
     ) -> Result<std::cmp::Ordering>
     where
@@ -2576,32 +2687,32 @@ impl RecordCompare {
         E: ExactSizeIterator<Item = V>,
         I: IntoIterator<IntoIter = E, Item = E::Item>,
     {
-        let unpacked = unpacked.into_iter();
+        let right_values = right_values.into_iter();
         match self {
-            RecordCompare::Int => {
-                compare_records_int(serialized, unpacked, index_info, tie_breaker)
-            }
+            RecordCompare::Int {
+                rhs_first_value: key,
+            } => compare_payload_int(left_payload, right_values, index_info, tie_breaker, *key),
             RecordCompare::String => {
-                compare_records_string(serialized, unpacked, index_info, tie_breaker)
+                compare_payload_string(left_payload, right_values, index_info, tie_breaker)
             }
             RecordCompare::Generic => {
-                compare_records_generic(serialized, unpacked, index_info, skip, tie_breaker)
+                compare_payload_generic(left_payload, right_values, index_info, 0, tie_breaker)
             }
         }
     }
 }
 
-pub fn find_compare<I, E, V>(unpacked: I, index_info: &IndexInfo) -> RecordCompare
+pub fn find_compare<V, I>(mut right_values: Peekable<I>, index_info: &IndexInfo) -> RecordCompare
 where
     V: AsValueRef,
-    E: ExactSizeIterator<Item = V>,
-    I: IntoIterator<IntoIter = Peekable<E>, Item = V>,
+    I: ExactSizeIterator<Item = V>,
 {
-    let mut unpacked = unpacked.into_iter();
-    if unpacked.len() != 0 && index_info.num_cols <= 13 {
-        let val = unpacked.peek().unwrap();
+    if right_values.len() != 0 && index_info.num_cols <= 13 {
+        let val = right_values.peek().unwrap();
         match val.as_value_ref() {
-            ValueRef::Numeric(Numeric::Integer(_)) => RecordCompare::Int,
+            ValueRef::Numeric(Numeric::Integer(key)) => RecordCompare::Int {
+                rhs_first_value: key,
+            },
             ValueRef::Text(_) if index_info.key_info[0].collation == CollationSeq::Binary => {
                 RecordCompare::String
             }
@@ -2629,7 +2740,7 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 
 /// Optimized integer-first record comparison function.
 ///
-/// This function is an optimized version of `compare_records_generic()` for the
+/// This function is an optimized version of `compare_payload_generic()` for the
 /// common case where:
 /// - (a) The first field of the unpacked record is an integer
 /// - (b) The serialized record's first field is also an integer
@@ -2646,12 +2757,12 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 /// - First serial type indicates integer (`1-6`, `8`, or `9`)
 /// - First unpacked field is a `ValueRef::Numeric(Numeric::Integer)`
 ///
-/// If any condition fails, it falls back to `compare_records_generic()`.
+/// If any condition fails, it falls back to `compare_payload_generic()`.
 ///
 /// # Arguments
 ///
-/// * `serialized` - The left-hand side record in serialized format
-/// * `unpacked` - The right-hand side record as an array of parsed values
+/// * `left_packed` - The left-hand side record, as its serialized bytes
+/// * `right_unpacked` - The right-hand side record, as an array of parsed values
 /// * `index_info` - Contains sort order information for each field
 /// * `collations` - Array of collation sequences (unused for integers)
 /// * `tie_breaker` - Result to return when all compared fields are equal
@@ -2665,49 +2776,44 @@ pub fn get_tie_breaker_from_seek_op(seek_op: SeekOp) -> std::cmp::Ordering {
 /// 3. **Native comparison**: Uses Rust's built-in `i64::cmp()` for speed
 /// 4. **Sort order**: Applies ascending/descending order to comparison result
 /// 5. **Remaining fields**: If first field is equal and more fields exist,
-///    delegates to `compare_records_generic()` with `skip=1`
-fn compare_records_int<V, I>(
-    serialized: &ImmutableRecord,
-    unpacked: I,
+///    delegates to `compare_payload_generic()` with `skip=1`
+#[inline(always)]
+fn compare_payload_int<V, I>(
+    left_packed: &[u8],
+    right_unpacked: I,
     index_info: &IndexInfo,
     tie_breaker: std::cmp::Ordering,
+    rhs_int: i64,
 ) -> Result<std::cmp::Ordering>
 where
     V: AsValueRef,
     I: ExactSizeIterator<Item = V>,
 {
-    let payload = serialized.get_payload();
-    if payload.len() < 2 {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
+    if left_packed.len() < 2 {
+        return compare_payload_generic(left_packed, right_unpacked, index_info, 0, tie_breaker);
     }
 
-    let (header_size, offset_1st_serialtype) = read_varint(payload)?;
+    let (header_size, offset_1st_serialtype) = read_varint(left_packed)?;
     let header_size = header_size as usize;
 
-    if payload.len() < header_size {
+    if left_packed.len() < header_size {
         return Err(LimboError::Corrupt(format!(
             "Record payload too short: claimed header size {} but payload only {} bytes",
             header_size,
-            payload.len()
+            left_packed.len()
         )));
     }
 
-    let (first_serial_type, _) = read_varint(&payload[offset_1st_serialtype..])?;
+    let (first_serial_type, _) = read_varint(&left_packed[offset_1st_serialtype..])?;
 
     let serialtype_is_integer = matches!(first_serial_type, 1..=6 | 8 | 9);
     if !serialtype_is_integer {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
+        return compare_payload_generic(left_packed, right_unpacked, index_info, 0, tie_breaker);
     }
 
     let data_start = header_size;
 
-    let lhs_int = read_integer(&payload[data_start..], first_serial_type as u8)?;
-    let mut unpacked = unpacked.peekable();
-    // Do not consume iterator here
-    let ValueRef::Numeric(Numeric::Integer(rhs_int)) = unpacked.peek().unwrap().as_value_ref()
-    else {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
-    };
+    let lhs_int = read_integer(&left_packed[data_start..], first_serial_type as u8)?;
     let comparison = match index_info.key_info[0].sort_order {
         SortOrder::Asc => lhs_int.cmp(&rhs_int),
         SortOrder::Desc => lhs_int.cmp(&rhs_int).reverse(),
@@ -2715,8 +2821,14 @@ where
     match comparison {
         std::cmp::Ordering::Equal => {
             // First fields equal, compare remaining fields if any
-            if unpacked.len() > 1 {
-                return compare_records_generic(serialized, unpacked, index_info, 1, tie_breaker);
+            if right_unpacked.len() > 1 {
+                return compare_payload_generic(
+                    left_packed,
+                    right_unpacked,
+                    index_info,
+                    1,
+                    tie_breaker,
+                );
             }
             Ok(tie_breaker)
         }
@@ -2724,7 +2836,7 @@ where
     }
 }
 
-/// This function is an optimized version of `compare_records_generic()` for the
+/// This function is an optimized version of `compare_payload_generic()` for the
 /// common case where:
 /// - (a) The first field of the unpacked record is a string
 /// - (b) The serialized record's first field is also a string
@@ -2742,12 +2854,12 @@ where
 /// - First serial type indicates string (`>= 13` and odd number)
 /// - First unpacked field is a `RefValue::Text`
 ///
-/// If any condition fails, it falls back to `compare_records_generic()`.
+/// If any condition fails, it falls back to `compare_payload_generic()`.
 ///
 /// # Arguments
 ///
-/// * `serialized` - The left-hand side record in serialized format
-/// * `unpacked` - The right-hand side record as an array of parsed values
+/// * `left_packed` - The left-hand side record, as its serialized bytes
+/// * `right_unpacked` - The right-hand side record, as an array of parsed values
 /// * `index_info` - Contains sort order information for each field
 /// * `collations` - Array of collation sequences for string comparisons
 /// * `tie_breaker` - Result to return when all compared fields are equal
@@ -2761,10 +2873,10 @@ where
 /// 3. **Sort order**: Applies ascending/descending order to comparison result
 /// 4. **Length comparison**: If strings are equal, compares lengths
 /// 5. **Remaining fields**: If first field is equal and more fields exist,
-///    delegates to `compare_records_generic()` with `skip=1`
-fn compare_records_string<V, I>(
-    serialized: &ImmutableRecord,
-    unpacked: I,
+///    delegates to `compare_payload_generic()` with `skip=1`
+fn compare_payload_string<V, I>(
+    left_packed: &[u8],
+    right_unpacked: I,
     index_info: &IndexInfo,
     tie_breaker: std::cmp::Ordering,
 ) -> Result<std::cmp::Ordering>
@@ -2772,45 +2884,44 @@ where
     V: AsValueRef,
     I: ExactSizeIterator<Item = V>,
 {
-    let payload = serialized.get_payload();
-    if payload.len() < 2 {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
+    if left_packed.len() < 2 {
+        return compare_payload_generic(left_packed, right_unpacked, index_info, 0, tie_breaker);
     }
 
-    let (header_size, offset_1st_serialtype) = read_varint(payload)?;
+    let (header_size, offset_1st_serialtype) = read_varint(left_packed)?;
     let header_size = header_size as usize;
 
-    if payload.len() < header_size {
+    if left_packed.len() < header_size {
         return Err(LimboError::Corrupt(format!(
             "Record payload too short: claimed header size {} but payload only {} bytes",
             header_size,
-            payload.len()
+            left_packed.len()
         )));
     }
 
-    let (first_serial_type, _) = read_varint(&payload[offset_1st_serialtype..])?;
+    let (first_serial_type, _) = read_varint(&left_packed[offset_1st_serialtype..])?;
 
     let serialtype_is_string = first_serial_type >= 13 && (first_serial_type & 1) == 1;
     if !serialtype_is_string {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
+        return compare_payload_generic(left_packed, right_unpacked, index_info, 0, tie_breaker);
     }
 
-    let mut unpacked = unpacked.peekable();
+    let mut right_unpacked = right_unpacked.peekable();
 
-    let ValueRef::Text(rhs_text) = unpacked.peek().unwrap().as_value_ref() else {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
+    let ValueRef::Text(rhs_text) = right_unpacked.peek().unwrap().as_value_ref() else {
+        return compare_payload_generic(left_packed, right_unpacked, index_info, 0, tie_breaker);
     };
 
     let string_len = (first_serial_type as usize - 13) / 2;
     let data_start = header_size;
 
-    turso_debug_assert!(data_start + string_len <= payload.len());
+    turso_debug_assert!(data_start + string_len <= left_packed.len());
 
     let serial_type = SerialType::try_from(first_serial_type)?;
-    let (lhs_value, _) = read_value(&payload[data_start..], serial_type)?;
+    let (lhs_value, _) = read_value(&left_packed[data_start..], serial_type)?;
 
     let ValueRef::Text(lhs_text) = lhs_value else {
-        return compare_records_generic(serialized, unpacked, index_info, 0, tie_breaker);
+        return compare_payload_generic(left_packed, right_unpacked, index_info, 0, tie_breaker);
     };
 
     let collation = index_info.key_info[0].collation;
@@ -2832,8 +2943,14 @@ where
                 return Ok(adjusted);
             }
 
-            if unpacked.len() > 1 {
-                return compare_records_generic(serialized, unpacked, index_info, 1, tie_breaker);
+            if right_unpacked.len() > 1 {
+                return compare_payload_generic(
+                    left_packed,
+                    right_unpacked,
+                    index_info,
+                    1,
+                    tie_breaker,
+                );
             }
             Ok(tie_breaker)
         }
@@ -2854,8 +2971,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `serialized` - The left-hand side record in serialized format
-/// * `unpacked` - The right-hand side record as an array of parsed values
+/// * `left_packed` - The left-hand side record, as its serialized bytes
+/// * `right_unpacked` - The right-hand side record, as an array of parsed values
 /// * `index_info` - Contains sort order information for each field
 /// * `skip` - Number of initial fields to skip (assumes caller verified equality)
 /// * `tie_breaker` - Result to return when all compared fields are equal
@@ -2872,9 +2989,9 @@ where
 /// The serialized and unpacked records do not have to contain the same number
 /// of fields. If all fields that appear in both records are equal, then
 /// `tie_breaker` is returned.
-pub fn compare_records_generic<V, I>(
-    serialized: &ImmutableRecord,
-    unpacked: I,
+fn compare_payload_generic<V, I>(
+    left_packed: &[u8],
+    right_unpacked: I,
     index_info: &IndexInfo,
     skip: usize,
     tie_breaker: std::cmp::Ordering,
@@ -2883,14 +3000,13 @@ where
     V: AsValueRef,
     I: ExactSizeIterator<Item = V>,
 {
-    let payload = serialized.get_payload();
-    if payload.is_empty() {
+    if left_packed.is_empty() {
         return Ok(std::cmp::Ordering::Less);
     }
 
-    let (header_size, mut header_pos) = read_varint(payload)?;
+    let (header_size, mut header_pos) = read_varint(left_packed)?;
     let header_end = header_size as usize;
-    turso_debug_assert!(header_end <= payload.len());
+    turso_debug_assert!(header_end <= left_packed.len());
 
     let mut data_pos = header_size as usize;
 
@@ -2900,7 +3016,7 @@ where
             break;
         }
 
-        let (serial_type_raw, bytes_read) = read_varint(&payload[header_pos..])?;
+        let (serial_type_raw, bytes_read) = read_varint(&left_packed[header_pos..])?;
         header_pos += bytes_read;
 
         let serial_type = SerialType::try_from(serial_type_raw)?;
@@ -2913,15 +3029,15 @@ where
     }
 
     let mut field_idx = skip;
-    let field_limit = unpacked.len().min(index_info.key_info.len());
+    let field_limit = right_unpacked.len().min(index_info.key_info.len());
 
     // assumes that that the `unpacked' iterator was not skipped outside this function call`
-    for rhs_value in unpacked.skip(skip) {
+    for rhs_value in right_unpacked.skip(skip) {
         let rhs_value = &rhs_value.as_value_ref();
         if field_idx >= field_limit || header_pos >= header_end {
             break;
         }
-        let (serial_type_raw, bytes_read) = read_varint(&payload[header_pos..])?;
+        let (serial_type_raw, bytes_read) = read_varint(&left_packed[header_pos..])?;
         header_pos += bytes_read;
 
         let serial_type = SerialType::try_from(serial_type_raw)?;
@@ -2931,7 +3047,7 @@ where
             SerialTypeKind::ConstInt1 => ValueRef::Numeric(Numeric::Integer(1)),
             SerialTypeKind::Null => ValueRef::Null,
             _ => {
-                let (value, field_size) = read_value(&payload[data_pos..], serial_type)?;
+                let (value, field_size) = read_value(&left_packed[data_pos..], serial_type)?;
                 data_pos += field_size;
                 value
             }
@@ -3257,7 +3373,11 @@ impl Record {
 }
 
 pub enum Cursor {
-    BTree(Box<dyn CursorTrait>),
+    /// A b-tree cursor
+    BTree(Box<BTreeCursor>),
+    /// A cursor behind a trait object: currently, either the MVCC cursor or test doubles.
+    /// TODO it wouldn't be too hard to get rid of `dyn CursorTrait` everywhere.
+    Dyn(Box<dyn CursorTrait>),
     IndexMethod(Box<dyn IndexMethodCursor>),
     Pseudo(Box<PseudoCursor>),
     Sorter(Box<Sorter>),
@@ -3272,6 +3392,7 @@ impl Debug for Cursor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BTree(..) => f.debug_tuple("BTree").finish(),
+            Self::Dyn(..) => f.debug_tuple("BTreeDyn").finish(),
             Self::IndexMethod(..) => f.debug_tuple("IndexMethod").finish(),
             Self::Pseudo(..) => f.debug_tuple("Pseudo").finish(),
             Self::Sorter(..) => f.debug_tuple("Sorter").finish(),
@@ -3283,10 +3404,15 @@ impl Debug for Cursor {
 }
 
 impl Cursor {
-    pub fn new_btree(cursor: Box<dyn CursorTrait>) -> Self {
+    pub fn new_btree(cursor: Box<BTreeCursor>) -> Self {
         // Matches sqlite3BtreeCursor adding to BtShared.pCursor (btree.c:4699).
         cursor.register_with_pager();
         Self::BTree(cursor)
+    }
+
+    pub fn new_btree_dyn(cursor: Box<dyn CursorTrait>) -> Self {
+        cursor.register_with_pager();
+        Self::Dyn(cursor)
     }
 
     pub fn new_pseudo(cursor: PseudoCursor) -> Self {
@@ -3306,6 +3432,7 @@ impl Cursor {
     pub fn as_btree_mut(&mut self) -> &mut dyn CursorTrait {
         match self {
             Self::BTree(cursor) => cursor.as_mut(),
+            Self::Dyn(cursor) => cursor.as_mut(),
             _ => {
                 mark_unlikely();
                 panic!("Cursor is not a btree cursor");
@@ -3369,6 +3496,7 @@ impl Cursor {
     pub fn set_null_flag(&mut self, flag: bool) {
         match self {
             Self::BTree(cursor) => cursor.set_null_flag(flag),
+            Self::Dyn(cursor) => cursor.set_null_flag(flag),
             Self::Virtual(cursor) => cursor.set_null_flag(flag),
             // A pseudo cursor always decodes columns from its content
             // register. SQLite's OP_NullRow likewise leaves pseudo-cursor
@@ -3661,6 +3789,25 @@ mod tests {
     use crate::alloc::vec;
     use crate::translate::collate::CollationSeq;
 
+    #[test]
+    fn is_ascii_checks_every_byte_of_every_length() {
+        for len in 0..40 {
+            let mut ascii: Vec<u8> = vec![];
+            ascii.extend((0..len).map(|i| b'a' + (i % 26) as u8));
+            assert!(is_ascii(&ascii), "length {len}");
+            assert_eq!(validate_utf8(&ascii), std::str::from_utf8(&ascii).ok());
+            for position in 0..len {
+                let mut bytes = ascii.clone();
+                bytes[position] = 0xc3;
+                assert!(!is_ascii(&bytes), "length {len}, byte {position}");
+                assert_eq!(validate_utf8(&bytes), std::str::from_utf8(&bytes).ok());
+            }
+        }
+        let text = "héllo wörld, ünïcödé";
+        assert!(!is_ascii(text.as_bytes()));
+        assert_eq!(validate_utf8(text.as_bytes()), Some(text));
+    }
+
     fn assert_integer_conversions<T>(in_range: &[(i64, T)], out_of_range: &[i64])
     where
         T: Copy + std::fmt::Debug + PartialEq + FromValue,
@@ -3823,6 +3970,43 @@ mod tests {
     }
 
     #[test]
+    fn test_value_iterator_last_decodes_only_the_last_value() {
+        let mut buf = std::vec::Vec::new();
+        let record = Record::new(vec![
+            Value::Null,
+            Value::from_i64(100),
+            Value::from_f64(std::f64::consts::PI),
+            Value::Text(Text::new("test")),
+            Value::from_slice(&[1, 2, 3]).expect(crate::alloc::ALLOC_ERR_MSG),
+            Value::from_i64(0),
+            Value::from_i64(1),
+            Value::from_i64(-7_000_000_000),
+        ]);
+        record.serialize(&mut buf);
+
+        let iter = ValueIterator::new(&buf).unwrap();
+        assert_eq!(
+            iter.last().unwrap().unwrap(),
+            ValueRef::from_i64(-7_000_000_000)
+        );
+
+        let mut buf = std::vec::Vec::new();
+        let record = Record::new(vec![Value::Text(Text::new("only"))]);
+        record.serialize(&mut buf);
+        let iter = ValueIterator::new(&buf).unwrap();
+        assert_eq!(
+            iter.last().unwrap().unwrap(),
+            ValueRef::Text(TextRef::new("only", TextSubtype::Text))
+        );
+
+        let mut buf = std::vec::Vec::new();
+        let record = Record::new(vec![]);
+        record.serialize(&mut buf);
+        let iter = ValueIterator::new(&buf).unwrap();
+        assert!(iter.last().is_none());
+    }
+
+    #[test]
     fn test_value_iterator_large_record() {
         let mut buf = std::vec::Vec::new();
         let values: Vec<Value> = (0..20)
@@ -3954,7 +4138,12 @@ mod tests {
 
         let comparer = find_compare(unpacked_values.iter().peekable(), index_info);
         let optimized_result = comparer
-            .compare(&serialized, &unpacked_values, index_info, 0, tie_breaker)
+            .compare_payload(
+                serialized.get_payload(),
+                &unpacked_values,
+                index_info,
+                tie_breaker,
+            )
             .unwrap();
 
         assert_eq!(
@@ -3962,8 +4151,17 @@ mod tests {
             "Test '{test_name}' failed: Full Comparison: {gold_result:?}, Optimized: {optimized_result:?}, Strategy: {comparer:?}"
         );
 
-        let generic_result = compare_records_generic(
-            &serialized,
+        let selected_result = compare_record(
+            serialized.get_payload(),
+            unpacked_values.iter(),
+            index_info,
+            tie_breaker,
+        )
+        .unwrap();
+        assert_eq!(gold_result, selected_result, "Test '{test_name}' failed");
+
+        let generic_result = compare_payload_generic(
+            serialized.get_payload(),
             unpacked_values.iter(),
             index_info,
             0,
@@ -4352,6 +4550,28 @@ mod tests {
     }
 
     #[test]
+    fn compare_record_preserves_prefix_tie_breakers() {
+        let index_info =
+            create_index_info(2, vec![SortOrder::Asc; 2], vec![CollationSeq::Binary; 2]);
+        for first in [Value::from_i64(42), Value::build_text("key"), Value::Null] {
+            let serialized = create_record(vec![first.clone(), Value::from_i64(99)]);
+            for tie_breaker in [Ordering::Less, Ordering::Equal, Ordering::Greater] {
+                let right_values = [first.as_ref()];
+                assert_eq!(
+                    compare_record(
+                        serialized.get_payload(),
+                        right_values.into_iter(),
+                        &index_info,
+                        tie_breaker,
+                    )
+                    .unwrap(),
+                    tie_breaker,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_skip_parameter() {
         let index_info = create_index_info(
             3,
@@ -4371,12 +4591,22 @@ mod tests {
         ];
 
         let tie_breaker = std::cmp::Ordering::Equal;
-        let result_skip_0 =
-            compare_records_generic(&serialized, unpacked.iter(), &index_info, 0, tie_breaker)
-                .unwrap();
-        let result_skip_1 =
-            compare_records_generic(&serialized, unpacked.iter(), &index_info, 1, tie_breaker)
-                .unwrap();
+        let result_skip_0 = compare_payload_generic(
+            serialized.get_payload(),
+            unpacked.iter(),
+            &index_info,
+            0,
+            tie_breaker,
+        )
+        .unwrap();
+        let result_skip_1 = compare_payload_generic(
+            serialized.get_payload(),
+            unpacked.iter(),
+            &index_info,
+            1,
+            tie_breaker,
+        )
+        .unwrap();
 
         assert_eq!(result_skip_0, std::cmp::Ordering::Less);
 
@@ -4400,7 +4630,9 @@ mod tests {
         ];
         assert!(matches!(
             find_compare(int_values.iter().peekable(), &index_info_small),
-            RecordCompare::Int
+            RecordCompare::Int {
+                rhs_first_value: 42
+            }
         ));
 
         let string_values = [

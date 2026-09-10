@@ -36,7 +36,6 @@ use crate::{
     vdbe::builder::ProgramBuilder,
 };
 use smallvec::SmallVec;
-use turso_parser::ast::Literal::Null;
 use turso_parser::ast::{
     self, As, Expr, FromClause, JoinType, Materialized, Over, QualifiedName, Select,
     TableInternalId, With,
@@ -1824,6 +1823,7 @@ fn parse_table(
                     expression_index_usages: Vec::new(),
                     database_id,
                     indexed: None,
+                    plan_estimate: None,
                 });
             }
             return Ok(());
@@ -1860,6 +1860,7 @@ fn parse_table(
             expression_index_usages: Vec::new(),
             database_id,
             indexed,
+            plan_estimate: None,
         });
         return Ok(());
     };
@@ -1970,6 +1971,7 @@ fn parse_table(
             expression_index_usages: Vec::new(),
             database_id,
             indexed: None,
+            plan_estimate: None,
         });
         return Ok(());
     }
@@ -1994,6 +1996,7 @@ fn parse_table(
                     expression_index_usages: Vec::new(),
                     database_id,
                     indexed: None,
+                    plan_estimate: None,
                 });
                 return Ok(());
             }
@@ -2058,14 +2061,13 @@ fn transform_args_into_where_terms(
                 column: i,
                 is_rowid_alias: col.is_rowid_alias(),
             };
-            let expr = match arg_expr.as_ref() {
-                Expr::Literal(Null) => Expr::IsNull(Box::new(column_expr)),
-                other => Expr::Binary(
-                    column_expr.into(),
-                    ast::Operator::Equals,
-                    other.clone().into(),
-                ),
-            };
+            // SQLite always uses equality, including for NULL. Unary plus keeps
+            // the hidden column's affinity from changing the argument.
+            let expr = Expr::Binary(
+                column_expr.into(),
+                ast::Operator::Equals,
+                Expr::Unary(ast::UnaryOperator::Positive, arg_expr.clone()).into(),
+            );
             predicates.push(expr);
         }
     }

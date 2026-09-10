@@ -16,6 +16,9 @@ public class SqliteFacadeTests
         factory.CreateCommand().Should().BeOfType<SqliteCommand>();
         factory.CreateParameter().Should().BeOfType<SqliteParameter>();
         factory.CreateConnectionStringBuilder().Should().BeOfType<SqliteConnectionStringBuilder>();
+        factory.CanCreateBatch.Should().BeTrue();
+        factory.CreateBatch().Should().BeOfType<SqliteBatch>();
+        factory.CreateBatchCommand().Should().BeOfType<SqliteBatchCommand>();
     }
 
     [Test]
@@ -32,6 +35,148 @@ public class SqliteFacadeTests
         builder.BinaryGUID.Should().BeFalse();
         builder.Version.Should().Be(3);
         builder["DataSource"].Should().Be(":memory:");
+    }
+
+    [Test]
+    public void ConnectionStringBuilderRoundTripsManagedConnectionKeywords()
+    {
+        var builder = new SqliteConnectionStringBuilder(
+            "DataSource=libsql://example.turso.io;AuthToken=token;ReplicaPath=replica.db;"
+            + "ReadYourWrites=False;SyncInterval=5;SyncClientName=client;SyncLongPollTimeout=6;"
+            + "BootstrapIfEmpty=False;PartialBootstrapPrefix=7;PartialBootstrapQuery=SELECT 1;"
+            + "PartialSyncSegmentSize=8;PartialSyncPrefetch=True;RemoteEncryptionCipher=aes256gcm;"
+            + "RemoteEncryptionKey=key;PushOperationsThreshold=9;PullBytesThreshold=10;"
+            + "ForceLogicalMvccPull=True;SyncExperimentalFeatures=feature;TLS=True");
+
+        builder.AuthToken.Should().Be("token");
+        builder.ReplicaPath.Should().Be("replica.db");
+        builder.ReadYourWrites.Should().BeFalse();
+        builder.SyncInterval.Should().Be(5);
+        builder.SyncClientName.Should().Be("client");
+        builder.SyncLongPollTimeout.Should().Be(6);
+        builder.BootstrapIfEmpty.Should().BeFalse();
+        builder.PartialBootstrapPrefix.Should().Be(7);
+        builder.PartialBootstrapQuery.Should().Be("SELECT 1");
+        builder.PartialSyncSegmentSize.Should().Be(8);
+        builder.PartialSyncPrefetch.Should().BeTrue();
+        builder.RemoteEncryptionCipher.Should().Be("aes256gcm");
+        builder.RemoteEncryptionKey.Should().Be("key");
+        builder.PushOperationsThreshold.Should().Be(9);
+        builder.PullBytesThreshold.Should().Be(10);
+        builder.ForceLogicalMvccPull.Should().BeTrue();
+        builder.SyncExperimentalFeatures.Should().Be("feature");
+        builder.Tls.Should().BeTrue();
+        builder.IsReplica.Should().BeTrue();
+        builder.IsDirectRemote.Should().BeFalse();
+        builder.IsRemote.Should().BeTrue();
+        builder.IsLocal.Should().BeFalse();
+
+        var roundTripped = new SqliteConnectionStringBuilder(builder.ConnectionString);
+        roundTripped.ConnectionString.Should().Be(builder.ConnectionString);
+        roundTripped.ReplicaPath.Should().Be("replica.db");
+        roundTripped.PartialSyncSegmentSize.Should().Be(8);
+        roundTripped.Tls.Should().BeTrue();
+
+        using var connection = new SqliteConnection(roundTripped.ConnectionString);
+        connection.IsLocal.Should().BeFalse();
+        connection.IsDirectRemote.Should().BeFalse();
+        connection.IsRemote.Should().BeTrue();
+        connection.IsReplica.Should().BeTrue();
+        connection.IsManaged.Should().BeTrue();
+    }
+
+    [TestCase(":memory:", true, false, false)]
+    [TestCase("local.db", true, false, false)]
+    [TestCase("file:local.db", true, false, false)]
+    [TestCase("https://example.turso.io", false, true, false)]
+    [TestCase("libsql://example.turso.io", false, true, false)]
+    public void ConnectionStringBuilderClassifiesDataSource(
+        string dataSource,
+        bool isLocal,
+        bool isDirectRemote,
+        bool isReplica)
+    {
+        var builder = new SqliteConnectionStringBuilder { DataSource = dataSource };
+
+        builder.IsLocal.Should().Be(isLocal);
+        builder.IsDirectRemote.Should().Be(isDirectRemote);
+        builder.IsReplica.Should().Be(isReplica);
+
+        builder.ReplicaPath = isLocal ? "ignored.db" : "replica.db";
+        builder.IsReplica.Should().Be(!isLocal);
+    }
+
+    [Test]
+    public async Task ManagedConnectionDelegatesLifecycleAndState()
+    {
+        await using var connection = new SqliteConnection(
+            "Data Source=https://example.turso.io;Auth Token=token;Default Timeout=7");
+        var transitions = new List<(ConnectionState Original, ConnectionState Current)>();
+        connection.StateChange += (_, args) => transitions.Add((args.OriginalState, args.CurrentState));
+
+        connection.IsLocal.Should().BeFalse();
+        connection.IsDirectRemote.Should().BeTrue();
+        connection.IsRemote.Should().BeTrue();
+        connection.IsReplica.Should().BeFalse();
+        connection.IsManaged.Should().BeTrue();
+        connection.CanCreateBatch.Should().BeTrue();
+        connection.DataSource.Should().Be("https://example.turso.io");
+        connection.DefaultTimeout.Should().Be(7);
+        connection.State.Should().Be(ConnectionState.Closed);
+
+        await connection.OpenAsync();
+        connection.State.Should().Be(ConnectionState.Open);
+        connection.DataSource.Should().Be("https://example.turso.io");
+        connection.SyncDatabase.Should().BeNull();
+        Assert.Throws<NotSupportedException>(connection.Sync);
+        Assert.ThrowsAsync<NotSupportedException>(() => connection.SyncAsync());
+
+        connection.Close();
+        connection.State.Should().Be(ConnectionState.Closed);
+        connection.Open();
+        connection.Close();
+        transitions.Should().Equal(
+            (ConnectionState.Closed, ConnectionState.Open),
+            (ConnectionState.Open, ConnectionState.Closed),
+            (ConnectionState.Closed, ConnectionState.Open),
+            (ConnectionState.Open, ConnectionState.Closed));
+    }
+
+    [Test]
+    public async Task WrappedTursoConnectionHonorsExplicitOwnership()
+    {
+        var borrowed = new TursoConnection("Data Source=https://example.turso.io");
+        borrowed.Open();
+        await using (var wrapper = new SqliteConnection(borrowed, ownsConnection: false))
+        {
+            wrapper.State.Should().Be(ConnectionState.Open);
+            wrapper.IsDirectRemote.Should().BeTrue();
+        }
+
+        borrowed.State.Should().Be(ConnectionState.Open);
+        borrowed.Close();
+
+        var owned = new TursoConnection("Data Source=https://example.turso.io");
+        owned.Open();
+        var owningWrapper = new SqliteConnection(owned, ownsConnection: true);
+        await owningWrapper.DisposeAsync();
+
+        owned.State.Should().Be(ConnectionState.Closed);
+        Assert.Throws<ObjectDisposedException>(owned.Open);
+    }
+
+    [Test]
+    public void ManagedConnectionRejectsLocalOnlyFacadeApis()
+    {
+        using var connection = new SqliteConnection("Data Source=https://example.turso.io");
+
+        Assert.Throws<NotSupportedException>(() => connection.GetSchema());
+        Assert.Throws<NotSupportedException>(() => connection.EnableExtensions());
+        Assert.Throws<NotSupportedException>(() => connection.CreateFunction("custom", () => 1));
+
+        using var local = new SqliteConnection("Data Source=:memory:");
+        local.CanCreateBatch.Should().BeFalse();
+        Assert.Throws<NotSupportedException>(() => local.CreateBatch());
     }
 
     [Test]

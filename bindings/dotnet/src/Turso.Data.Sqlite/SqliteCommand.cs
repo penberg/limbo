@@ -17,6 +17,7 @@ public class SqliteCommand : DbCommand
     private string _commandText = string.Empty;
     private int _commandTimeout = 30;
     private bool _hasOpenReader;
+    private global::Turso.TursoCommand? _activeManagedCommand;
 
     public SqliteCommand()
     {
@@ -131,6 +132,7 @@ public class SqliteCommand : DbCommand
 
     public override void Cancel()
     {
+        _activeManagedCommand?.Cancel();
     }
 
     public override int ExecuteNonQuery()
@@ -156,6 +158,12 @@ public class SqliteCommand : DbCommand
     public override void Prepare()
     {
         EnsureExecutable("Prepare");
+        if (Connection!.IsManagedConnection)
+        {
+            PrepareManagedAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return;
+        }
+
         var statements = SplitStatements(CommandText);
         if (statements.Count != 1)
         {
@@ -182,6 +190,15 @@ public class SqliteCommand : DbCommand
         }
     }
 
+    public override Task PrepareAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureExecutable("Prepare");
+        return Connection!.IsManagedConnection
+            ? PrepareManagedAsync(cancellationToken)
+            : base.PrepareAsync(cancellationToken);
+    }
+
     protected override DbParameter CreateDbParameter() => new SqliteParameter();
 
     public new SqliteDataReader ExecuteReader() => Execute("ExecuteReader");
@@ -190,28 +207,61 @@ public class SqliteCommand : DbCommand
 
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => Execute("ExecuteReader", behavior);
 
-    public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+    public new Task<SqliteDataReader> ExecuteReaderAsync(CancellationToken cancellationToken = default)
+        => ExecuteReaderAsync(CommandBehavior.Default, cancellationToken);
+
+    public new async Task<SqliteDataReader> ExecuteReaderAsync(
+        CommandBehavior behavior,
+        CancellationToken cancellationToken)
+        => (SqliteDataReader)await ExecuteDbDataReaderAsync(behavior, cancellationToken).ConfigureAwait(false);
+
+    public override async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(ExecuteNonQuery());
+        if (Connection?.IsManagedConnection != true)
+            return ExecuteNonQuery();
+
+        await using var reader = await ExecuteManagedAsync("ExecuteNonQuery", CommandBehavior.Default, cancellationToken)
+            .ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+        }
+
+        await reader.CloseAsync().ConfigureAwait(false);
+        return reader.RecordsAffected;
     }
 
-    public override Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken)
+    public override async Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(ExecuteScalar());
+        if (Connection?.IsManagedConnection != true)
+            return ExecuteScalar();
+
+        await using var reader = await ExecuteManagedAsync("ExecuteScalar", CommandBehavior.Default, cancellationToken)
+            .ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? reader.GetValue(0)
+            : null;
     }
 
-    protected override Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+    protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(
+        CommandBehavior behavior,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<DbDataReader>(Execute("ExecuteReader", behavior));
+        if (Connection?.IsManagedConnection != true)
+            return Execute("ExecuteReader", behavior);
+
+        return await ExecuteManagedAsync("ExecuteReader", behavior, cancellationToken).ConfigureAwait(false);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
+            _activeManagedCommand?.Dispose();
             _statement?.Dispose();
+        }
 
         base.Dispose(disposing);
     }
@@ -219,6 +269,13 @@ public class SqliteCommand : DbCommand
     private SqliteDataReader Execute(string method, CommandBehavior behavior = CommandBehavior.Default)
     {
         EnsureExecutable(method);
+        if (Connection!.IsManagedConnection)
+        {
+            return ExecuteManagedAsync(method, behavior, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+        }
+
         if (IsEmptyCommand(CommandText))
         {
             _hasOpenReader = true;
@@ -270,6 +327,252 @@ public class SqliteCommand : DbCommand
         return new SqliteDataReader(this, recordsAffected, behavior, CloseReader);
     }
 
+    private async Task PrepareManagedAsync(CancellationToken cancellationToken)
+    {
+        var statements = GetManagedStatements();
+        ValidateManagedParameterValues();
+        foreach (var statement in statements)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sql = RewriteFacadeStatement(statement.Sql, Connection!);
+
+            using var command = CreateManagedCommand(statement, sql);
+            _activeManagedCommand = command;
+            try
+            {
+                await command.PrepareAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (TursoException ex)
+            {
+                throw ToSqliteException(ex, statement.Sql);
+            }
+            finally
+            {
+                _activeManagedCommand = null;
+            }
+        }
+    }
+
+    private async Task<SqliteDataReader> ExecuteManagedAsync(
+        string method,
+        CommandBehavior behavior,
+        CancellationToken cancellationToken)
+    {
+        EnsureExecutable(method);
+        var statements = GetManagedStatements();
+        if (Connection!.HasOpenReader && statements.Any(IsWriteStatement))
+        {
+            await Task.Delay(TimeSpan.FromSeconds(CommandTimeout), cancellationToken).ConfigureAwait(false);
+            throw new SqliteException(Properties.Resources.SqliteNativeError(5, "database is locked"), 5);
+        }
+        if (Connection!.IsReadOnly && statements.Any(IsWriteStatement))
+        {
+            throw new SqliteException(
+                Properties.Resources.SqliteNativeError(8, "attempt to write a readonly database"),
+                8);
+        }
+        if (statements.Count == 0)
+        {
+            _hasOpenReader = true;
+            Connection!.ReaderOpened();
+            return new SqliteDataReader(this, -1, behavior, CloseReader);
+        }
+
+        ValidateManagedParameterValues();
+        var results = new List<ManagedSqliteResult>();
+        var recordsAffected = 0;
+        var hadResultSet = false;
+        foreach (var statement in statements)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (TryHandleFacadeStatement(statement.Sql, out var sql))
+                continue;
+
+            using var command = CreateManagedCommand(statement, sql);
+            _activeManagedCommand = command;
+            try
+            {
+                await using var reader = await command
+                    .ExecuteReaderAsync(CommandBehavior.Default, cancellationToken)
+                    .ConfigureAwait(false);
+                var result = await BufferManagedResultAsync(reader, statement.Sql, cancellationToken)
+                    .ConfigureAwait(false);
+                if (result.Columns.Count > 0)
+                {
+                    results.Add(result);
+                    hadResultSet = true;
+                }
+
+                if (CountsRowsAffected(statement) && result.RecordsAffected > 0)
+                    recordsAffected = checked(recordsAffected + result.RecordsAffected);
+            }
+            catch (TursoException ex)
+            {
+                throw ToSqliteException(ex, statement.Sql);
+            }
+            finally
+            {
+                _activeManagedCommand = null;
+            }
+        }
+
+        _hasOpenReader = true;
+        Connection!.ReaderOpened();
+        return new SqliteDataReader(
+            this,
+            new ManagedSqliteExecution(results, recordsAffected, hadResultSet),
+            behavior,
+            CloseReader);
+    }
+
+    internal static async Task<ManagedSqliteResult> BufferManagedResultAsync(
+        DbDataReader reader,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        var columns = new List<ManagedSqliteColumn>(reader.FieldCount);
+        for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+        {
+            columns.Add(
+                new ManagedSqliteColumn(
+                    reader.GetName(ordinal),
+                    reader.GetDataTypeName(ordinal),
+                    reader.GetFieldType(ordinal)));
+        }
+
+        var rows = new List<object?[]>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var row = new object?[reader.FieldCount];
+            for (var ordinal = 0; ordinal < row.Length; ordinal++)
+                row[ordinal] = reader.GetValue(ordinal);
+            rows.Add(row);
+        }
+
+        return new ManagedSqliteResult(sql, columns, rows, reader.RecordsAffected);
+    }
+
+    internal global::Turso.TursoCommand CreateManagedCommand(
+        ManagedSqliteStatement statement,
+        string? sql = null)
+    {
+        var command = new global::Turso.TursoCommand(Connection!.ManagedConnection)
+        {
+            CommandText = sql ?? statement.Sql,
+            CommandTimeout = CommandTimeout,
+            Transaction = Transaction?.ManagedTransaction,
+        };
+
+        try
+        {
+            AddManagedParameters(command, statement);
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    private IReadOnlyList<ManagedSqliteStatement> GetManagedStatements()
+    {
+        var statements = ManagedSqliteStatementParser.Parse(CommandText);
+        if (statements.Any(statement => statement.IsTransactionControl && !CanExecuteSavepointStatement(statement)))
+        {
+            throw new InvalidOperationException(
+                "Transaction-control SQL is not supported on a managed SqliteConnection. "
+                + "Use SqliteConnection.BeginTransaction and SqliteTransaction instead.");
+        }
+
+        if (statements.Count > 1
+            && Connection!.IsDirectRemote
+            && !Connection.ManagedReadYourWrites
+            && Transaction is null)
+        {
+            throw new NotSupportedException(
+                "Multi-statement SqliteCommand execution requires Read Your Writes=True "
+                + "or an explicit SqliteTransaction on a direct remote connection.");
+        }
+
+        return statements;
+    }
+
+    private bool CanExecuteSavepointStatement(ManagedSqliteStatement statement)
+    {
+        if (Transaction is null)
+            return false;
+
+        if (statement.FirstKeyword is "SAVEPOINT" or "RELEASE")
+            return true;
+
+        if (statement.FirstKeyword != "ROLLBACK")
+            return false;
+
+        var sql = statement.Sql.TrimStart();
+        if (!sql.StartsWith("ROLLBACK", StringComparison.OrdinalIgnoreCase))
+            return false;
+        sql = sql["ROLLBACK".Length..].TrimStart();
+        if (sql.StartsWith("TRANSACTION", StringComparison.OrdinalIgnoreCase))
+            sql = sql["TRANSACTION".Length..].TrimStart();
+        return sql.StartsWith("TO", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal void ValidateManagedParameterValues()
+    {
+        for (var index = 0; index < Parameters.Count; index++)
+        {
+            var parameter = Parameters[index];
+            if (string.IsNullOrEmpty(parameter.ParameterName))
+                throw new InvalidOperationException(Properties.Resources.RequiresSet(nameof(parameter.ParameterName)));
+            if (!parameter.HasValue)
+                throw new InvalidOperationException(Properties.Resources.RequiresSet(nameof(parameter.Value)));
+        }
+    }
+
+    internal void AddManagedParameters(
+        global::Turso.TursoCommand command,
+        ManagedSqliteStatement statement)
+    {
+        var mapped = new Dictionary<string, SqliteParameter>(StringComparer.Ordinal);
+        for (var index = 0; index < Parameters.Count; index++)
+        {
+            var parameter = Parameters[index];
+            var parameterName = parameter.ParameterName;
+            string? matchedName = null;
+            if (statement.ParameterNames.Contains(parameterName, StringComparer.Ordinal))
+            {
+                matchedName = parameterName;
+            }
+            else if (!IsPrefixed(parameterName))
+            {
+                foreach (var candidate in statement.ParameterNames)
+                {
+                    if (!IsPrefixed(candidate)
+                        || !candidate.AsSpan(1).Equals(parameterName.AsSpan(), StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (matchedName is not null)
+                        throw new InvalidOperationException(Properties.Resources.AmbiguousParameterName(parameterName));
+                    matchedName = candidate;
+                }
+            }
+
+            if (matchedName is not null)
+                mapped[matchedName] = parameter;
+        }
+
+        foreach (var parameterName in statement.ParameterNames)
+        {
+            if (!mapped.TryGetValue(parameterName, out var parameter))
+                throw new InvalidOperationException(Properties.Resources.MissingParameters(parameterName));
+
+            command.Parameters.Add(parameter.ToManagedParameter(parameterName));
+        }
+    }
+
     private void ThrowIfReaderOpen(string property)
     {
         if (_hasOpenReader)
@@ -300,6 +603,17 @@ public class SqliteCommand : DbCommand
     {
         _hasOpenReader = false;
         Connection?.ReaderClosed();
+    }
+
+    internal Action OwnBufferedReader()
+    {
+        _hasOpenReader = true;
+        Connection?.ReaderOpened();
+        return () =>
+        {
+            CloseReader();
+            Dispose();
+        };
     }
 
     internal TursoStatementHandle PrepareSingleStatement(string sql)
@@ -402,21 +716,41 @@ public class SqliteCommand : DbCommand
     }
 
     private static bool IsWriteCommand(string commandText)
-        => SplitStatements(commandText).Any(IsWriteStatement);
+        => ManagedSqliteStatementParser.Parse(commandText).Any(IsWriteStatement);
 
-    private static bool IsWriteStatement(string statement)
+    internal static bool IsWriteStatement(ManagedSqliteStatement statement)
+        => statement.FirstKeyword is "CREATE" or "DROP" or "ALTER"
+            or "INSERT" or "UPDATE" or "DELETE" or "REPLACE"
+            or "VACUUM" or "ATTACH" or "DETACH" or "REINDEX" or "ANALYZE"
+           || statement.FirstKeyword == "WITH" && IsWithDmlStatement(statement.Sql)
+           || statement.FirstKeyword == "PRAGMA" && IsWritablePragma(statement.Sql);
+
+    private static bool IsWritablePragma(string sql)
     {
-        var trimmed = statement.TrimStart();
-        return trimmed.StartsWith("CREATE", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("DROP", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("ALTER", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("INSERT", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("DELETE", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("REPLACE", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("VACUUM", StringComparison.OrdinalIgnoreCase)
-               || IsWithDmlStatement(trimmed);
+        if (Regex.IsMatch(sql, @"\bPRAGMA\b[\s\S]*=", RegexOptions.IgnoreCase))
+            return true;
+
+        var match = Regex.Match(
+            sql,
+            @"\bPRAGMA\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*)\.)?(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            RegexOptions.IgnoreCase);
+        return match.Success && !ReadOnlyPragmaFunctions.Contains(match.Groups["name"].Value);
     }
+
+    private static readonly HashSet<string> ReadOnlyPragmaFunctions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "foreign_key_check",
+            "foreign_key_list",
+            "index_info",
+            "index_list",
+            "index_xinfo",
+            "integrity_check",
+            "quick_check",
+            "table_info",
+            "table_list",
+            "table_xinfo",
+        };
 
     internal bool TryHandleFacadeStatement(string sql, out string rewrittenSql)
     {
@@ -435,7 +769,7 @@ public class SqliteCommand : DbCommand
 
     private const string EmptyResultSql = "SELECT 1 WHERE 0";
 
-    private static string RewriteFacadeStatement(string sql, SqliteConnection connection)
+    internal static string RewriteFacadeStatement(string sql, SqliteConnection connection)
         => RewriteUnsupportedPragmas(NormalizeSql(sql), sql, connection);
 
     private static string RewriteUnsupportedPragmas(string normalized, string sql, SqliteConnection connection)
@@ -506,9 +840,19 @@ public class SqliteCommand : DbCommand
                || IsWithDmlStatement(trimmed);
     }
 
+    private static bool CountsRowsAffected(ManagedSqliteStatement statement)
+        => statement.FirstKeyword is "INSERT" or "UPDATE" or "DELETE" or "REPLACE"
+           || statement.FirstKeyword == "WITH"
+           && Regex.IsMatch(
+               statement.Sql,
+               @"\)\s*(INSERT|UPDATE|DELETE|REPLACE)\b",
+               RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
     private static bool IsWithDmlStatement(string trimmedStatement)
-        => trimmedStatement.StartsWith("WITH", StringComparison.OrdinalIgnoreCase)
-           && Regex.IsMatch(trimmedStatement, @"\)\s*(INSERT|UPDATE|DELETE|REPLACE)\b", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        => Regex.IsMatch(
+            trimmedStatement,
+            @"\)(?:\s|--[^\r\n]*(?:\r?\n|$)|/\*[\s\S]*?\*/)*(INSERT|UPDATE|DELETE|REPLACE)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
     private static List<string> SplitStatements(string commandText)
     {
@@ -578,6 +922,22 @@ public class SqliteCommand : DbCommand
 
     internal static SqliteException ToSqliteException(TursoException ex, string? sql = null)
     {
+        if (ex is global::Turso.TursoRemoteSqlException remoteException)
+        {
+            var (errorCode, extendedErrorCode) = GetRemoteSqliteErrorCodes(
+                remoteException.RemoteErrorCode);
+            var remoteMessage = string.IsNullOrWhiteSpace(remoteException.RemoteErrorMessage)
+                ? remoteException.Message
+                : remoteException.RemoteErrorMessage;
+            if (sql is not null)
+                remoteMessage = PreserveNoSuchTableCase(remoteMessage, sql);
+
+            return new SqliteException(
+                Properties.Resources.SqliteNativeError(errorCode, remoteMessage),
+                errorCode,
+                extendedErrorCode);
+        }
+
         var message = ex.Message;
         foreach (var prefix in new[] { "Unable to prepare statement: Parse error: ", "Parse error: " })
         {
@@ -607,6 +967,88 @@ public class SqliteCommand : DbCommand
             message = PreserveNoSuchTableCase(message, sql);
 
         return new SqliteException(Properties.Resources.SqliteNativeError(1, message), 1);
+    }
+
+    private static (int ErrorCode, int ExtendedErrorCode) GetRemoteSqliteErrorCodes(
+        string? remoteErrorCode)
+    {
+        if (string.IsNullOrWhiteSpace(remoteErrorCode))
+            return (1, 1);
+
+        var code = remoteErrorCode.ToUpperInvariant();
+        var extended = code switch
+        {
+            "SQLITE_BUSY_RECOVERY" => 261,
+            "SQLITE_BUSY_SNAPSHOT" => 517,
+            "SQLITE_BUSY_TIMEOUT" => 773,
+            "SQLITE_LOCKED_SHAREDCACHE" => 262,
+            "SQLITE_LOCKED_VTAB" => 518,
+            "SQLITE_READONLY_RECOVERY" => 264,
+            "SQLITE_READONLY_CANTLOCK" => 520,
+            "SQLITE_READONLY_ROLLBACK" => 776,
+            "SQLITE_READONLY_DBMOVED" => 1032,
+            "SQLITE_READONLY_CANTINIT" => 1288,
+            "SQLITE_READONLY_DIRECTORY" => 1544,
+            "SQLITE_CONSTRAINT_CHECK" => 275,
+            "SQLITE_CONSTRAINT_COMMITHOOK" => 531,
+            "SQLITE_CONSTRAINT_FOREIGNKEY" => 787,
+            "SQLITE_CONSTRAINT_FUNCTION" => 1043,
+            "SQLITE_CONSTRAINT_NOTNULL" => 1299,
+            "SQLITE_CONSTRAINT_PRIMARYKEY" => 1555,
+            "SQLITE_CONSTRAINT_TRIGGER" => 1811,
+            "SQLITE_CONSTRAINT_UNIQUE" => 2067,
+            "SQLITE_CONSTRAINT_VTAB" => 2323,
+            "SQLITE_CONSTRAINT_ROWID" => 2579,
+            "SQLITE_CONSTRAINT_PINNED" => 2835,
+            "SQLITE_CONSTRAINT_DATATYPE" => 3091,
+            "SQLITE_ABORT_ROLLBACK" => 516,
+            _ => 0,
+        };
+        if (extended != 0)
+            return (extended & 0xff, extended);
+
+        var primary = code switch
+        {
+            "SQLITE_OK" => 0,
+            "SQLITE_ERROR" => 1,
+            "SQLITE_INTERNAL" => 2,
+            "SQLITE_PERM" => 3,
+            "SQLITE_ABORT" => 4,
+            "SQLITE_BUSY" => 5,
+            "SQLITE_LOCKED" => 6,
+            "SQLITE_NOMEM" => 7,
+            "SQLITE_READONLY" => 8,
+            "SQLITE_INTERRUPT" => 9,
+            "SQLITE_IOERR" => 10,
+            "SQLITE_CORRUPT" => 11,
+            "SQLITE_NOTFOUND" => 12,
+            "SQLITE_FULL" => 13,
+            "SQLITE_CANTOPEN" => 14,
+            "SQLITE_PROTOCOL" => 15,
+            "SQLITE_EMPTY" => 16,
+            "SQLITE_SCHEMA" => 17,
+            "SQLITE_TOOBIG" => 18,
+            "SQLITE_CONSTRAINT" => 19,
+            "SQLITE_MISMATCH" => 20,
+            "SQLITE_MISUSE" => 21,
+            "SQLITE_NOLFS" => 22,
+            "SQLITE_AUTH" => 23,
+            "SQLITE_FORMAT" => 24,
+            "SQLITE_RANGE" => 25,
+            "SQLITE_NOTADB" => 26,
+            "SQLITE_NOTICE" => 27,
+            "SQLITE_WARNING" => 28,
+            _ when code.StartsWith("SQLITE_CONSTRAINT_", StringComparison.Ordinal) => 19,
+            _ when code.StartsWith("SQLITE_BUSY_", StringComparison.Ordinal) => 5,
+            _ when code.StartsWith("SQLITE_LOCKED_", StringComparison.Ordinal) => 6,
+            _ when code.StartsWith("SQLITE_READONLY_", StringComparison.Ordinal) => 8,
+            _ when code.StartsWith("SQLITE_IOERR_", StringComparison.Ordinal) => 10,
+            _ when code.StartsWith("SQLITE_CORRUPT_", StringComparison.Ordinal) => 11,
+            _ when code.StartsWith("SQLITE_CANTOPEN_", StringComparison.Ordinal) => 14,
+            _ when code.StartsWith("SQLITE_ABORT_", StringComparison.Ordinal) => 4,
+            _ => 1,
+        };
+        return (primary, primary);
     }
 
     private static string PreserveNoSuchTableCase(string message, string sql)

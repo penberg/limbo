@@ -17,8 +17,9 @@ use crate::sync::{Arc, Weak};
 use crate::types::IOResultOr;
 use crate::{
     index_method::{
-        open_index_cursor, parse_patterns, IndexMethod, IndexMethodAttachment,
-        IndexMethodConfiguration, IndexMethodContext, IndexMethodCursor, IndexMethodDefinition,
+        parse_patterns, BackingColumn, BackingIndex, BackingSchema, BackingStore, BackingStoreOp,
+        BackingTable, IndexMethod, IndexMethodAttachment, IndexMethodConfiguration,
+        IndexMethodContext, IndexMethodCursor, IndexMethodDefinition,
     },
     return_if_io,
     schema::IndexColumn,
@@ -26,13 +27,12 @@ use crate::{
     translate::collate::CollationSeq,
     turso_assert,
     types::{IOResult, KeyInfo, SeekKey, SeekOp, SeekResult},
-    util::quote_identifier,
     vdbe::Register,
     Connection, LimboError, Result, Value,
 };
 use parking_lot::Mutex;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::{
     cell::RefCell,
@@ -72,6 +72,54 @@ use rows::{
 
 /// Name identifier for the FTS index method, used in `CREATE INDEX ... USING fts`.
 pub const FTS_INDEX_METHOD_NAME: &str = "fts";
+
+/// The schema objects of one FTS index: one internal table and one key-only
+/// index over `(path, chunk_no, bytes)`.
+struct FtsStore {
+    schema: BackingSchema,
+}
+
+impl FtsStore {
+    fn new(index_name: &str) -> Self {
+        let table = BackingTable::new(
+            format!("fts_dir_{index_name}"),
+            vec![
+                BackingColumn::new("path", crate::schema::Type::Text),
+                BackingColumn::new("chunk_no", crate::schema::Type::Integer),
+                BackingColumn::new("bytes", crate::schema::Type::Blob),
+            ],
+        );
+        let index = BackingIndex::on_backing_table(
+            &table,
+            format!("{}_key", table.table_name()),
+            vec![
+                "path".to_string(),
+                "chunk_no".to_string(),
+                "bytes".to_string(),
+            ],
+            vec![key_info(), key_info(), key_info()],
+        );
+        Self {
+            schema: BackingSchema::new(vec![table], vec![index]),
+        }
+    }
+
+    fn index(&self) -> &BackingIndex {
+        &self.schema.indexes[0]
+    }
+
+    fn table_name(&self) -> String {
+        self.schema.tables[0].table_name()
+    }
+}
+
+fn key_info() -> KeyInfo {
+    KeyInfo {
+        collation: CollationSeq::Binary,
+        sort_order: SortOrder::Asc,
+        nulls_order: None,
+    }
+}
 
 /// Memory budget for Tantivy's per-segment writer arena.
 pub const DEFAULT_MEMORY_BUDGET_BYTES: usize = 64 * 1024 * 1024;
@@ -258,15 +306,6 @@ pub fn fts_match(text: &str, query: &str) -> bool {
         }
         false
     })
-}
-
-/// Creates default `KeyInfo` for BTree index columns.
-fn key_info() -> KeyInfo {
-    KeyInfo {
-        sort_order: SortOrder::Asc,
-        collation: CollationSeq::Binary,
-        nulls_order: None,
-    }
 }
 
 /// Parse field weights from a string like "body=2.0,title=1.0"
@@ -486,6 +525,13 @@ struct FtsShared {
     /// Throwaway index used only to mint `SegmentMeta` values for
     /// synthesized `meta.json` content.
     scratch: Mutex<Option<Index>>,
+    /// Heuristic count of visible segments: bumped by segment-appending
+    /// publishes, reset by merges, reconciled by every full registry scan.
+    /// Only used to decide whether the write-path auto-merge should pay for
+    /// the real scan — never for correctness (the merge recomputes the true
+    /// visible set from its own snapshot). May drift on rollbacks or across
+    /// processes; the next scan or merge corrects it.
+    visible_segment_estimate: AtomicUsize,
     stats: FtsRuntimeStats,
 }
 
@@ -770,91 +816,6 @@ impl IndexMethodAttachment for FtsIndexAttachment {
     }
 }
 
-/// Nested DDL statements a cursor is driving for `create` or `destroy`,
-/// stepped cooperatively so their I/O reaches the caller instead of being
-/// pumped inside the opcode. The connection is nested only while one of
-/// them is being stepped or dropped: the flag tells the pager that the
-/// statement's `Halt` and reset must not finalize the parent's
-/// transaction, and it must not leak to other statements stepped on this
-/// connection while the parent is suspended at a yield.
-struct NestedDdl {
-    connection: Weak<Connection>,
-    /// SQL still to run, in order. Each statement is prepared only when
-    /// its turn comes: a later one may depend on schema an earlier one
-    /// creates (the backing index on the backing table).
-    pending: VecDeque<String>,
-    current: Option<crate::Statement>,
-}
-
-impl NestedDdl {
-    fn new(conn: &Arc<Connection>, statements: impl IntoIterator<Item = String>) -> Self {
-        Self {
-            connection: Arc::downgrade(conn),
-            pending: statements.into_iter().collect(),
-            current: None,
-        }
-    }
-
-    /// Prepare `sql` nested: `__turso_internal_` names are refused to
-    /// top-level statements. No statement subtransaction: the parent
-    /// statement's transaction covers it (a subtransaction here would
-    /// fail with DatabaseBusy).
-    fn prepare(conn: &Arc<Connection>, sql: String) -> Result<crate::Statement> {
-        conn.start_nested();
-        let stmt = conn.prepare(sql);
-        conn.end_nested();
-        let stmt = stmt?;
-        stmt.program
-            .prepared
-            .needs_stmt_subtransactions
-            .store(false, Ordering::Relaxed);
-        Ok(stmt)
-    }
-
-    /// Drive the statements to completion in order, handing their I/O to
-    /// the caller; re-enter after each yield until `Done`.
-    fn step(&mut self) -> IOResultOr<()> {
-        let conn = self.connection.upgrade().ok_or_else(|| {
-            LimboError::InternalError("FTS nested DDL outlived its connection".into())
-        })?;
-        loop {
-            if self.current.is_none() {
-                let Some(sql) = self.pending.pop_front() else {
-                    return Ok(IOResult::Done(()));
-                };
-                self.current = Some(Self::prepare(&conn, sql)?);
-            }
-            let stmt = self.current.as_mut().expect("prepared above");
-            conn.start_nested();
-            let result = stmt.run_ignore_rows_nonblock();
-            if !matches!(result, Ok(IOResult::IO(_))) {
-                // Drop a finished (or failed) statement while still
-                // nested: its reset consults `is_nested_stmt()`.
-                self.current = None;
-            }
-            conn.end_nested();
-            return_if_io!(result);
-        }
-    }
-}
-
-impl Drop for NestedDdl {
-    fn drop(&mut self) {
-        // A statement abandoned mid-flight (the parent statement was reset)
-        // is dropped nested for the same reason a finished one is.
-        if self.current.is_none() {
-            return;
-        }
-        let Some(conn) = self.connection.upgrade() else {
-            self.current = None;
-            return;
-        };
-        conn.start_nested();
-        self.current = None;
-        conn.end_nested();
-    }
-}
-
 /// Pattern indices for FTS queries
 const FTS_PATTERN_SCORE: i64 = 0;
 const FTS_PATTERN_COMBINED_ORDERED_LIMIT: i64 = 1;
@@ -1003,7 +964,7 @@ pub struct FtsCursor {
     text_fields: Vec<(IndexColumn, Field)>,
     /// The user-visible index name, for error messages.
     index_name: String,
-    dir_table_name: String,
+    store: FtsStore,
     /// Pre-computed default fields for QueryParser (avoids rebuilding Vec per query)
     default_fields: Vec<Field>,
     /// Pre-computed (Field, boost) pairs for QueryParser (avoids re-iterating per query)
@@ -1016,10 +977,10 @@ pub struct FtsCursor {
     connection: Option<Weak<Connection>>,
     database_id: Option<usize>,
     fts_dir_cursor: Option<Box<dyn CursorTrait>>,
-    /// Backing-store DDL in flight for `create` / `destroy`; `Some` only
-    /// while it is suspended at an I/O yield.
-    pending_ddl: Option<NestedDdl>,
-    btree_root_page: Option<i64>,
+    /// A create or a drop of the backing store that is in progress. It is
+    /// `Some` only while the operation waits at an I/O yield.
+    pending_store_op: Option<BackingStoreOp>,
+    backing: Option<BackingStore>,
 
     control: Option<FtsControlV2>,
     /// The snapshot's visible segment set (descriptors + resident bytes +
@@ -1050,6 +1011,11 @@ pub struct FtsCursor {
     pending_tombstone_rows: Vec<(SegmentId, u32)>,
     /// Row publication in flight (statement flush, control row, or merge).
     publish: Option<PendingPublish>,
+    /// Set when a statement flush published a new segment; tells
+    /// `stage_statement_commit` to consider a write-path merge once the
+    /// flush publication completes. Survives IO yields so the auto-merge
+    /// check resumes exactly once per flushed statement.
+    auto_merge_pending: bool,
     /// Segment ids this transaction published into the shared byte cache;
     /// purged on rollback.
     own_published: Vec<SegmentId>,
@@ -1073,11 +1039,7 @@ pub struct FtsCursor {
 impl FtsCursor {
     /// Creates a new FTS cursor with the given configuration.
     fn new(attachment: &FtsIndexAttachment) -> Self {
-        let dir_table_name = format!(
-            "{}fts_dir_{}",
-            crate::schema::TURSO_INTERNAL_PREFIX,
-            attachment.cfg.index_name
-        );
+        let store = FtsStore::new(&attachment.cfg.index_name);
         let text_fields = attachment.text_fields.clone();
         let default_fields: Vec<Field> = text_fields.iter().map(|(_, f)| *f).collect();
         let field_boosts: Vec<(Field, f32)> = text_fields
@@ -1095,7 +1057,7 @@ impl FtsCursor {
             ngram_window: attachment.ngram_window,
             text_fields,
             index_name: attachment.cfg.index_name.clone(),
-            dir_table_name,
+            store,
             default_fields,
             field_boosts,
             shared: Arc::clone(&attachment.shared),
@@ -1103,8 +1065,8 @@ impl FtsCursor {
             connection: None,
             database_id: None,
             fts_dir_cursor: None,
-            pending_ddl: None,
-            btree_root_page: None,
+            pending_store_op: None,
+            backing: None,
             control: None,
             segments: Vec::new(),
             snapshot_loaded: false,
@@ -1119,6 +1081,7 @@ impl FtsCursor {
             doc_buffer: Vec::new(),
             pending_tombstone_rows: Vec::new(),
             publish: None,
+            auto_merge_pending: false,
             own_published: Vec::new(),
             state: FtsState::Init,
             opening_for_write: false,
@@ -1197,54 +1160,13 @@ impl FtsCursor {
         }
     }
 
-    /// Resolve this index's stable MVCC table id, if MVCC is active.
-    fn mvcc_index_id(
-        &self,
-        conn: &Arc<Connection>,
-        database_id: usize,
-    ) -> Result<Option<(Arc<crate::MvStore>, u64, crate::mvcc::database::MVTableId)>> {
-        let Some(mv_store) = conn.mv_store_for_db(database_id) else {
-            return Ok(None);
-        };
-        let tx_id = conn.get_mv_tx_id_for_db(database_id).ok_or_else(|| {
-            LimboError::InternalError(
-                "FTS write opened without an active MVCC transaction".to_string(),
-            )
-        })?;
-        let root_page = self.btree_root_page.ok_or_else(|| {
-            LimboError::InternalError("FTS backing root is not initialized".to_string())
-        })?;
-        let snapshot_ts = mv_store.read_snapshot_ts(tx_id);
-        // A PASSIVE checkpoint can retire this root page under a stale
-        // compiled plan; that is a stale-schema read, not corruption.
-        let index_id = if conn.experimental_mvcc_passive_checkpoint_enabled() {
-            mv_store
-                .try_get_table_id_from_root_page_at(root_page, snapshot_ts)
-                .ok_or(LimboError::SchemaUpdated)?
-        } else {
-            mv_store.get_table_id_from_root_page_at(root_page, snapshot_ts)
-        };
-        Ok(Some((mv_store, tx_id, index_id)))
-    }
-
     /// Under MVCC, take the per-index maintenance lease (the merge mutex)
     /// for this cursor's transaction. Reentrant for the owning transaction;
     /// a no-op in WAL mode, where the pager write lock already serializes.
     /// Only merge/OPTIMIZE and index teardown take this — plain writers
     /// append disjoint rows and run concurrently.
     fn acquire_mvcc_maintenance_lease(&self) -> Result<()> {
-        let conn = self
-            .connection
-            .as_ref()
-            .and_then(Weak::upgrade)
-            .ok_or_else(|| LimboError::InternalError("FTS cursor has no connection".to_string()))?;
-        let database_id = self.database_id.ok_or_else(|| {
-            LimboError::InternalError("FTS database id is not initialized".to_string())
-        })?;
-        let Some((mv_store, tx_id, index_id)) = self.mvcc_index_id(&conn, database_id)? else {
-            return Ok(());
-        };
-        match mv_store.acquire_index_method_write_lease(tx_id, index_id) {
+        match self.backing_handle()?.acquire_maintenance_lease() {
             Ok(()) => {
                 self.shared
                     .stats
@@ -1270,19 +1192,15 @@ impl FtsCursor {
         if self.registered_deleter {
             return Ok(());
         }
-        let conn = self
-            .connection
-            .as_ref()
-            .and_then(Weak::upgrade)
-            .ok_or_else(|| LimboError::InternalError("FTS cursor has no connection".to_string()))?;
-        let database_id = self.database_id.ok_or_else(|| {
-            LimboError::InternalError("FTS database id is not initialized".to_string())
-        })?;
-        if let Some((mv_store, tx_id, index_id)) = self.mvcc_index_id(&conn, database_id)? {
-            mv_store.register_index_method_deleter(tx_id, index_id)?;
-        }
+        self.backing_handle()?.register_deleter()?;
         self.registered_deleter = true;
         Ok(())
+    }
+
+    fn backing_handle(&self) -> Result<&BackingStore> {
+        self.backing
+            .as_ref()
+            .ok_or_else(|| LimboError::InternalError("FTS backing store is not open".to_string()))
     }
 
     /// Open the backing B-tree cursor for the FTS row store.
@@ -1290,26 +1208,15 @@ impl FtsCursor {
         if self.fts_dir_cursor.is_some() {
             return Ok(());
         }
-        // The index stores all 3 columns: (path, chunk_no, bytes) as the key.
-        let index_name = format!("{}_key", self.dir_table_name);
-        let scratch = conn
-            .with_schema(database_id, |schema| {
-                schema.get_index(&self.dir_table_name, &index_name).cloned()
-            })
-            .ok_or_else(|| {
+        let backing =
+            BackingStore::lookup(conn, database_id, self.store.index())?.ok_or_else(|| {
                 LimboError::InternalError(format!(
-                    "index {} for table {} not found",
-                    index_name, self.dir_table_name
+                    "FTS backing store {} not found",
+                    self.store.table_name()
                 ))
             })?;
-        self.btree_root_page = Some(scratch.root_page);
-        self.fts_dir_cursor = Some(open_index_cursor(
-            conn,
-            database_id,
-            &self.dir_table_name,
-            &index_name,
-            [key_info(), key_info(), key_info()],
-        )?);
+        self.fts_dir_cursor = Some(backing.open_cursor()?);
+        self.backing = Some(backing);
         Ok(())
     }
 
@@ -1848,6 +1755,11 @@ impl FtsCursor {
                             );
                         }
                         self.snapshot_loaded = true;
+                        // A full scan is ground truth for the auto-merge
+                        // trigger heuristic; reconcile any drift.
+                        self.shared
+                            .visible_segment_estimate
+                            .store(self.segments.len(), Ordering::Relaxed);
                     }
                     self.ensure_searcher()?;
                     self.state = FtsState::Ready;
@@ -1900,62 +1812,16 @@ impl FtsCursor {
         self.drive_open()
     }
 
-    /// Make sure the backing table and its `backing_btree` index exist,
-    /// creating them on the first `create`. Every later open takes the
-    /// fast path and never prepares a statement.
-    fn ensure_backing_store(
-        &mut self,
-        conn: &Arc<Connection>,
-        database_id: usize,
-    ) -> IOResultOr<()> {
-        if let Some(ddl) = self.pending_ddl.as_mut() {
-            return_if_io!(ddl.step());
-            self.pending_ddl = None;
-            return Ok(IOResult::Done(()));
+    /// Make sure that the backing store exists. The first `create` creates
+    /// it. Every later open finds it in the schema and does not run DDL.
+    fn ensure_backing_store(&mut self, context: &IndexMethodContext) -> IOResultOr<()> {
+        if self.pending_store_op.is_none() {
+            self.pending_store_op = Some(context.create_backing_schema(&self.store.schema)?);
         }
-        let table_name = self.dir_table_name.clone();
-        let index_name = format!("{table_name}_key");
-        let already_exists = conn.with_schema(database_id, |schema| {
-            schema.get_btree_table(&table_name).is_some()
-                && schema.get_index(&table_name, &index_name).is_some()
-        });
-        if already_exists {
-            return Ok(IOResult::Done(()));
-        }
-        let db_prefix = conn
-            .get_database_name_by_index(database_id)
-            .filter(|name| name != "main")
-            .map(|name| format!("{}.", quote_identifier(&name)))
-            .unwrap_or_default();
-        let table_ident = quote_identifier(&table_name);
-        let create_table_sql = format!(
-            "CREATE TABLE IF NOT EXISTS {db_prefix}{table_ident} \
-             (path TEXT NOT NULL, chunk_no INTEGER NOT NULL, bytes BLOB NOT NULL)"
-        );
-        // backing_btree stores all columns in the index B-tree, without
-        // rowid indirection, so cursors work on the exact key structure.
-        let create_index_sql = format!(
-            "CREATE INDEX IF NOT EXISTS {db_prefix}{index_ident} ON {table_ident} \
-             USING {method} (path, chunk_no, bytes)",
-            index_ident = quote_identifier(&index_name),
-            method = super::BACKING_BTREE_INDEX_METHOD_NAME,
-        );
-        // The store is a table plus its index, so two DDL statements run
-        // here, once per CREATE INDEX, nested inside the parent statement
-        // and stepped cooperatively (see [`NestedDdl`]). A helper that
-        // creates a backing B-tree without going through SQL would replace
-        // both.
-        self.drive_nested_ddl(NestedDdl::new(conn, [create_table_sql, create_index_sql]))
-    }
-
-    /// Step freshly prepared nested DDL; park it on the cursor if it
-    /// yields so the next entry resumes it.
-    fn drive_nested_ddl(&mut self, mut ddl: NestedDdl) -> IOResultOr<()> {
-        let result = ddl.step();
-        if matches!(result, Ok(IOResult::IO(_))) {
-            self.pending_ddl = Some(ddl);
-        }
-        result
+        let op = self.pending_store_op.as_mut().expect("set above");
+        return_if_io!(op.step());
+        self.pending_store_op = None;
+        Ok(IOResult::Done(()))
     }
 
     /// Mint a fresh on-disk index incarnation. Drawn from the IO's random
@@ -1966,7 +1832,7 @@ impl FtsCursor {
     /// (connection-less unit tests) a process-local counter keeps values
     /// distinct.
     fn mint_index_incarnation(&self) -> u64 {
-        let root = self.btree_root_page.unwrap_or_default() as u64;
+        let root = self.backing.as_ref().map_or(0, BackingStore::root_page) as u64;
         let entropy = self
             .io_random_u64()
             .unwrap_or_else(|| NEXT_FTS_INDEX_INCARNATION.fetch_add(1, Ordering::Relaxed));
@@ -2114,11 +1980,17 @@ impl FtsCursor {
             PublishApply::AppendSegment(new_segment) => {
                 if let Some(segment) = new_segment {
                     self.segments.push(segment);
+                    self.shared
+                        .visible_segment_estimate
+                        .fetch_add(1, Ordering::Relaxed);
                 }
                 self.invalidate_snapshot_view();
             }
             PublishApply::ReplaceSegments(segments) => {
                 self.segments = segments;
+                self.shared
+                    .visible_segment_estimate
+                    .store(self.segments.len(), Ordering::Relaxed);
                 self.invalidate_snapshot_view();
             }
         }
@@ -2233,6 +2105,126 @@ impl FtsCursor {
         Ok(())
     }
 
+    /// Which visible segments the write-path merge should rewrite (B2):
+    /// - a segment at least half tombstoned is always a candidate —
+    ///   rewriting reclaims its dead space no matter how big it is;
+    /// - otherwise candidates are every clean segment at or below the
+    ///   smallest size layer holding at least two of them, so one huge
+    ///   segment is not rewritten on every trigger.
+    ///
+    /// Returns an empty set when nothing is worth rewriting (no pair of
+    /// mergeable clean segments and no tombstone-heavy segment).
+    fn auto_merge_candidates(&self) -> HashSet<SegmentId> {
+        /// ParadeDB-style size layers. Segments at or past the last
+        /// boundary never merge on size grounds.
+        const FTS_MERGE_LAYER_BYTES: [u64; 4] = [100 << 10, 1 << 20, 100 << 20, 1 << 30];
+        fn segment_bytes(segment: &LoadedSegment) -> u64 {
+            segment.descriptor.files.iter().map(|file| file.size).sum()
+        }
+
+        let mut candidates: HashSet<SegmentId> = self
+            .segments
+            .iter()
+            .filter(|segment| {
+                segment.descriptor.max_doc > 0
+                    && segment.deleted.len() as u64 * 2 >= u64::from(segment.descriptor.max_doc)
+            })
+            .map(LoadedSegment::id)
+            .collect();
+        for ceiling in FTS_MERGE_LAYER_BYTES {
+            let group: Vec<SegmentId> = self
+                .segments
+                .iter()
+                .filter(|segment| {
+                    !candidates.contains(&segment.id()) && segment_bytes(segment) <= ceiling
+                })
+                .map(LoadedSegment::id)
+                .collect();
+            if group.len() >= 2 {
+                candidates.extend(group);
+                return candidates;
+            }
+        }
+        // No clean tier is mergeable; rewriting only pays off if a
+        // tombstone-heavy segment reclaims space.
+        candidates
+    }
+
+    /// After a statement flush published a new segment, merge the visible
+    /// set down if it exceeds the connection's `fts_merge_threshold`. Runs
+    /// inside the same transaction, under the same lease and admissibility
+    /// rules as OPTIMIZE — so a refused lease (`Busy` /
+    /// `WriteWriteConflict`) skips the merge silently: a writer must never
+    /// fail because maintenance was contended.
+    fn try_auto_merge(&mut self) -> Result<IOResult<()>> {
+        // Re-entry after an IO yield inside the merge publication: the
+        // pending flag was already cleared when the merge was staged, so
+        // this only handles yields from the snapshot scan below.
+        let Some(conn) = self.connection.as_ref().and_then(Weak::upgrade) else {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        };
+        let threshold = conn.get_fts_merge_threshold();
+        if threshold <= 0 {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        // Cheap pre-check: below the threshold, a flushed statement must pay
+        // nothing beyond this load — the estimate keeps the insert fast path
+        // scan-free. Over-estimates cost one wasted scan; under-estimates
+        // delay the merge until the next reconciling scan.
+        if self
+            .shared
+            .visible_segment_estimate
+            .load(Ordering::Relaxed)
+            .max(self.segments.len())
+            <= threshold as usize
+        {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        // The insert fast path stops after format detection; counting the
+        // visible set needs the full registry scan (resumable on IO).
+        return_if_io!(self.ensure_snapshot_loaded());
+        if self.segments.len() <= threshold as usize {
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        match self.acquire_mvcc_maintenance_lease() {
+            Ok(()) => {}
+            Err(LimboError::Busy | LimboError::WriteWriteConflict) => {
+                tracing::debug!("FTS auto-merge: lease contended, skipping");
+                self.auto_merge_pending = false;
+                return Ok(IOResult::Done(()));
+            }
+            Err(err) => return Err(err),
+        }
+        match self.backing_handle()?.check_merge_admissible() {
+            Ok(()) => {}
+            Err(LimboError::Busy | LimboError::WriteWriteConflict) => {
+                tracing::debug!("FTS auto-merge: deleter overlap, skipping");
+                self.auto_merge_pending = false;
+                return Ok(IOResult::Done(()));
+            }
+            Err(err) => return Err(err),
+        }
+        // Tiered candidacy: rewrite the small tier and tombstone-heavy
+        // segments, never a big clean segment on every trigger.
+        let candidates = self.auto_merge_candidates();
+        if candidates.is_empty() {
+            tracing::debug!("FTS auto-merge: no tier is worth rewriting, skipping");
+            self.auto_merge_pending = false;
+            return Ok(IOResult::Done(()));
+        }
+        self.stage_merge_of_segments(&candidates)?;
+        // Clear before driving: a yield inside the publication resumes
+        // through `stage_statement_commit`'s is_publishing branch, which
+        // must not evaluate the trigger again.
+        self.auto_merge_pending = false;
+        return_if_io!(self.drive_publish());
+        Ok(IOResult::Done(()))
+    }
+
     /// Complete any in-flight or due batch publication before a mutation.
     /// The VDBE retries the current instruction when an operation returns
     /// `IOResult::IO`, so this must finish before Tantivy state changes.
@@ -2340,6 +2332,7 @@ impl FtsCursor {
         self.doc_buffer.clear();
         self.pending_tombstone_rows.clear();
         self.publish = None;
+        self.auto_merge_pending = false;
         self.segments.clear();
         self.snapshot_loaded = false;
         self.scan_descriptors.clear();
@@ -2348,6 +2341,7 @@ impl FtsCursor {
         self.control = None;
         self.invalidate_snapshot_view();
         self.fts_dir_cursor = None;
+        self.backing = None;
         self.current_hits.clear();
         self.streaming_hits = None;
         self.hit_pos = 0;
@@ -2546,19 +2540,11 @@ pub struct FtsBackingRowWiper {
 #[cfg(feature = "test_helper")]
 impl FtsBackingRowWiper {
     pub fn new(conn: &Arc<Connection>, database_id: usize, index_name: &str) -> Result<Self> {
-        let dir_table_name = format!(
-            "{}fts_dir_{}",
-            crate::schema::TURSO_INTERNAL_PREFIX,
-            index_name
-        );
-        let key_index_name = format!("{dir_table_name}_key");
-        let cursor = open_index_cursor(
-            conn,
-            database_id,
-            &dir_table_name,
-            &key_index_name,
-            [key_info(), key_info(), key_info()],
-        )?;
+        let cursor = BackingStore::lookup(conn, database_id, FtsStore::new(index_name).index())?
+            .ok_or_else(|| {
+                LimboError::InternalError(format!("FTS backing store for {index_name} not found"))
+            })?
+            .open_cursor()?;
         Ok(Self {
             cursor,
             // Every path is a prefix match for the empty string.
@@ -2586,19 +2572,11 @@ pub struct FtsBackingRowDumper {
 #[cfg(feature = "test_helper")]
 impl FtsBackingRowDumper {
     pub fn new(conn: &Arc<Connection>, database_id: usize, index_name: &str) -> Result<Self> {
-        let dir_table_name = format!(
-            "{}fts_dir_{}",
-            crate::schema::TURSO_INTERNAL_PREFIX,
-            index_name
-        );
-        let key_index_name = format!("{dir_table_name}_key");
-        let cursor = open_index_cursor(
-            conn,
-            database_id,
-            &dir_table_name,
-            &key_index_name,
-            [key_info(), key_info(), key_info()],
-        )?;
+        let cursor = BackingStore::lookup(conn, database_id, FtsStore::new(index_name).index())?
+            .ok_or_else(|| {
+                LimboError::InternalError(format!("FTS backing store for {index_name} not found"))
+            })?
+            .open_cursor()?;
         Ok(Self {
             cursor,
             started: false,
@@ -2665,7 +2643,7 @@ impl IndexMethodCursor for FtsCursor {
             return_if_io!(self.drive_publish());
             return Ok(IOResult::Done(()));
         }
-        return_if_io!(self.ensure_backing_store(&conn, database_id));
+        return_if_io!(self.ensure_backing_store(context));
         self.open_cursor(&conn, database_id)?;
         self.claim_writer_slot()?;
         let control = FtsControlV2::new(self.mint_index_incarnation());
@@ -2694,16 +2672,15 @@ impl IndexMethodCursor for FtsCursor {
         let database_id = context.database().id;
         self.database_id = Some(database_id);
         self.connection = Some(Arc::downgrade(&conn));
-        if let Some(ddl) = self.pending_ddl.as_mut() {
-            // Resuming the DROP TABLE below after an I/O yield.
-            return_if_io!(ddl.step());
-            self.pending_ddl = None;
+        if let Some(op) = self.pending_store_op.as_mut() {
+            return_if_io!(op.step());
+            self.pending_store_op = None;
             self.state = FtsState::Init;
             return Ok(IOResult::Done(()));
         }
         tracing::debug!(
             "FTS destroy: dropping internal storage {}",
-            self.dir_table_name
+            self.store.table_name()
         );
 
         // Teardown retires every row, like a merge: serialize with
@@ -2720,23 +2697,16 @@ impl IndexMethodCursor for FtsCursor {
         self.snapshot_loaded = false;
         self.invalidate_snapshot_view();
         self.fts_dir_cursor = None;
+        self.backing = None;
         self.control = None;
         *self.shared.segment_bytes.lock() = SegmentByteCache::default();
         *self.shared.searchers.lock() = SearcherCache::default();
 
-        // Drop the internal storage table; the backing_btree index is
-        // dropped automatically with it. Nested inside the parent DROP
-        // INDEX statement and stepped cooperatively (see [`NestedDdl`]).
-        let db_prefix = conn
-            .get_database_name_by_index(database_id)
-            .filter(|name| name != "main")
-            .map(|name| format!("{}.", quote_identifier(&name)))
-            .unwrap_or_default();
-        let drop_table_sql = format!(
-            "DROP TABLE IF EXISTS {db_prefix}{}",
-            quote_identifier(&self.dir_table_name)
-        );
-        return_if_io!(self.drive_nested_ddl(NestedDdl::new(&conn, [drop_table_sql])));
+        let mut op = context.drop_backing_schema(&self.store.schema)?;
+        if let IOResult::IO(io) = op.step()? {
+            self.pending_store_op = Some(op);
+            return Ok(IOResult::IO(io));
+        }
 
         self.state = FtsState::Init;
         Ok(IOResult::Done(()))
@@ -2768,7 +2738,7 @@ impl IndexMethodCursor for FtsCursor {
         if matches!(self.state, FtsState::Ready) {
             return Ok(IOResult::Done(()));
         }
-        return_if_io!(self.ensure_backing_store(&conn, database_id));
+        return_if_io!(self.ensure_backing_store(context));
         if !self.snapshot_loaded {
             self.probe_only = true;
         }
@@ -3212,7 +3182,14 @@ impl IndexMethodCursor for FtsCursor {
                 self.pending_op_count()
             );
             self.stage_flush()?;
+            self.auto_merge_pending = matches!(
+                self.publish.as_ref().map(|publish| &publish.apply),
+                Some(PublishApply::AppendSegment(Some(_)))
+            );
             return_if_io!(self.drive_publish());
+        }
+        if self.auto_merge_pending {
+            return_if_io!(self.try_auto_merge());
         }
         // This cursor's statement-scope writes are staged; it never flushes
         // again, so a later statement's cursor may write this index.
@@ -3286,7 +3263,7 @@ impl IndexMethodCursor for FtsCursor {
         }
 
         if !matches!(self.state, FtsState::Ready) {
-            return_if_io!(self.ensure_backing_store(&conn, database_id));
+            return_if_io!(self.ensure_backing_store(context));
             self.opening_for_write = true;
             let result = self.drive_open();
             if !matches!(result, Ok(IOResult::IO(_))) {
@@ -3319,9 +3296,7 @@ impl IndexMethodCursor for FtsCursor {
         // Belt and braces: re-verify no deleter overlapped between lease
         // acquisition and here (the lease blocks new deleters, so this can
         // only fail if the acquire raced an in-flight registration).
-        if let Some((mv_store, tx_id, index_id)) = self.mvcc_index_id(&conn, database_id)? {
-            mv_store.check_index_method_merge_admissible(tx_id, index_id)?;
-        }
+        self.backing_handle()?.check_merge_admissible()?;
 
         // OPTIMIZE is the explicit "compact now" command: it merges every
         // visible segment, with no tier exemptions.

@@ -4,8 +4,8 @@ use super::{
     plan::{
         DeletePlan, GroupBy, InSeekSource, IterationDirection, JoinInfo, JoinOrderMember, JoinType,
         JoinedTable, MinMaxDef, MultiIndexBranch, MultiIndexScanOp, Operation, Plan, Search,
-        SeekDef, SeekKey, SelectPlan, SetOperation, SimpleAggregate, TableReferences, UpdatePlan,
-        WhereTerm,
+        SeekDef, SeekKey, SelectPlan, SetOperation, SimpleAggregate, TablePlanEstimate,
+        TableReferences, UpdatePlan, WhereTerm,
     },
 };
 use crate::alloc::TursoIteratorExt;
@@ -55,8 +55,8 @@ use crate::{
 };
 use crate::{turso_assert, turso_assert_eq, turso_debug_assert, turso_soft_unreachable};
 use constraints::{
-    can_use_partial_index, constraints_from_where_clause, partial_index,
-    partial_index_predicate_terms, Constraint,
+    add_implied_column_equalities, can_use_partial_index, constraints_from_where_clause,
+    partial_index, partial_index_predicate_terms, Constraint,
 };
 use cost::Cost;
 use join::{
@@ -871,6 +871,7 @@ struct TableAccessPlan {
     subquery_calls: SmallVec<[(TableInternalId, f64); 2]>,
     order_target: Option<OrderTarget>,
     sort_eliminated: bool,
+    initial_input_rows: f64,
 }
 
 #[derive(Default)]
@@ -2284,7 +2285,7 @@ fn optimize_table_access(
     result_columns: &mut [ResultSetColumn],
     table_references: &mut TableReferences,
     available_indexes: &AvailableIndexes,
-    where_clause: &mut [WhereTerm],
+    where_clause: &mut Vec<WhereTerm>,
     order_by: &mut Vec<(
         Box<ast::Expr>,
         SortOrder,
@@ -2333,7 +2334,7 @@ fn find_table_access_plan(
     result_columns: &mut [ResultSetColumn],
     table_references: &mut TableReferences,
     available_indexes: &AvailableIndexes,
-    where_clause: &mut [WhereTerm],
+    where_clause: &mut Vec<WhereTerm>,
     order_by: &mut Vec<(
         Box<ast::Expr>,
         SortOrder,
@@ -2408,7 +2409,7 @@ fn find_table_access_plan(
 
     // For multi-table queries, collect index method candidates to pass to the DP algorithm.
     // This allows the optimizer to consider index methods at any position in the join order.
-    let base_table_rows_for_candidates = table_references
+    let base_table_rows = table_references
         .joined_tables()
         .iter()
         .map(|t| base_row_estimate(schema, t, params))
@@ -2423,7 +2424,7 @@ fn find_table_access_plan(
             group_by,
             limit,
             offset,
-            &base_table_rows_for_candidates,
+            &base_table_rows,
             params,
         )?
     } else {
@@ -2432,21 +2433,6 @@ fn find_table_access_plan(
     let maybe_order_target = simple_aggregate
         .and_then(|sa| simple_aggregate_order_target(sa, table_references))
         .or_else(|| compute_order_target(order_by, group_by.as_mut(), table_references));
-    let mut constraints_per_table = constraints_from_where_clause(
-        where_clause,
-        table_references,
-        available_indexes,
-        subqueries,
-        schema,
-        params,
-    )?;
-
-    let base_table_rows = table_references
-        .joined_tables()
-        .iter()
-        .map(|t| base_row_estimate(schema, t, params))
-        .collect::<Vec<_>>();
-
     // Currently the expressions we evaluate as constraints are binary comparisons that (except for IS/IS NOT)
     // will never be true for a NULL operand.
     // If there are any constraints on the right hand side table of an outer join that are not part of the outer join condition,
@@ -2456,9 +2442,7 @@ fn find_table_access_plan(
     // there can never be a situation where null columns are emitted for t2 because t2.id = 5 will never be true in that case.
     // hence: we can convert the outer join into an inner join.
     //
-    // Converting a LEFT JOIN into an INNER JOIN is an optimization opportunity:
-    // it can enable join reordering and let more predicates participate in key selection.
-    // -> recompute constraints if we rewrote a LEFT JOIN into an INNER JOIN.
+    // Converting a LEFT JOIN into an INNER JOIN can enable join reordering.
     loop {
         let mut outer_join_rewritten = false;
         for t in table_references.joined_tables_mut().iter_mut().filter(|t| {
@@ -2492,15 +2476,17 @@ fn find_table_access_plan(
         if !outer_join_rewritten {
             break;
         }
-        constraints_per_table = constraints_from_where_clause(
-            where_clause,
-            table_references,
-            available_indexes,
-            subqueries,
-            schema,
-            params,
-        )?;
     }
+
+    add_implied_column_equalities(where_clause, table_references)?;
+    let mut constraints_per_table = constraints_from_where_clause(
+        where_clause,
+        table_references,
+        available_indexes,
+        subqueries,
+        schema,
+        params,
+    )?;
 
     // Enforce INDEXED BY / NOT INDEXED after outer-join rewrites settle, because
     // a null-rejecting WHERE term can turn a LEFT JOIN into an INNER JOIN and
@@ -2587,6 +2573,7 @@ fn find_table_access_plan(
         subquery_calls,
         order_target: maybe_order_target,
         sort_eliminated,
+        initial_input_rows: initial_input_cardinality,
     }))
 }
 
@@ -2610,6 +2597,7 @@ fn apply_table_access_plan(
         subquery_calls: _,
         order_target: maybe_order_target,
         sort_eliminated,
+        initial_input_rows,
     } = plan;
 
     if sort_eliminated {
@@ -2639,6 +2627,33 @@ fn apply_table_access_plan(
         best_plan.best_access_methods().collect::<Vec<_>>(),
         best_plan.table_numbers().collect::<Vec<_>>(),
     );
+
+    for table in table_references.joined_tables_mut() {
+        table.plan_estimate = None;
+    }
+    let mut input_rows = initial_input_rows;
+    let mut total_cost = 0.0;
+    for (position, (&table_idx, &access_method_idx)) in best_table_numbers
+        .iter()
+        .zip(&best_access_methods)
+        .enumerate()
+    {
+        let access_method = &access_methods_arena[access_method_idx];
+        total_cost += access_method.cost.0;
+        let output_rows = best_plan.prefix_cardinalities[position];
+        table_references.joined_tables_mut()[table_idx].plan_estimate = Some(TablePlanEstimate {
+            input_rows,
+            rows_per_input: if input_rows == 0.0 {
+                0.0
+            } else {
+                output_rows / input_rows
+            },
+            output_rows,
+            access_cost: access_method.cost.0,
+            total_cost,
+        });
+        input_rows = output_rows;
+    }
 
     // Collect hash join build/probe table indices. Build tables are excluded from the main
     // join order because they are consumed during hash build. A table may appear as both
@@ -3389,6 +3404,8 @@ impl Optimizable for ast::Expr {
                 lhs, start, end, ..
             } => lhs.is_nonnull(tables) && start.is_nonnull(tables) && end.is_nonnull(tables),
             Expr::Binary(_, ast::Operator::Modulus | ast::Operator::Divide, _) => false, // 1 % 0, 1 / 0
+            Expr::Binary(_, ast::Operator::ArrowRight | ast::Operator::ArrowRightShift, _) => false, // JSON path may be absent, yielding NULL
+            Expr::Binary(_, ast::Operator::ArrayContains | ast::Operator::ArrayOverlap, _) => false,
             Expr::Binary(expr, _, expr1) => expr.is_nonnull(tables) && expr1.is_nonnull(tables),
             Expr::Case {
                 when_then_pairs,
@@ -3443,7 +3460,15 @@ impl Optimizable for ast::Expr {
             Expr::InSelect { .. } => false,
             Expr::InTable { .. } => false,
             Expr::IsNull(..) => true,
-            Expr::Like { lhs, rhs, .. } => lhs.is_nonnull(tables) && rhs.is_nonnull(tables),
+            Expr::Like {
+                lhs, rhs, escape, ..
+            } => {
+                lhs.is_nonnull(tables)
+                    && rhs.is_nonnull(tables)
+                    && escape
+                        .as_ref()
+                        .is_none_or(|escape| escape.is_nonnull(tables))
+            }
             Expr::Literal(literal) => match literal {
                 ast::Literal::Numeric(_) => true,
                 ast::Literal::String(_) => true,

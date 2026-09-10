@@ -485,6 +485,7 @@ pub fn emit_upsert(
     returning: &mut [ResultSetColumn],
     connection: &Arc<Connection>,
     table_references: &mut TableReferences,
+    table_alias: Option<&str>,
 ) -> crate::Result<()> {
     // Seek & snapshot CURRENT
     program.emit_insn(Insn::SeekRowid {
@@ -639,6 +640,7 @@ pub fn emit_upsert(
             expr_current_start,
             ctx.conflict_rowid_reg,
             Some(table.get_name()),
+            table_alias,
             Some(insertion),
             true,
             excluded_decoded_start,
@@ -662,6 +664,7 @@ pub fn emit_upsert(
             expr_current_start,
             ctx.conflict_rowid_reg,
             Some(table.get_name()),
+            table_alias,
             Some(insertion),
             true,
             excluded_decoded_start,
@@ -1657,6 +1660,7 @@ fn rewrite_expr_to_registers(
     base_start: usize,
     rowid_reg: usize,
     table_name: Option<&str>,
+    table_alias: Option<&str>,
     insertion: Option<&Insertion>,
     allow_excluded: bool,
     excluded_decoded_start: Option<usize>,
@@ -1685,8 +1689,20 @@ fn rewrite_expr_to_registers(
                 Expr::Qualified(ns, c) | Expr::DoublyQualified(_, ns, c) => {
                     let ns = normalize_ident(ns.as_str());
                     let c = normalize_ident(c.as_str());
+                    // An INSERT target alias replaces the base table name in
+                    // the DO UPDATE scope.  It also shadows the special
+                    // `excluded` pseudo-table when the alias is literally
+                    // named `excluded` (SQLite's name-resolution rule).
+                    let is_target_namespace = if let Some(alias) = table_alias {
+                        ns.eq_ignore_ascii_case(alias)
+                    } else {
+                        table_name_norm
+                            .as_ref()
+                            .is_some_and(|tn| ns.eq_ignore_ascii_case(tn))
+                    };
                     // Handle EXCLUDED.* if enabled
-                    if allow_excluded && ns.eq_ignore_ascii_case("excluded") {
+                    if allow_excluded && ns.eq_ignore_ascii_case("excluded") && !is_target_namespace
+                    {
                         if let Some(ins) = insertion {
                             if ROWID_STRS.iter().any(|s| s.eq_ignore_ascii_case(&c)) {
                                 *expr = Expr::Register(ins.key_register());
@@ -1711,15 +1727,13 @@ fn rewrite_expr_to_registers(
                     }
 
                     // Match the target table namespace if provided
-                    if let Some(ref tn) = table_name_norm {
-                        if ns.eq_ignore_ascii_case(tn) {
-                            if let Some(r) = col_reg_from_row_image(&c) {
-                                *expr = Expr::Register(r);
-                            } else {
-                                bail_parse_error!("no such column: {}.{}", ns, c);
-                            }
-                            return Ok(WalkControl::Continue);
+                    if is_target_namespace {
+                        if let Some(r) = col_reg_from_row_image(&c) {
+                            *expr = Expr::Register(r);
+                        } else {
+                            bail_parse_error!("no such column: {}.{}", ns, c);
                         }
+                        return Ok(WalkControl::Continue);
                     }
 
                     // In UPSERT DO UPDATE context (allow_excluded=true), a qualified

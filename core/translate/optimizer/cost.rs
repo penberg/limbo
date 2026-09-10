@@ -289,8 +289,10 @@ pub(crate) fn estimate_rows_per_seek(
     base_row_count: RowCountEstimate,
     analyze_ctx: Option<&AnalyzeCtx>,
 ) -> f64 {
+    let join_probe_constant_selectivity =
+        join_probe_constant_selectivity(constraints, usable_constraint_refs);
     if is_unique_point_lookup(index_info, usable_constraint_refs) {
-        return 1.0;
+        return join_probe_constant_selectivity;
     }
 
     if let Some(ctx) = analyze_ctx {
@@ -318,7 +320,8 @@ pub(crate) fn estimate_rows_per_seek(
                         sel
                     })
                     .product();
-                return (eq_prefix_rows * range_selectivity).max(1.0);
+                return (eq_prefix_rows * range_selectivity).max(1.0)
+                    * join_probe_constant_selectivity;
             }
         }
     }
@@ -340,7 +343,27 @@ pub(crate) fn estimate_rows_per_seek(
         })
         .product();
 
-    (selectivity_multiplier * *base_row_count).max(1.0)
+    (selectivity_multiplier * *base_row_count).max(1.0) * join_probe_constant_selectivity
+}
+
+fn join_probe_constant_selectivity(
+    constraints: &[Constraint],
+    usable_constraint_refs: &[RangeConstraintRef],
+) -> f64 {
+    let equality_constraints = usable_constraint_refs
+        .iter()
+        .take_while(|constraint| constraint.eq.is_some())
+        .map(|constraint| &constraints[constraint.eq.as_ref().unwrap().constraint_pos]);
+    if !equality_constraints
+        .clone()
+        .any(|constraint| !constraint.lhs_mask.is_empty())
+    {
+        return 1.0;
+    }
+    equality_constraints
+        .filter(|constraint| constraint.lhs_mask.is_empty())
+        .map(|constraint| constraint.selectivity)
+        .product()
 }
 
 /// Estimate rows per seek using ANALYZE stats (sqlite_stat1 histogram data).

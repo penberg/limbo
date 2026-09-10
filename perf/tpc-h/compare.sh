@@ -47,7 +47,7 @@ for q in $(printf '%s\n' "${QUERY_PATHS[@]}" | sort -V); do
     # Run main branch twice, take best
     main_best=999999
     for i in 1 2; do
-        t=$( { time $MAIN_BIN $DB "$sql" > /dev/null 2>&1; } 2>&1 | grep real | awk -F'[ms]' '{print ($1*60000)+($2*1000)}' )
+        t=$( { time $MAIN_BIN $DB --vfs io_uring "$sql" > /dev/null 2>&1; } 2>&1 | grep real | awk -F'[ms]' '{print ($1*60000)+($2*1000)}' )
         if (( $(echo "$t < $main_best" | bc -l) )); then
             main_best=$t
         fi
@@ -56,7 +56,7 @@ for q in $(printf '%s\n' "${QUERY_PATHS[@]}" | sort -V); do
     # Run current branch twice, take best
     curr_best=999999
     for i in 1 2; do
-        t=$( { time $CURR_BIN $DB "$sql" > /dev/null 2>&1; } 2>&1 | grep real | awk -F'[ms]' '{print ($1*60000)+($2*1000)}' )
+        t=$( { time $CURR_BIN $DB --vfs io_uring "$sql" > /dev/null 2>&1; } 2>&1 | grep real | awk -F'[ms]' '{print ($1*60000)+($2*1000)}' )
         if (( $(echo "$t < $curr_best" | bc -l) )); then
             curr_best=$t
         fi

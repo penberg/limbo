@@ -13,19 +13,26 @@ public partial class SqliteConnection
 
     private void RegisterAggregateFunction(string name, int argc, bool isDeterministic, object? seed, Func<object?, object?[], object?>? step, Func<object?, object?> resultSelector)
     {
+        ThrowIfDirectRemote("Custom aggregate functions");
         ArgumentNullException.ThrowIfNull(name);
         if (step is null)
         {
             _aggregateFunctions.Remove(name);
-            if (_database is not null)
+            if (HasNativeCallbackHandle)
+            {
+                using var syncOperation = _managedConnection?.EnterSyncOperation();
                 TursoBindings.UnregisterFunction(DatabaseHandle, name);
+            }
             return;
         }
 
         var registration = new AggregateFunctionRegistration(name, argc, isDeterministic, seed, step, resultSelector);
         _aggregateFunctions[name] = registration;
-        if (_database is not null)
+        if (HasNativeCallbackHandle)
+        {
+            using var syncOperation = _managedConnection?.EnterSyncOperation();
             _nativeFunctionContexts.Add(registration.Register(DatabaseHandle));
+        }
     }
 
     private void RegisterAggregateFunctions()

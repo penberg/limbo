@@ -3014,6 +3014,11 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> StateTransition for CommitStat
     type Context = Arc<MvStore<Clock, A>>;
     type SMResult = ();
 
+    #[aristo::intent(
+        "An abandoned partial write never reaches disk.",
+        verify = "full",
+        id = "abandoned_partial_write_never_reaches_disk"
+    )]
     #[tracing::instrument(fields(state = ?self.state), skip(self, mvcc_store), level = Level::DEBUG)]
     fn step(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         tracing::trace!("step(state={:?})", self.state);
@@ -3773,7 +3778,17 @@ impl StateTransition for WriteRowStateMachine {
                 // ordering invariant, making the row invisible to point lookups
                 // ("Rowid N out of order" under sqlite3 integrity_check). Fall back
                 // to a real seek, which resolves the divider comparison correctly.
-                if self.requires_seek || !self.cursor.read().is_positioned_past_page_start() {
+                //
+                // The other sound position is the end of the rightmost leaf: when
+                // the previous row was the last row of the table, next() ran off
+                // the end and left the cursor one past it, with no divider to the
+                // right. Every append-only workload sits here for every row, so
+                // without this case each row would seek from the root.
+                let positioned_for_next_key = {
+                    let cursor = self.cursor.read();
+                    cursor.is_positioned_past_page_start() || cursor.is_at_end_of_rightmost_leaf()
+                };
+                if self.requires_seek || !positioned_for_next_key {
                     self.state = WriteRowState::Seek;
                 } else {
                     self.state = WriteRowState::Insert;
@@ -10265,18 +10280,21 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> MvStore<Clock, A> {
     }
 
     pub fn get_rowid_allocator(&self, table_id: &MVTableId) -> Arc<RowidAllocator> {
-        let mut map = self.table_id_to_last_rowid.write();
-        if map.contains_key(table_id) {
-            map.get(table_id).unwrap().clone()
-        } else {
-            let allocator = Arc::new(RowidAllocator {
-                lock: TursoRwLock::new(),
-                max_rowid: AtomicI64::new(0),
-                initialized: AtomicBool::new(false),
-            });
-            map.insert(*table_id, allocator.clone());
-            allocator
+        // Every insert comes through here, so the common case, an allocator
+        // that exists, must not take the map's write lock.
+        if let Some(allocator) = self.table_id_to_last_rowid.read().get(table_id) {
+            return allocator.clone();
         }
+        let mut map = self.table_id_to_last_rowid.write();
+        map.entry(*table_id)
+            .or_insert_with(|| {
+                Arc::new(RowidAllocator {
+                    lock: TursoRwLock::new(),
+                    max_rowid: AtomicI64::new(0),
+                    initialized: AtomicBool::new(false),
+                })
+            })
+            .clone()
     }
 
     /// Whether `table_id` has a *currently live* checkpointed B-tree. Snapshot-agnostic; for

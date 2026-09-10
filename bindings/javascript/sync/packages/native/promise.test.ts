@@ -1,4 +1,4 @@
-import { unlinkSync } from "node:fs";
+import { statSync, unlinkSync } from "node:fs";
 import { test as baseTest, expect } from 'vitest'
 import { connect, Database, DatabaseRowMutation, DatabaseRowTransformResult, retryFetch } from './promise.js'
 import { TursoServer } from './turso-server.js'
@@ -222,6 +222,52 @@ test.skipIf(process.env.LOCAL_SYNC_SERVER)('partial sync (query bootstrap strate
     expect(n1.networkReceivedBytes).toEqual(n2.networkReceivedBytes);
 })
 
+// A partial-sync replica stored in a file uses the sparse IO backend, unlike
+// the ':memory:' replicas of the tests above. Checkpointing twice must work:
+// the first call folds the WAL frames and truncates the WAL file to zero
+// bytes, the second one runs with an empty WAL. Linux-only: the sparse backend
+// exists there only, and elsewhere a file-backed partial replica panics.
+test.runIf(process.platform === 'linux')('partial sync (checkpoint with empty WAL)', async ({ server }) => {
+    {
+        const db = await connect({
+            path: ':memory:',
+            url: server.dbUrl(),
+            longPollTimeoutMs: 100,
+        });
+        await db.exec("CREATE TABLE IF NOT EXISTS partial(value BLOB)");
+        await db.exec("DELETE FROM partial");
+        await db.exec("INSERT INTO partial SELECT randomblob(1024) FROM generate_series(1, 2000)");
+        await db.push();
+        await db.close();
+    }
+
+    const path = `partial-checkpoint-${(Math.random() * 10000) | 0}.db`;
+    try {
+        const db = await connect({
+            path,
+            url: server.dbUrl(),
+            longPollTimeoutMs: 100,
+            partialSyncExperimental: {
+                bootstrapStrategy: { kind: 'prefix', length: 128 * 1024 },
+                segmentSize: 128 * 1024,
+            },
+        });
+
+        await (await db.prepare("INSERT INTO partial VALUES (randomblob(1024))")).run();
+        expect((await db.stats()).mainWalSize).toBeGreaterThan(0);
+
+        await db.checkpoint();
+        expect((await db.stats()).mainWalSize).toBe(0);
+        expect(statSync(`${path}-wal`).size).toBe(0);
+
+        await db.checkpoint();
+        await db.close();
+    }
+    finally {
+        cleanup(path);
+    }
+})
+
 test('concurrent-actions-consistency', async ({ server }) => {
     {
         const db = await connect({
@@ -443,6 +489,35 @@ test('select-after-push', async ({ server }) => {
         const rows = await (await db.prepare('SELECT * FROM t')).all();
         expect(rows).toEqual([{ x: 1 }, { x: 2 }, { x: 3 }])
     }
+})
+
+test('cdc-operations-count', async ({ server }) => {
+    const db = await connect({ path: ':memory:', url: server.dbUrl() });
+    const cdcOperations = async () => (await db.stats()).cdcOperations;
+
+    await db.exec("CREATE TABLE t(x)");
+    expect(await cdcOperations()).toBe(1);
+
+    await db.exec("INSERT INTO t VALUES (1)");
+    expect(await cdcOperations()).toBe(2);
+
+    await db.exec("INSERT INTO t VALUES (2), (3)");
+    expect(await cdcOperations()).toBe(4);
+
+    await db.push();
+    expect(await cdcOperations()).toBe(0);
+
+    // pull writes the sync high-water mark into the internal
+    // turso_sync_last_change_id table, which push never sends
+    await db.pull();
+    expect(await cdcOperations()).toBe(0);
+
+    await db.exec("UPDATE t SET x = 10 WHERE x = 1");
+    await db.exec("DELETE FROM t WHERE x = 2");
+    expect(await cdcOperations()).toBe(2);
+
+    await db.push();
+    expect(await cdcOperations()).toBe(0);
 })
 
 test('select-without-push', async ({ server }) => {
@@ -1259,3 +1334,31 @@ test('push failure leaves server state on transaction boundary', async ({ server
     const rows = await (await db2.prepare('SELECT x FROM q ORDER BY x')).all();
     expect(rows).toEqual([{ x: 0 }, { x: 1 }, { x: 2 }, { x: 3 }, { x: 4 }]);
 })
+
+test('push hands the request body to fetch as bytes without inflating memory', async ({ server }) => {
+    let bodyBytes = 0;
+    let bodyIsBytes = false;
+    const inspectingFetch: typeof fetch = (input, init) => {
+        if (init?.method === 'POST' && init.body != null) {
+            bodyIsBytes = init.body instanceof Uint8Array;
+            bodyBytes = Math.max(bodyBytes, (init.body as Uint8Array).byteLength);
+        }
+        return fetch(input, init);
+    };
+    const db = await connect({ path: ':memory:', url: server.dbUrl(), fetch: inspectingFetch });
+    await db.exec("CREATE TABLE IF NOT EXISTS big(x INTEGER PRIMARY KEY, y BLOB)");
+    const blobBytes = 16 * 1024 * 1024;
+    await db.exec(`INSERT INTO big VALUES (1, randomblob(${blobBytes}))`);
+
+    const rssBefore = process.memoryUsage().rss;
+    await db.push();
+    const rssGrowth = process.memoryUsage().rss - rssBefore;
+
+    expect(bodyIsBytes).toBe(true);
+    expect(bodyBytes).toBeGreaterThan(blobBytes);
+    // Before the body crossed the napi boundary as a Uint8Array it was marshalled as
+    // a JS Array<number>, one element per byte, which alone costs 8 bytes per
+    // body byte in V8 and put push at roughly 20x the change-set size.
+    expect(rssGrowth).toBeLessThan(6 * bodyBytes);
+    console.log(`push body=${(bodyBytes / 1024 / 1024).toFixed(1)}MiB rssGrowth=${(rssGrowth / 1024 / 1024).toFixed(0)}MiB (${(rssGrowth / bodyBytes).toFixed(1)}x)`);
+}, 120000)

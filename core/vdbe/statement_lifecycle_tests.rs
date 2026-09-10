@@ -6,7 +6,7 @@ use crate::mvcc::cursor::CursorYieldPoint;
 use crate::mvcc::yield_hooks::YieldPointMarker;
 use crate::mvcc::yield_points::{YieldInjector, YieldPoint};
 use crate::sync::{Arc, Mutex};
-#[cfg(feature = "fts")]
+#[cfg(any(feature = "fts", feature = "io_memory_yield"))]
 use crate::StepResult;
 use crate::{Connection, Database, DatabaseOpts, LimboError, OpenFlags, Result, Value};
 
@@ -207,14 +207,14 @@ fn fail_rolls_back_base_rows_when_index_method_preparation_fails() {
 /// Delegates to `MemoryIO` and counts every `step` / `wait_for_completion`
 /// made while the test is inside `Statement::step`: that is the engine
 /// pumping I/O synchronously instead of yielding it to the caller.
-#[cfg(feature = "fts")]
+#[cfg(any(feature = "fts", feature = "io_memory_yield"))]
 struct NoPumpInsideStepIo {
     inner: Arc<dyn crate::IO>,
     inside_step: std::sync::atomic::AtomicBool,
     pumps_inside_step: std::sync::atomic::AtomicUsize,
 }
 
-#[cfg(feature = "fts")]
+#[cfg(any(feature = "fts", feature = "io_memory_yield"))]
 impl std::fmt::Debug for NoPumpInsideStepIo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NoPumpInsideStepIo")
@@ -223,7 +223,7 @@ impl std::fmt::Debug for NoPumpInsideStepIo {
     }
 }
 
-#[cfg(feature = "fts")]
+#[cfg(any(feature = "fts", feature = "io_memory_yield"))]
 impl NoPumpInsideStepIo {
     fn new(inner: Arc<dyn crate::IO>) -> Self {
         Self {
@@ -281,7 +281,7 @@ impl crate::Clock for NoPumpInsideStepIo {
     }
 }
 
-#[cfg(feature = "fts")]
+#[cfg(any(feature = "fts", feature = "io_memory_yield"))]
 impl crate::IO for NoPumpInsideStepIo {
     fn open_file(
         &self,
@@ -564,6 +564,81 @@ fn fts_backing_store_ddl_yields_real_io_on_a_deferred_backend() {
                 "SELECT count(*) FROM docs WHERE fts_match(body, 'fresh')"
             )[0][0],
             Value::from_i64(1),
+            "mvcc={mvcc}"
+        );
+    }
+}
+
+/// The toy vector index creates and drops its backing stores through the
+/// handle that core owns. As a result, its DDL must give its I/O to the
+/// caller, like all other index-method work. It must not run the I/O inside
+/// the opcode.
+#[cfg(feature = "io_memory_yield")]
+#[test]
+fn toy_index_backing_store_ddl_yields_real_io_on_a_deferred_backend() {
+    for mvcc in [false, true] {
+        let io = Arc::new(NoPumpInsideStepIo::new(Arc::new(
+            crate::MemoryYieldIO::new(),
+        )));
+        let db = Database::open_file_with_flags(
+            io.clone(),
+            &format!("toy-ddl-deferred-io-{mvcc}.db"),
+            OpenFlags::default(),
+            DatabaseOpts::new().with_index_method(true),
+            None,
+            Arc::new(SqliteDialect),
+        )
+        .unwrap();
+        let conn = db.connect().unwrap();
+        if mvcc {
+            conn.execute("PRAGMA journal_mode = 'mvcc'").unwrap();
+        }
+        conn.execute("CREATE TABLE vectors(id INTEGER PRIMARY KEY, embedding)")
+            .unwrap();
+        for id in 1..=5 {
+            conn.execute(format!(
+                "INSERT INTO vectors VALUES ({id}, vector32_sparse('[{id}, 0, 1]'))"
+            ))
+            .unwrap();
+        }
+
+        let io_yields = io.drive(
+            &conn,
+            "CREATE INDEX vectors_idx ON vectors USING toy_vector_sparse_ivf (embedding)",
+        );
+        assert!(
+            io_yields > 0,
+            "the deferred backend surfaced no I/O during CREATE INDEX (mvcc={mvcc})"
+        );
+        assert_eq!(
+            io.pumps_inside_step(),
+            0,
+            "CREATE INDEX pumped deferred I/O inside Statement::step (mvcc={mvcc})"
+        );
+        assert_eq!(
+            get_rows(
+                &conn,
+                "SELECT id FROM vectors \
+                 ORDER BY vector_distance_jaccard(embedding, vector32_sparse('[3, 0, 1]')) \
+                 LIMIT 1"
+            )[0][0],
+            Value::from_i64(3),
+            "mvcc={mvcc}"
+        );
+
+        io.drive(&conn, "DROP INDEX vectors_idx");
+        assert_eq!(
+            io.pumps_inside_step(),
+            0,
+            "DROP INDEX pumped deferred I/O inside Statement::step (mvcc={mvcc})"
+        );
+        assert_eq!(
+            get_rows(
+                &conn,
+                "SELECT count(*) FROM sqlite_master \
+                 WHERE name IN ('vectors_idx_inverted_index', 'vectors_idx_stats')"
+            )[0][0],
+            Value::from_i64(0),
             "mvcc={mvcc}"
         );
     }

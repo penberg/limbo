@@ -178,6 +178,7 @@ pub fn emit_program_for_update(
                 expression_index_usages: Vec::new(),
                 database_id: MAIN_DB_ID,
                 indexed: None,
+                plan_estimate: None,
             }],
             vec![],
         );

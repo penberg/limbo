@@ -60,6 +60,86 @@ expect error {
 }
 
 @cross-check-integrity
+test partial-index-where-nocase-column-refuses-duplicate {
+    CREATE TABLE t (s TEXT COLLATE NOCASE);
+    CREATE UNIQUE INDEX i ON t(s) WHERE s = 'a';
+    INSERT INTO t VALUES ('A');
+    INSERT INTO t VALUES ('a');
+}
+expect error {
+    UNIQUE constraint failed: t.s
+}
+
+@cross-check-integrity
+test partial-index-where-rtrim-column-refuses-duplicate {
+    CREATE TABLE t (s TEXT COLLATE RTRIM);
+    CREATE UNIQUE INDEX i ON t(s) WHERE s = 'a';
+    INSERT INTO t VALUES ('a  ');
+    INSERT INTO t VALUES ('a');
+}
+expect error {
+    UNIQUE constraint failed: t.s
+}
+
+@cross-check-integrity
+test partial-index-where-nocase-column-other-than-indexed {
+    CREATE TABLE t (k INTEGER, s TEXT COLLATE NOCASE);
+    CREATE UNIQUE INDEX i ON t(k) WHERE s = 'a';
+    INSERT INTO t VALUES (1, 'A');
+    INSERT INTO t VALUES (1, 'a');
+}
+expect error {
+    UNIQUE constraint failed: t.k
+}
+
+@cross-check-integrity
+test partial-index-where-nocase-column-update-into-predicate {
+    CREATE TABLE t (s TEXT COLLATE NOCASE);
+    CREATE UNIQUE INDEX i ON t(s) WHERE s = 'a';
+    INSERT INTO t VALUES ('z');
+    UPDATE t SET s = 'A';
+    SELECT s FROM t WHERE s = 'a';
+}
+expect {
+    A
+}
+
+@cross-check-integrity
+test partial-index-where-binary-column-keeps-binary {
+    CREATE TABLE t (s TEXT);
+    CREATE UNIQUE INDEX i ON t(s) WHERE s = 'a';
+    INSERT INTO t VALUES ('A');
+    INSERT INTO t VALUES ('a');
+    SELECT count(*) FROM t;
+}
+expect {
+    2
+}
+
+@cross-check-integrity
+test partial-index-where-explicit-collate-beats-column {
+    CREATE TABLE t (s TEXT COLLATE NOCASE);
+    CREATE UNIQUE INDEX i ON t(s) WHERE s = 'a' COLLATE BINARY;
+    INSERT INTO t VALUES ('A');
+    INSERT INTO t VALUES ('a');
+    SELECT count(*) FROM t;
+}
+expect {
+    2
+}
+
+@cross-check-integrity
+test expression-index-nocase-column-refuses-duplicate {
+    CREATE TABLE t (s TEXT COLLATE NOCASE);
+    CREATE UNIQUE INDEX i ON t(s = 'a');
+    INSERT INTO t VALUES ('A');
+    INSERT INTO t VALUES ('a');
+}
+expect error {
+    UNIQUE constraint failed
+}
+
+@cross-check-integrity
 test partial-index-expensive-violation-update {
     CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, price INTEGER);
     CREATE UNIQUE INDEX idx_expensive ON products(sku) WHERE price > 100;

@@ -190,6 +190,10 @@ pub fn pragma_for(pragma: &PragmaName) -> Pragma {
             PragmaFlags::NoColumns1 | PragmaFlags::Result0,
             &["mvcc_group_commit"],
         ),
+        PragmaName::FtsMergeThreshold => Pragma::new(
+            PragmaFlags::NoColumns1 | PragmaFlags::Result0,
+            &["fts_merge_threshold"],
+        ),
         ForeignKeys => Pragma::new(
             PragmaFlags::NoColumns1 | PragmaFlags::Result0,
             &["foreign_keys"],
@@ -443,6 +447,9 @@ impl PragmaVirtualTableCursor {
         };
 
         self.arg = arg;
+        // VFilter starts a new scan. Reset the position so repeated scans
+        // return the same rowids, as SQLite does.
+        self.pos = 0;
 
         if let Some(schema) = schema {
             // Schema-qualified PRAGMA statements are not supported yet
@@ -469,6 +476,38 @@ impl PragmaVirtualTableCursor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Database, MemoryIO, SqliteDialect};
+
+    #[test]
+    fn filter_starts_each_pragma_scan_at_rowid_one() {
+        let io: Arc<dyn crate::IO> = Arc::new(MemoryIO::new());
+        let db =
+            Database::open_file(io, crate::util::MEMORY_PATH, Arc::new(SqliteDialect)).unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE scan_target(first, second)")
+            .unwrap();
+
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 6,
+            max_arg_count: 2,
+            has_pragma_arg: true,
+        };
+        let mut cursor = pragma_vtab.open(conn).unwrap();
+
+        assert!(cursor
+            .filter(crate::alloc::vec![Value::from_text("scan_target")])
+            .unwrap());
+        assert_eq!(cursor.rowid(), 1);
+        assert!(cursor.next().unwrap());
+        assert_eq!(cursor.rowid(), 2);
+        assert!(!cursor.next().unwrap());
+
+        assert!(cursor
+            .filter(crate::alloc::vec![Value::from_text("scan_target")])
+            .unwrap());
+        assert_eq!(cursor.rowid(), 1);
+    }
 
     #[test]
     fn test_best_index_argv_order_both_hidden_constraints() {

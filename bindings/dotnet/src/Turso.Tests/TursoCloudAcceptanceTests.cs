@@ -1,4 +1,7 @@
+using System.Data;
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
+using FacadeConnection = Turso.Data.Sqlite.SqliteConnection;
 
 namespace Turso.Tests;
 
@@ -10,7 +13,7 @@ public sealed class TursoCloudAcceptanceTests
     {
         var (remoteUrl, authToken) = GetCloudCredentials();
         var tableName = "dotnet_interval_" + Guid.NewGuid().ToString("N");
-        var replicaDirectory = NewReplicaDirectory();
+        var replicaDirectory = NewReplicaDirectory("interval");
         var replicaPath = Path.Combine(replicaDirectory, "replica.db");
         var remoteConnectionString = $"Data Source={remoteUrl};Auth Token={authToken}";
 
@@ -47,11 +50,86 @@ public sealed class TursoCloudAcceptanceTests
         }
     }
 
+    [Test]
+    public async Task SqliteFacadeAndEfQueryDirectRemoteAndReplica()
+    {
+        var (remoteUrl, authToken) = GetCloudCredentials();
+        var tableName = "dotnet_facade_" + Guid.NewGuid().ToString("N");
+        var replicaDirectory = NewReplicaDirectory("facade-ef");
+        var replicaPath = Path.Combine(replicaDirectory, "replica.db");
+        var remoteConnectionString = $"Data Source={remoteUrl};Auth Token={authToken}";
+        var replicaConnectionString =
+            remoteConnectionString + $";Replica Path={replicaPath};Pooling=True";
+
+        await using var remote = new TursoConnection(remoteConnectionString);
+        await remote.OpenAsync();
+        try
+        {
+            await ExecuteNonQueryAsync(remote, $"CREATE TABLE {tableName}(value TEXT)");
+            await ExecuteNonQueryAsync(remote, $"INSERT INTO {tableName} VALUES ('facade-ef')");
+
+            await using (var facadeRemote = new FacadeConnection(remoteConnectionString))
+            {
+                await facadeRemote.OpenAsync();
+                await using var command = facadeRemote.CreateCommand();
+                command.CommandText = $"SELECT value FROM {tableName}";
+                (await command.ExecuteScalarAsync()).Should().Be("facade-ef");
+            }
+
+            await using (var remoteContext = new DbContext(
+                             new DbContextOptionsBuilder()
+                                 .UseTurso(remoteConnectionString)
+                                 .Options))
+            {
+#pragma warning disable EF1002 // tableName is generated from a fixed prefix and Guid("N").
+                var value = await remoteContext.Database
+                    .SqlQueryRaw<string>($"SELECT value AS Value FROM {tableName}")
+                    .SingleAsync();
+#pragma warning restore EF1002
+                value.Should().Be("facade-ef");
+            }
+
+            await using (var facadeReplica = new FacadeConnection(replicaConnectionString))
+            {
+                await facadeReplica.OpenAsync();
+                await using var command = facadeReplica.CreateCommand();
+                command.CommandText = $"SELECT value FROM {tableName}";
+                (await command.ExecuteScalarAsync()).Should().Be("facade-ef");
+            }
+
+            await using (var replicaContext = new DbContext(
+                             new DbContextOptionsBuilder()
+                                 .UseTurso(replicaConnectionString)
+                                 .Options))
+            {
+#pragma warning disable EF1002 // tableName is generated from a fixed prefix and Guid("N").
+                var value = await replicaContext.Database
+                    .SqlQueryRaw<string>($"SELECT value AS Value FROM {tableName}")
+                    .SingleAsync();
+#pragma warning restore EF1002
+                value.Should().Be("facade-ef");
+            }
+        }
+
+        finally
+        {
+            await DropTableAsync(remote, tableName);
+            Directory.Delete(replicaDirectory, recursive: true);
+        }
+    }
+
     private static async Task ExecuteNonQueryAsync(TursoConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task DropTableAsync(TursoConnection remote, string tableName)
+    {
+        if (remote.State != ConnectionState.Open)
+            await remote.OpenAsync();
+        await ExecuteNonQueryAsync(remote, $"DROP TABLE IF EXISTS {tableName}");
     }
 
     private static (string RemoteUrl, string AuthToken) GetCloudCredentials()
@@ -64,11 +142,11 @@ public sealed class TursoCloudAcceptanceTests
         return (remoteUrl, authToken);
     }
 
-    private static string NewReplicaDirectory()
+    private static string NewReplicaDirectory(string suffix)
     {
         var path = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
-            "turso-cloud-interval-" + Guid.NewGuid().ToString("N"));
+            $"turso-cloud-{suffix}-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
     }

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Sqlite.Storage.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -62,10 +63,14 @@ public static class TursoDbContextOptionsBuilderExtensions
         => (DbContextOptionsBuilder<TContext>)UseTurso((DbContextOptionsBuilder)optionsBuilder, connection, contextOwnsConnection, sqliteOptionsAction);
 
     private static DbContextOptionsBuilder UseTursoServices(DbContextOptionsBuilder optionsBuilder)
-        => optionsBuilder
+    {
+        optionsBuilder.AddInterceptors(TursoSqliteCommandInterceptor.Instance);
+        return optionsBuilder
             .ReplaceService<ISqliteRelationalConnection, TursoSqliteRelationalConnection>()
             .ReplaceService<IRelationalDatabaseCreator, TursoSqliteDatabaseCreator>()
+            .ReplaceService<IHistoryRepository, TursoSqliteHistoryRepository>()
             .ReplaceService<IQuerySqlGeneratorFactory, TursoSqliteQuerySqlGeneratorFactory>()
             .ReplaceService<IQueryableMethodTranslatingExpressionVisitorFactory, TursoSqliteQueryableMethodTranslatingExpressionVisitorFactory>()
             .ReplaceService<IUpdateSqlGenerator, TursoSqliteUpdateSqlGenerator>();
+    }
 }

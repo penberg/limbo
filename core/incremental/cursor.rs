@@ -1714,7 +1714,7 @@ mod tests {
     mod io_resumption_tests {
         use super::*;
         use crate::io::Completion;
-        use crate::storage::btree::{BTreeKey, CursorTrait};
+        use crate::storage::btree::{BTreeKey, CursorStep, CursorTrait};
         use crate::types::{IOCompletions, ImmutableRecord, IndexInfo};
         use crate::Register;
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1734,6 +1734,80 @@ mod tests {
             record: ImmutableRecord,
             /// Index info
             index_info: Arc<IndexInfo>,
+            advance_completion: Completion,
+            advance_error: Option<Box<crate::LimboError>>,
+            null_flag: bool,
+        }
+
+        #[test]
+        fn cursor_step_owns_io_after_cursor_is_dropped() {
+            for forward in [true, false] {
+                let mut cursor = MockBTreeCursor::new();
+                cursor.advance_completion = Completion::new_sync(|_| {});
+                let completion = cursor.advance_completion.clone();
+                let mut cursor: Box<dyn CursorTrait> = Box::new(cursor);
+                let step = if forward {
+                    cursor.next_row()
+                } else {
+                    cursor.prev_row()
+                };
+                let CursorStep::IO(io) = step else {
+                    panic!("expected IO, got {step:?}");
+                };
+                let resumed = if forward {
+                    cursor.next_row()
+                } else {
+                    cursor.prev_row()
+                };
+                assert!(matches!(resumed, CursorStep::Row));
+                drop(cursor);
+                assert!(!io.finished());
+                completion.complete(0);
+                assert!(io.finished());
+            }
+        }
+
+        #[test]
+        fn cursor_step_preserves_advance_errors() {
+            for forward in [true, false] {
+                let mut cursor = MockBTreeCursor::new();
+                let error = Box::new(crate::LimboError::InternalError("advance failed".into()));
+                let original = std::ptr::from_ref(error.as_ref());
+                cursor.advance_error = Some(error);
+                let cursor: &mut dyn CursorTrait = &mut cursor;
+                let step = if forward {
+                    cursor.next_row()
+                } else {
+                    cursor.prev_row()
+                };
+                let CursorStep::Error(error) = step else {
+                    panic!("expected error, got {step:?}");
+                };
+                assert_eq!(std::ptr::from_ref(error.as_ref()), original);
+            }
+        }
+
+        #[test]
+        fn cursor_step_handles_null_and_empty_rows() {
+            for forward in [true, false] {
+                let mut cursor = MockBTreeCursor::new();
+                cursor.set_null_flag(true);
+                let advance = |cursor: &mut dyn CursorTrait| {
+                    if forward {
+                        cursor.next_row()
+                    } else {
+                        cursor.prev_row()
+                    }
+                };
+                assert!(matches!(advance(&mut cursor), CursorStep::Empty));
+                assert!(!cursor.get_null_flag());
+                assert_eq!(cursor.next_count.load(Ordering::SeqCst), 0);
+                assert_eq!(cursor.get_prev_count(), 0);
+                assert!(matches!(advance(&mut cursor), CursorStep::IO(_)));
+                assert!(matches!(advance(&mut cursor), CursorStep::Row));
+                cursor.current_rowid = None;
+                assert!(matches!(advance(&mut cursor), CursorStep::Empty));
+            }
         }
 
         impl MockBTreeCursor {
@@ -1747,6 +1821,9 @@ mod tests {
                     current_rowid: Some(1),
                     record,
                     index_info: Arc::new(IndexInfo::default()),
+                    advance_completion: Completion::new_yield(),
+                    advance_error: None,
+                    null_flag: false,
                 }
             }
 
@@ -1802,11 +1879,13 @@ mod tests {
             }
 
             fn next(&mut self) -> IOResultOr<()> {
+                if let Some(err) = self.advance_error.take() {
+                    return Err(err);
+                }
                 let count = self.next_count.fetch_add(1, Ordering::SeqCst);
                 if count == 0 {
                     // First call returns IO (pending)
-                    let completion = Completion::new_yield();
-                    Ok(IOResult::IO(IOCompletions(completion)))
+                    Ok(IOResult::IO(IOCompletions(self.advance_completion.clone())))
                 } else {
                     // Subsequent calls return Done
                     Ok(IOResult::Done(()))
@@ -1814,11 +1893,13 @@ mod tests {
             }
 
             fn prev(&mut self) -> IOResultOr<()> {
+                if let Some(err) = self.advance_error.take() {
+                    return Err(err);
+                }
                 let count = self.prev_count.fetch_add(1, Ordering::SeqCst);
                 if count == 0 {
                     // First call returns IO (pending)
-                    let completion = Completion::new_yield();
-                    Ok(IOResult::IO(IOCompletions(completion)))
+                    Ok(IOResult::IO(IOCompletions(self.advance_completion.clone())))
                 } else {
                     // Subsequent calls return Done
                     Ok(IOResult::Done(()))
@@ -1845,10 +1926,12 @@ mod tests {
                 Ok(IOResult::Done(()))
             }
 
-            fn set_null_flag(&mut self, _flag: bool) {}
+            fn set_null_flag(&mut self, flag: bool) {
+                self.null_flag = flag;
+            }
 
             fn get_null_flag(&self) -> bool {
-                false
+                self.null_flag
             }
 
             fn exists(&mut self, _key: &Value) -> IOResultOr<bool> {
@@ -1868,7 +1951,7 @@ mod tests {
             }
 
             fn is_empty(&self) -> bool {
-                false
+                self.current_rowid.is_none()
             }
 
             fn root_page(&self) -> i64 {

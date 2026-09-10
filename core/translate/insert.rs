@@ -345,6 +345,7 @@ pub fn translate_insert(
             expression_index_usages: Vec::new(),
             database_id,
             indexed: None,
+            plan_estimate: None,
         }],
         vec![],
     );
@@ -1174,6 +1175,7 @@ pub fn translate_insert(
             &mut result_columns,
             connection,
             &mut table_references,
+            tbl_name.alias.as_ref().map(|alias| alias.as_str()),
         )?;
     }
 
@@ -1254,6 +1256,7 @@ fn emit_epilogue(
                 cursor_id: temp_table_ctx.cursor_id,
                 pc_if_next: temp_table_ctx.loop_start_label,
                 fullscan: false,
+                is_index: false,
             });
             program.preassign_label_to_next_insn(temp_table_ctx.loop_end_label);
 
@@ -1587,6 +1590,7 @@ fn resolve_upserts(
     result_columns: &mut [ResultSetColumn],
     connection: &Arc<crate::Connection>,
     table_references: &mut TableReferences,
+    table_alias: Option<&str>,
 ) -> Result<()> {
     for (_, label, upsert) in upsert_actions {
         program.preassign_label_to_next_insn(*label);
@@ -1610,6 +1614,7 @@ fn resolve_upserts(
                 result_columns,
                 connection,
                 table_references,
+                table_alias,
             )?;
         } else {
             // UpsertDo::Nothing case
@@ -1758,6 +1763,7 @@ fn reload_autoincrement_state(program: &mut ProgramBuilder, meta: AutoincMeta) {
         cursor_id: seq_cursor_id,
         pc_if_next: loop_start_label,
         fullscan: false,
+        is_index: false,
     });
     program.preassign_label_to_next_insn(loop_end_label);
 }
@@ -3419,6 +3425,7 @@ fn ensure_sequence_initialized(
         cursor_id: seq_cursor_id,
         pc_if_next: loop_start_label,
         fullscan: false,
+        is_index: false,
     });
 
     program.preassign_label_to_next_insn(insert_new_label);
@@ -4331,6 +4338,7 @@ pub fn emit_parent_side_fk_decrement_on_insert(
                 cursor_id: ccur,
                 pc_if_next: loop_top,
                 fullscan: false,
+                is_index: false,
             });
             program.preassign_label_to_next_insn(done);
             program.emit_insn(Insn::Close { cursor_id: ccur });

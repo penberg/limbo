@@ -10,6 +10,12 @@ public sealed class SqliteFactory : DbProviderFactory
     {
     }
 
+    public override bool CanCreateBatch => true;
+
+    public override DbBatch CreateBatch() => new SqliteBatch();
+
+    public override DbBatchCommand CreateBatchCommand() => new SqliteBatchCommand();
+
     public override DbCommand CreateCommand() => new SqliteCommand();
 
     public override DbConnection CreateConnection() => new SqliteConnection();

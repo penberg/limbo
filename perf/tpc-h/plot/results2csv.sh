@@ -1,7 +1,7 @@
 #!/bin/bash
 # Convert a TPC-H results_*.txt file to results.csv for plotting.
 # Usage: ./results2csv.sh <results_file> [mode]
-# mode: "analyze" (default) or "no-analyze"
+# mode: "no-analyze" (default) or "analyze"
 
 set -e
 
@@ -19,7 +19,7 @@ else
     SECTION="MODE: WITHOUT ANALYZE"
 fi
 
-echo "Query,Turso,SQLite"
+echo "Query,Limbo,SQLite"
 
 in_section=false
 while IFS= read -r line; do

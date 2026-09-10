@@ -379,13 +379,160 @@ pub struct HashDistinctData {
     pub target_pc: BranchOffset,
 }
 
-// There are currently 190 opcodes in sqlite
+// The opcodes the dispatch loop matches directly come first.
 #[repr(u8)]
 #[derive(Description, Debug, Clone, EnumDiscriminants)]
 #[strum_discriminants(vis(pub(crate)))]
 #[strum_discriminants(derive(VariantArray, EnumCount, FromRepr))]
 #[strum_discriminants(name(InsnVariants))]
 pub enum Insn {
+    /// Advance the cursor to the next row.
+    Next {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
+        /// True when this step is part of a full table scan (a loop over the
+        /// whole table with no index or rowid constraint). Only these steps
+        /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
+        /// which tags the opcode with P5 at codegen time.
+        fullscan: bool,
+        is_index: bool,
+    },
+
+    /// Emit a row of results.
+    ResultRow {
+        start_reg: usize, // P1
+        count: usize,     // P2
+    },
+
+    /// Read a column from the current row of the cursor.
+    Column {
+        cursor_id: CursorID,
+        column: usize,
+        dest: usize,
+        default: Option<Value>,
+    },
+
+    /// Read `defaults.len()` consecutive columns starting at `start_column` from the current row
+    /// of the cursor into consecutive registers starting at `dest`.
+    ColumnRange {
+        cursor_id: CursorID,
+        start_column: usize,
+        dest: usize,
+        // this can't be a SmallVec because it would make the enum too large.
+        defaults: Vec<Option<Value>>,
+    },
+
+    /// Read the rowid of the current row.
+    RowId {
+        cursor_id: CursorID,
+        dest: usize,
+    },
+
+    Prev {
+        cursor_id: CursorID,
+        pc_if_prev: BranchOffset,
+        /// See [Insn::Next::fullscan].
+        fullscan: bool,
+        /// See [Insn::Next::is_index].
+        is_index: bool,
+    },
+    /// Compare two registers and jump to the given PC if they are equal.
+    Eq {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
+        /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
+        /// <JUMP TO NEXT ROW IF id != NULL>
+        /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
+        /// This flag indicates that if either is null we should still jump.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if they are not equal.
+    Ne {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
+    Lt {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    Le {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
+    Gt {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
+    Ge {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
+        collation: Option<CollationSeq>,
+    },
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
+    If {
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
+        jump_if_null: bool,
+    },
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
+    IfNot {
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
+        jump_if_null: bool,
+    },
+    /// Branch to the given PC.
+    Goto {
+        target_pc: BranchOffset,
+    },
+    /// Stores the current program counter into register 'return_reg' then jumps to address target_pc.
+    Gosub {
+        target_pc: BranchOffset,
+        return_reg: usize,
+    },
+    /// Returns to the program counter stored in register 'return_reg'.
+    /// If can_fallthrough is true, fall through to the next instruction
+    /// if return_reg does not contain an integer value. Otherwise raise an error.
+    Return {
+        return_reg: usize,
+        can_fallthrough: bool,
+    },
+    /// Write an integer value into a register.
+    Integer {
+        value: i64,
+        dest: usize,
+    },
+
     /// Initialize the program state and jump to the given PC.
     Init {
         target_pc: BranchOffset,
@@ -498,21 +645,6 @@ pub enum Insn {
         reg: usize,
         target_pc: BranchOffset,
     },
-    /// Compare two registers and jump to the given PC if they are equal.
-    Eq {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
-        ///
-        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
-        /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
-        /// <JUMP TO NEXT ROW IF id != NULL>
-        /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
-        /// This flag indicates that if either is null we should still jump.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
     /// Compute a hash on num_keys registers starting with r[key_reg]. Check to see if that hash
     /// is found in the bloom filter associated with the cursor/hash_table. If it is not present
     /// then jump to target_pc. Otherwise fall through.
@@ -536,67 +668,7 @@ pub enum Insn {
         key_reg: usize,
         num_keys: usize,
     },
-    /// Compare two registers and jump to the given PC if they are not equal.
-    Ne {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
-        ///
-        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
-    Lt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
     // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
-    Le {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
-    Gt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
-    Ge {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
-        flags: CmpInsFlags,
-        collation: Option<CollationSeq>,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
-    If {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
-        jump_if_null: bool,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
-    IfNot {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
-        jump_if_null: bool,
-    },
     /// Open a cursor for reading.
     OpenRead {
         cursor_id: CursorID,
@@ -682,24 +754,6 @@ pub enum Insn {
     Last {
         cursor_id: CursorID,
         pc_if_empty: BranchOffset,
-    },
-
-    /// Read a column from the current row of the cursor.
-    Column {
-        cursor_id: CursorID,
-        column: usize,
-        dest: usize,
-        default: Option<Value>,
-    },
-
-    /// Read `defaults.len()` consecutive columns starting at `start_column` from the current row
-    /// of the cursor into consecutive registers starting at `dest`.
-    ColumnRange {
-        cursor_id: CursorID,
-        start_column: usize,
-        dest: usize,
-        // this can't be a SmallVec because it would make the enum too large.
-        defaults: Vec<Option<Value>>,
     },
 
     /// Jump to `target_pc` if the cursor's current record contains a field at
@@ -917,30 +971,6 @@ pub enum Insn {
         affinity_str: Option<String>,
     },
 
-    /// Emit a row of results.
-    ResultRow {
-        start_reg: usize, // P1
-        count: usize,     // P2
-    },
-
-    /// Advance the cursor to the next row.
-    Next {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-        /// True when this step is part of a full table scan (a loop over the
-        /// whole table with no index or rowid constraint). Only these steps
-        /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
-        /// which tags the opcode with P5 at codegen time.
-        fullscan: bool,
-    },
-
-    Prev {
-        cursor_id: CursorID,
-        pc_if_prev: BranchOffset,
-        /// See [Insn::Next::fullscan].
-        fullscan: bool,
-    },
-
     /// Halt the program.
     Halt {
         err_code: usize,
@@ -978,25 +1008,6 @@ pub enum Insn {
         name: String,
     },
 
-    /// Branch to the given PC.
-    Goto {
-        target_pc: BranchOffset,
-    },
-
-    /// Stores the current program counter into register 'return_reg' then jumps to address target_pc.
-    Gosub {
-        target_pc: BranchOffset,
-        return_reg: usize,
-    },
-
-    /// Returns to the program counter stored in register 'return_reg'.
-    /// If can_fallthrough is true, fall through to the next instruction
-    /// if return_reg does not contain an integer value. Otherwise raise an error.
-    Return {
-        return_reg: usize,
-        can_fallthrough: bool,
-    },
-
     /// Invoke a trigger or foreign-key action subprogram.
     ///
     /// According to SQLite documentation (https://sqlite.org/opcode.html):
@@ -1024,12 +1035,6 @@ pub enum Insn {
     /// Emitted at the end of INSERT/UPDATE/DELETE programs when PRAGMA count_changes is on,
     /// followed by a ResultRow that returns the count to the caller.
     ChangeCount {
-        dest: usize,
-    },
-
-    /// Write an integer value into a register.
-    Integer {
-        value: i64,
         dest: usize,
     },
 
@@ -1062,11 +1067,6 @@ pub enum Insn {
         dest: usize,
     },
 
-    /// Read the rowid of the current row.
-    RowId {
-        cursor_id: CursorID,
-        dest: usize,
-    },
     /// Read the rowid of the current row from an index cursor.
     IdxRowId {
         cursor_id: CursorID,
@@ -2127,273 +2127,6 @@ const fn get_insn_virtual_table() -> [InsnFunction; InsnVariants::COUNT] {
 
 const INSN_VTABLE: [InsnFunction; InsnVariants::COUNT] = get_insn_virtual_table();
 
-/// Dispatches one instruction through a direct, exhaustive match: every arm
-/// is a direct call the branch predictor resolves per call site, and LLVM
-/// may inline hot opcodes into their arms, folding the `load_insn!` re-match
-/// inside them. Viable as a full match (not tiered) because `InsnResult`
-/// returns in registers; with the old 40-byte-error result each arm carried
-/// its own return-slot plumbing and the match blew past inlining thresholds.
-#[inline(always)]
-pub(crate) fn dispatch_insn(
-    program: &super::Program,
-    state: &mut super::ProgramState,
-    insn: &Insn,
-    pager: &std::sync::Arc<crate::Pager>,
-) -> execute::InsnResult {
-    match insn {
-        Insn::Eq { .. }
-        | Insn::Ne { .. }
-        | Insn::Lt { .. }
-        | Insn::Le { .. }
-        | Insn::Gt { .. }
-        | Insn::Ge { .. } => execute::op_comparison(program, state, insn, pager),
-        Insn::SeekGE { .. } | Insn::SeekGT { .. } | Insn::SeekLE { .. } | Insn::SeekLT { .. } => {
-            execute::op_seek(program, state, insn, pager)
-        }
-        Insn::AggFinal { .. } | Insn::AggValue { .. } => {
-            execute::op_agg_final(program, state, insn, pager)
-        }
-        Insn::OpenEphemeral { .. } | Insn::OpenAutoindex { .. } => {
-            execute::op_open_ephemeral(program, state, insn, pager)
-        }
-        Insn::Found { .. } | Insn::NotFound { .. } => {
-            execute::op_found(program, state, insn, pager)
-        }
-        Insn::Init { .. } => execute::op_init(program, state, insn, pager),
-        Insn::Null { .. } => execute::op_null(program, state, insn, pager),
-        Insn::BeginSubrtn { .. } => execute::op_null(program, state, insn, pager),
-        Insn::NullRow { .. } => execute::op_null_row(program, state, insn, pager),
-        Insn::Add { .. } => execute::op_add(program, state, insn, pager),
-        Insn::Subtract { .. } => execute::op_subtract(program, state, insn, pager),
-        Insn::Multiply { .. } => execute::op_multiply(program, state, insn, pager),
-        Insn::Divide { .. } => execute::op_divide(program, state, insn, pager),
-        Insn::DropIndex { .. } => execute::op_drop_index(program, state, insn, pager),
-        Insn::Compare { .. } => execute::op_compare(program, state, insn, pager),
-        Insn::BitAnd { .. } => execute::op_bit_and(program, state, insn, pager),
-        Insn::BitOr { .. } => execute::op_bit_or(program, state, insn, pager),
-        Insn::BitNot { .. } => execute::op_bit_not(program, state, insn, pager),
-        Insn::Checkpoint { .. } => execute::op_checkpoint(program, state, insn, pager),
-        Insn::Remainder { .. } => execute::op_remainder(program, state, insn, pager),
-        Insn::Jump { .. } => execute::op_jump(program, state, insn, pager),
-        Insn::Move { .. } => execute::op_move(program, state, insn, pager),
-        Insn::IfPos { .. } => execute::op_if_pos(program, state, insn, pager),
-        Insn::NotNull { .. } => execute::op_not_null(program, state, insn, pager),
-        Insn::If { .. } => execute::op_if(program, state, insn, pager),
-        Insn::IfNot { .. } => execute::op_if_not(program, state, insn, pager),
-        Insn::OpenRead { .. } => execute::op_open_read(program, state, insn, pager),
-        Insn::VOpen { .. } => execute::op_vopen(program, state, insn, pager),
-        Insn::VCreate { .. } => execute::op_vcreate(program, state, insn, pager),
-        Insn::VFilter { .. } => execute::op_vfilter(program, state, insn, pager),
-        Insn::VColumn { .. } => execute::op_vcolumn(program, state, insn, pager),
-        Insn::VUpdate { .. } => execute::op_vupdate(program, state, insn, pager),
-        Insn::VNext { .. } => execute::op_vnext(program, state, insn, pager),
-        Insn::VDestroy { .. } => execute::op_vdestroy(program, state, insn, pager),
-        Insn::OpenPseudo { .. } => execute::op_open_pseudo(program, state, insn, pager),
-        Insn::Rewind { .. } => execute::op_rewind(program, state, insn, pager),
-        Insn::Last { .. } => execute::op_last(program, state, insn, pager),
-        Insn::Column { .. } => execute::op_column(program, state, insn, pager),
-        Insn::ColumnRange { .. } => execute::op_column_range(program, state, insn, pager),
-        Insn::ColumnHasField { .. } => execute::op_column_has_field(program, state, insn, pager),
-        Insn::TypeCheck { .. } => execute::op_type_check(program, state, insn, pager),
-        Insn::ArrayEncode { .. } => execute::op_array_encode(program, state, insn, pager),
-        Insn::ArrayDecode { .. } => execute::op_array_decode(program, state, insn, pager),
-        Insn::ArrayElement { .. } => execute::op_array_element(program, state, insn, pager),
-        Insn::ArrayLength { .. } => execute::op_array_length(program, state, insn, pager),
-        Insn::MakeArray { .. } => execute::op_make_array(program, state, insn, pager),
-        Insn::MakeArrayDynamic { .. } => {
-            execute::op_make_array_dynamic(program, state, insn, pager)
-        }
-        Insn::StructField { .. } => execute::op_struct_field(program, state, insn, pager),
-        Insn::UnionPack { .. } => execute::op_union_pack(program, state, insn, pager),
-        Insn::UnionTag { .. } => execute::op_union_tag(program, state, insn, pager),
-        Insn::UnionExtract { .. } => execute::op_union_extract(program, state, insn, pager),
-        Insn::RegCopyOffset { .. } => execute::op_reg_copy_offset(program, state, insn, pager),
-        Insn::BlobRead { .. } => execute::op_blob_read(program, state, insn, pager),
-        Insn::BlobWrite { .. } => execute::op_blob_write(program, state, insn, pager),
-        Insn::BlobLen { .. } => execute::op_blob_len(program, state, insn, pager),
-        Insn::ArrayConcat { .. } => execute::op_array_concat(program, state, insn, pager),
-        Insn::ArraySetElement { .. } => execute::op_array_set_element(program, state, insn, pager),
-        Insn::ArraySlice { .. } => execute::op_array_slice(program, state, insn, pager),
-        Insn::MakeRecord { .. } => execute::op_make_record(program, state, insn, pager),
-        Insn::ResultRow { .. } => execute::op_result_row(program, state, insn, pager),
-        Insn::Next { .. } => execute::op_next(program, state, insn, pager),
-        Insn::Prev { .. } => execute::op_prev(program, state, insn, pager),
-        Insn::Halt { .. } => execute::op_halt(program, state, insn, pager),
-        Insn::HaltIfNull { .. } => execute::op_halt_if_null(program, state, insn, pager),
-        Insn::Transaction { .. } => execute::op_transaction(program, state, insn, pager),
-        Insn::AutoCommit { .. } => execute::op_auto_commit(program, state, insn, pager),
-        Insn::Savepoint { .. } => execute::op_savepoint(program, state, insn, pager),
-        Insn::Goto { .. } => execute::op_goto(program, state, insn, pager),
-        Insn::Gosub { .. } => execute::op_gosub(program, state, insn, pager),
-        Insn::Return { .. } => execute::op_return(program, state, insn, pager),
-        Insn::Integer { .. } => execute::op_integer(program, state, insn, pager),
-        Insn::Program { .. } => execute::op_program(program, state, insn, pager),
-        Insn::ResetCount => execute::op_reset_count(program, state, insn, pager),
-        Insn::ChangeCount { .. } => execute::op_change_count(program, state, insn, pager),
-        Insn::Real { .. } => execute::op_real(program, state, insn, pager),
-        Insn::RealAffinity { .. } => execute::op_real_affinity(program, state, insn, pager),
-        Insn::String8 { .. } => execute::op_string8(program, state, insn, pager),
-        Insn::Blob { .. } => execute::op_blob(program, state, insn, pager),
-        Insn::RowData { .. } => execute::op_row_data(program, state, insn, pager),
-        Insn::RowId { .. } => execute::op_row_id(program, state, insn, pager),
-        Insn::IdxRowId { .. } => execute::op_idx_row_id(program, state, insn, pager),
-        Insn::SeekRowid { .. } => execute::op_seek_rowid(program, state, insn, pager),
-        Insn::DeferredSeek { .. } => execute::op_deferred_seek(program, state, insn, pager),
-        Insn::SeekEnd { .. } => execute::op_seek_end(program, state, insn, pager),
-        Insn::IdxGE { .. } => execute::op_idx_ge(program, state, insn, pager),
-        Insn::IdxGT { .. } => execute::op_idx_gt(program, state, insn, pager),
-        Insn::IdxLE { .. } => execute::op_idx_le(program, state, insn, pager),
-        Insn::IdxLT { .. } => execute::op_idx_lt(program, state, insn, pager),
-        Insn::DecrJumpZero { .. } => execute::op_decr_jump_zero(program, state, insn, pager),
-        Insn::AggStep { .. } => execute::op_agg_step(program, state, insn, pager),
-        Insn::AggInverse { .. } => execute::op_agg_inverse(program, state, insn, pager),
-        Insn::SorterOpen { .. } => execute::op_sorter_open(program, state, insn, pager),
-        Insn::SorterInsert { .. } => execute::op_sorter_insert(program, state, insn, pager),
-        Insn::SorterSort { .. } => execute::op_sorter_sort(program, state, insn, pager),
-        Insn::SorterData { .. } => execute::op_sorter_data(program, state, insn, pager),
-        Insn::SorterNext { .. } => execute::op_sorter_next(program, state, insn, pager),
-        Insn::SorterCompare { .. } => execute::op_sorter_compare(program, state, insn, pager),
-        Insn::RowSetAdd { .. } => execute::op_rowset_add(program, state, insn, pager),
-        Insn::RowSetRead { .. } => execute::op_rowset_read(program, state, insn, pager),
-        Insn::RowSetTest { .. } => execute::op_rowset_test(program, state, insn, pager),
-        Insn::Function { .. } => execute::op_function(program, state, insn, pager),
-        Insn::Cast { .. } => execute::op_cast(program, state, insn, pager),
-        Insn::InitCoroutine { .. } => execute::op_init_coroutine(program, state, insn, pager),
-        Insn::EndCoroutine { .. } => execute::op_end_coroutine(program, state, insn, pager),
-        Insn::Yield { .. } => execute::op_yield(program, state, insn, pager),
-        Insn::Insert { .. } => execute::op_insert(program, state, insn, pager),
-        Insn::Int64 { .. } => execute::op_int_64(program, state, insn, pager),
-        Insn::IdxInsert { .. } => execute::op_idx_insert(program, state, insn, pager),
-        Insn::Delete { .. } => execute::op_delete(program, state, insn, pager),
-        Insn::NewRowid { .. } => execute::op_new_rowid(program, state, insn, pager),
-        Insn::MustBeInt { .. } => execute::op_must_be_int(program, state, insn, pager),
-        Insn::SoftNull { .. } => execute::op_soft_null(program, state, insn, pager),
-        Insn::NoConflict { .. } => execute::op_no_conflict(program, state, insn, pager),
-        Insn::NotExists { .. } => execute::op_not_exists(program, state, insn, pager),
-        Insn::OffsetLimit { .. } => execute::op_offset_limit(program, state, insn, pager),
-        Insn::OpenWrite { .. } => execute::op_open_write(program, state, insn, pager),
-        Insn::Copy { .. } => execute::op_copy(program, state, insn, pager),
-        Insn::CreateBtree { .. } => execute::op_create_btree(program, state, insn, pager),
-        Insn::IndexMethodCreate { .. } => {
-            execute::op_index_method_create(program, state, insn, pager)
-        }
-        Insn::IndexMethodDestroy { .. } => {
-            execute::op_index_method_destroy(program, state, insn, pager)
-        }
-        Insn::IndexMethodOptimize { .. } => {
-            execute::op_index_method_optimize(program, state, insn, pager)
-        }
-        Insn::IndexMethodQuery { .. } => {
-            execute::op_index_method_query(program, state, insn, pager)
-        }
-        Insn::ClearBtree { .. } => execute::op_clear_btree(program, state, insn, pager),
-        Insn::Destroy { .. } => execute::op_destroy(program, state, insn, pager),
-        Insn::ResetSorter { .. } => execute::op_reset_sorter(program, state, insn, pager),
-        Insn::DropTable { .. } => execute::op_drop_table(program, state, insn, pager),
-        Insn::DropTrigger { .. } => execute::op_drop_trigger(program, state, insn, pager),
-        Insn::DropType { .. } => execute::op_drop_type(program, state, insn, pager),
-        Insn::AddSequence { .. } => execute::op_add_sequence(program, state, insn, pager),
-        Insn::DropSequence { .. } => execute::op_drop_sequence(program, state, insn, pager),
-        Insn::SequenceComputeNext { .. } => {
-            execute::op_sequence_compute_next(program, state, insn, pager)
-        }
-        Insn::SetSequenceCurrval { .. } => {
-            execute::op_set_sequence_currval(program, state, insn, pager)
-        }
-        Insn::SequenceTrackAllocation { .. } => {
-            execute::op_sequence_track_allocation(program, state, insn, pager)
-        }
-        Insn::SequenceRegisterAllocation { .. } => {
-            execute::op_sequence_register_allocation(program, state, insn, pager)
-        }
-        Insn::SequenceBeginInnerTx { .. } => {
-            execute::op_sequence_begin_inner_tx(program, state, insn, pager)
-        }
-        Insn::SequenceCommitInnerTx { .. } => {
-            execute::op_sequence_commit_inner_tx(program, state, insn, pager)
-        }
-        Insn::AddType { .. } => execute::op_add_type(program, state, insn, pager),
-        Insn::DropView { .. } => execute::op_drop_view(program, state, insn, pager),
-        Insn::Close { .. } => execute::op_close(program, state, insn, pager),
-        Insn::IsNull { .. } => execute::op_is_null(program, state, insn, pager),
-        Insn::ParseSchema { .. } => execute::op_parse_schema(program, state, insn, pager),
-        Insn::PopulateMaterializedViews { .. } => {
-            execute::op_populate_materialized_views(program, state, insn, pager)
-        }
-        Insn::ShiftRight { .. } => execute::op_shift_right(program, state, insn, pager),
-        Insn::ShiftLeft { .. } => execute::op_shift_left(program, state, insn, pager),
-        Insn::AddImm { .. } => execute::op_add_imm(program, state, insn, pager),
-        Insn::Variable { .. } => execute::op_variable(program, state, insn, pager),
-        Insn::ZeroOrNull { .. } => execute::op_zero_or_null(program, state, insn, pager),
-        Insn::Not { .. } => execute::op_not(program, state, insn, pager),
-        Insn::IsTrue { .. } => execute::op_is_true(program, state, insn, pager),
-        Insn::Concat { .. } => execute::op_concat(program, state, insn, pager),
-        Insn::And { .. } => execute::op_and(program, state, insn, pager),
-        Insn::Or { .. } => execute::op_or(program, state, insn, pager),
-        Insn::Noop => execute::op_noop(program, state, insn, pager),
-        Insn::PageCount { .. } => execute::op_page_count(program, state, insn, pager),
-        Insn::ReadCookie { .. } => execute::op_read_cookie(program, state, insn, pager),
-        Insn::SetCookie { .. } => execute::op_set_cookie(program, state, insn, pager),
-        Insn::Once { .. } => execute::op_once(program, state, insn, pager),
-        Insn::ResetOnce { .. } => execute::op_reset_once(program, state, insn, pager),
-        Insn::Affinity { .. } => execute::op_affinity(program, state, insn, pager),
-        Insn::IdxDelete { .. } => execute::op_idx_delete(program, state, insn, pager),
-        Insn::Count { .. } => execute::op_count(program, state, insn, pager),
-        Insn::IntegrityCk { .. } => execute::op_integrity_check(program, state, insn, pager),
-        Insn::RenameTable { .. } => execute::op_rename_table(program, state, insn, pager),
-        Insn::DropColumn { .. } => execute::op_drop_column(program, state, insn, pager),
-        Insn::AddColumn { .. } => execute::op_add_column(program, state, insn, pager),
-        Insn::AlterColumn { .. } => execute::op_alter_column(program, state, insn, pager),
-        Insn::MaxPgcnt { .. } => execute::op_max_pgcnt(program, state, insn, pager),
-        Insn::JournalMode { .. } => execute::op_journal_mode(program, state, insn, pager),
-        Insn::IfNeg { .. } => execute::op_if_neg(program, state, insn, pager),
-        Insn::Explain { .. } => execute::op_noop(program, state, insn, pager),
-        Insn::OpenDup { .. } => execute::op_open_dup(program, state, insn, pager),
-        Insn::MemMax { .. } => execute::op_mem_max(program, state, insn, pager),
-        Insn::Sequence { .. } => execute::op_sequence(program, state, insn, pager),
-        Insn::SequenceTest { .. } => execute::op_sequence_test(program, state, insn, pager),
-        Insn::FkCounter { .. } => execute::op_fk_counter(program, state, insn, pager),
-        Insn::FkIfZero { .. } => execute::op_fk_if_zero(program, state, insn, pager),
-        Insn::FkCheck { .. } => execute::op_fk_check(program, state, insn, pager),
-        Insn::VBegin { .. } => execute::op_vbegin(program, state, insn, pager),
-        Insn::VRename { .. } => execute::op_vrename(program, state, insn, pager),
-        Insn::FilterAdd { .. } => execute::op_filter_add(program, state, insn, pager),
-        Insn::Filter { .. } => execute::op_filter(program, state, insn, pager),
-        Insn::HashBuild { .. } => execute::op_hash_build(program, state, insn, pager),
-        Insn::HashDistinct { .. } => execute::op_hash_distinct(program, state, insn, pager),
-        Insn::HashBuildFinalize { .. } => {
-            execute::op_hash_build_finalize(program, state, insn, pager)
-        }
-        Insn::HashProbe { .. } => execute::op_hash_probe(program, state, insn, pager),
-        Insn::HashNext { .. } => execute::op_hash_next(program, state, insn, pager),
-        Insn::HashClose { .. } => execute::op_hash_close(program, state, insn, pager),
-        Insn::HashClear { .. } => execute::op_hash_clear(program, state, insn, pager),
-        Insn::HashMarkMatched { .. } => execute::op_hash_mark_matched(program, state, insn, pager),
-        Insn::HashResetMatched { .. } => {
-            execute::op_hash_reset_matched(program, state, insn, pager)
-        }
-        Insn::HashScanUnmatched { .. } => {
-            execute::op_hash_scan_unmatched(program, state, insn, pager)
-        }
-        Insn::HashNextUnmatched { .. } => {
-            execute::op_hash_next_unmatched(program, state, insn, pager)
-        }
-        Insn::HashGraceInit { .. } => execute::op_hash_grace_init(program, state, insn, pager),
-        Insn::HashGraceLoadPartition { .. } => {
-            execute::op_hash_grace_load_partition(program, state, insn, pager)
-        }
-        Insn::HashGraceNextProbe { .. } => {
-            execute::op_hash_grace_next_probe(program, state, insn, pager)
-        }
-        Insn::HashGraceAdvancePartition { .. } => {
-            execute::op_hash_grace_advance_partition(program, state, insn, pager)
-        }
-        Insn::VacuumInto { .. } => execute::op_vacuum_into(program, state, insn, pager),
-        Insn::Vacuum { .. } => execute::op_vacuum(program, state, insn, pager),
-        Insn::InitCdcVersion { .. } => execute::op_init_cdc_version(program, state, insn, pager),
-    }
-}
-
 impl InsnVariants {
     // This function is used for testing
     #[allow(dead_code)]
@@ -2425,12 +2158,12 @@ impl InsnVariants {
             InsnVariants::Move => execute::op_move,
             InsnVariants::IfPos => execute::op_if_pos,
             InsnVariants::NotNull => execute::op_not_null,
-            InsnVariants::Eq
-            | InsnVariants::Ne
-            | InsnVariants::Lt
-            | InsnVariants::Le
-            | InsnVariants::Gt
-            | InsnVariants::Ge => execute::op_comparison,
+            InsnVariants::Eq => execute::op_eq,
+            InsnVariants::Ne => execute::op_ne,
+            InsnVariants::Lt => execute::op_lt,
+            InsnVariants::Le => execute::op_le,
+            InsnVariants::Gt => execute::op_gt,
+            InsnVariants::Ge => execute::op_ge,
             InsnVariants::If => execute::op_if,
             InsnVariants::IfNot => execute::op_if_not,
             InsnVariants::OpenRead => execute::op_open_read,
@@ -2714,21 +2447,6 @@ pub enum Cookie {
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray;
-
-    #[test]
-    fn test_make_sure_correct_insn_table() {
-        for variant in super::InsnVariants::VARIANTS {
-            let func1 = variant.to_function();
-            let func2 = variant.to_function_fast();
-            assert_eq!(
-                func1 as usize, func2 as usize,
-                "Variant {:?} does not match in fast table at index {}",
-                variant, *variant as usize
-            );
-        }
-    }
-
     #[test]
     fn test_insn_size_does_not_grow() {
         // Interpreter dispatch is sensitive to instruction size. Widening a

@@ -1,0 +1,87 @@
+@database :memory:
+
+# When a LEFT JOIN runs as a hash join, the unmatched build rows (the ones
+# that get NULLs for the probe table) are emitted by a separate scan after the
+# probe loop. That scan must still apply WHERE filters that reference the
+# probe table, including filters that came from a later join's ON clause and
+# became plain WHERE terms when that join was rewritten to an inner join.
+# The bug: the unmatched scan skipped a filter that also referenced the build
+# table of an earlier hash join, because that table's values live in payload
+# registers rather than a positioned cursor. The null-extended rows then
+# bypassed the filter entirely.
+#
+# All queries here need: no indexes (so the planner picks hash joins), a LEFT
+# JOIN whose ON clause uses IS (so it cannot itself be rewritten to inner),
+# and a WHERE term that lets the next LEFT JOIN be rewritten to inner.
+
+test hash-join-null-extended-row-must-not-skip-is-filter {
+    CREATE TABLE t1(id INTEGER PRIMARY KEY, a INT, c INT);
+    CREATE TABLE t2(id INTEGER PRIMARY KEY, a INT, c INT);
+    CREATE TABLE t3(id INTEGER PRIMARY KEY, c INT, d INT);
+    CREATE TABLE t4(id INTEGER PRIMARY KEY, c INT, d INT);
+    INSERT INTO t1 VALUES (1, 1, 1);
+    INSERT INTO t3 VALUES (1, 5, 5);
+    INSERT INTO t4 VALUES (1, 5, 5);
+    -- t1's row has no t2 match, so t2 is null-extended and `t2.c IS t3.c`
+    -- becomes `NULL IS 5`, which is false: no row may come out.
+    SELECT count(*) FROM t1
+    LEFT JOIN t2 ON t1.a = t2.a
+    LEFT JOIN t3 ON t2.c IS t3.c
+    JOIN t4 ON t3.c = t4.c AND t3.d = t4.d
+    WHERE t3.d IS NOT NULL;
+}
+expect {
+    0
+}
+
+test hash-join-filters-null-extended-rows-but-keeps-matched-rows {
+    CREATE TABLE t1(id INTEGER PRIMARY KEY, a INT, c INT);
+    CREATE TABLE t2(id INTEGER PRIMARY KEY, a INT, c INT);
+    CREATE TABLE t3(id INTEGER PRIMARY KEY, c INT, d INT);
+    CREATE TABLE t4(id INTEGER PRIMARY KEY, c INT, d INT);
+    INSERT INTO t1 VALUES (1, 1, 1);
+    INSERT INTO t1 VALUES (2, 2, 2);
+    INSERT INTO t2 VALUES (10, 2, 7);
+    INSERT INTO t3 VALUES (1, 5, 5);
+    INSERT INTO t3 VALUES (2, NULL, 6);
+    INSERT INTO t3 VALUES (3, 7, 8);
+    INSERT INTO t4 VALUES (1, 5, 5);
+    INSERT INTO t4 VALUES (2, 7, 8);
+    -- t1.id=2 matches t2.id=10 and its t2.c=7 pairs with t3.id=3/t4.id=2.
+    -- t1.id=1 has no t2 match and must be filtered out by `t2.c IS t3.c`.
+    SELECT t1.id, t2.id, t3.id, t4.id FROM t1
+    LEFT JOIN t2 ON t1.a = t2.a
+    LEFT JOIN t3 ON t2.c IS t3.c
+    JOIN t4 ON t3.c = t4.c AND t3.d = t4.d
+    WHERE t3.d IS NOT NULL ORDER BY 1, 2, 3, 4;
+}
+expect {
+    2|10|3|2
+}
+
+test hash-join-null-extended-row-still-matches-is-null-partner {
+    CREATE TABLE t1(id INTEGER PRIMARY KEY, a INT, c INT);
+    CREATE TABLE t2(id INTEGER PRIMARY KEY, a INT, c INT);
+    CREATE TABLE t3(id INTEGER PRIMARY KEY, c INT, d INT);
+    CREATE TABLE t4(id INTEGER PRIMARY KEY, c INT, d INT);
+    INSERT INTO t1 VALUES (1, 1, 1);
+    INSERT INTO t1 VALUES (2, 2, 2);
+    INSERT INTO t2 VALUES (10, 2, 7);
+    INSERT INTO t3 VALUES (1, 5, 5);
+    INSERT INTO t3 VALUES (2, NULL, 6);
+    INSERT INTO t3 VALUES (3, 7, 8);
+    INSERT INTO t4 VALUES (1, 5, 5);
+    INSERT INTO t4 VALUES (2, 7, 8);
+    INSERT INTO t4 VALUES (3, 9, 6);
+    -- The other polarity: the null-extended t2 row must still pair with the
+    -- t3.c IS NULL row, because `NULL IS NULL` is true.
+    SELECT t1.id, t2.id, t3.id, t4.id FROM t1
+    LEFT JOIN t2 ON t1.a = t2.a
+    LEFT JOIN t3 ON t2.c IS t3.c
+    JOIN t4 ON t3.d = t4.d
+    WHERE t3.d IS NOT NULL ORDER BY 1, 2, 3, 4;
+}
+expect {
+    1||2|3
+    2|10|3|2
+}

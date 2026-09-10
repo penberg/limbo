@@ -66,6 +66,7 @@ fn build_mvcc_db_with_log(populate: impl FnOnce(&Arc<turso_core::Connection>)) -
     conn.execute("PRAGMA journal_mode = 'mvcc'").unwrap();
     conn.execute("PRAGMA mvcc_checkpoint_threshold = -1")
         .unwrap();
+    conn.execute("PRAGMA synchronous = OFF").unwrap();
     conn.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, v BLOB)")
         .unwrap();
     populate(&conn);
@@ -123,7 +124,7 @@ fn single_frame_with_num_ops(num_ops: u64) -> RecoveryFixture {
 fn bench_recovery(c: &mut Criterion) {
     {
         let mut group = c.benchmark_group("mvcc-recovery/small-frames");
-        for &num_frames in &[1, 100, 1000, 10_000, 100_000, 1_000_000] {
+        for &num_frames in &[1, 100, 1000, 10_000, 100_000] {
             let fixture = build_small_frames(num_frames);
             group.throughput(Throughput::Elements(num_frames));
             group.bench_with_input(
@@ -152,7 +153,7 @@ fn bench_recovery(c: &mut Criterion) {
 
     {
         let mut group = c.benchmark_group("mvcc-recovery/wide-frame");
-        for &num_ops in &[1, 100, 1000, 10_000, 100_000, 1_000_000] {
+        for &num_ops in &[1, 100, 1000, 10_000, 100_000] {
             let fixture = single_frame_with_num_ops(num_ops);
             group.throughput(Throughput::Elements(num_ops));
             group.bench_with_input(

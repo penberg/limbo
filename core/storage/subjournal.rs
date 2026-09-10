@@ -105,7 +105,7 @@ impl Subjournal {
                 let Ok((buf, bytes_read)) = res else {
                     return None;
                 };
-                let page_idx = page.get().id;
+                let page_idx = page.get().id();
                 if bytes_read != page_size as i32 {
                     tracing::error!(
                         "subjournal short read on page {page_idx}: expected {page_size} bytes, got {bytes_read}"

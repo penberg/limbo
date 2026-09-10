@@ -19,6 +19,24 @@ public class SqliteConnectionStringBuilder : DbConnectionStringBuilder
         "Default Timeout",
         "Pooling",
         "Vfs",
+        "Auth Token",
+        "Replica Path",
+        "Read Your Writes",
+        "Sync Interval",
+        "Sync Client Name",
+        "Sync Long Poll Timeout",
+        "Bootstrap If Empty",
+        "Partial Bootstrap Prefix",
+        "Partial Bootstrap Query",
+        "Partial Sync Segment Size",
+        "Partial Sync Prefetch",
+        "Remote Encryption Cipher",
+        "Remote Encryption Key",
+        "Push Operations Threshold",
+        "Pull Bytes Threshold",
+        "Force Logical MVCC Pull",
+        "Sync Experimental Features",
+        "Tls",
         "DateTimeKind",
         "DateTimeFormat",
         "BinaryGUID",
@@ -43,6 +61,44 @@ public class SqliteConnectionStringBuilder : DbConnectionStringBuilder
         ["CommandTimeout"] = "Default Timeout",
         ["Pooling"] = "Pooling",
         ["Vfs"] = "Vfs",
+        ["Auth Token"] = "Auth Token",
+        ["AuthToken"] = "Auth Token",
+        ["Authentication Token"] = "Auth Token",
+        ["AuthenticationToken"] = "Auth Token",
+        ["Replica Path"] = "Replica Path",
+        ["ReplicaPath"] = "Replica Path",
+        ["Read Your Writes"] = "Read Your Writes",
+        ["ReadYourWrites"] = "Read Your Writes",
+        ["Sync Interval"] = "Sync Interval",
+        ["SyncInterval"] = "Sync Interval",
+        ["Sync Client Name"] = "Sync Client Name",
+        ["SyncClientName"] = "Sync Client Name",
+        ["Sync Long Poll Timeout"] = "Sync Long Poll Timeout",
+        ["SyncLongPollTimeout"] = "Sync Long Poll Timeout",
+        ["Bootstrap If Empty"] = "Bootstrap If Empty",
+        ["BootstrapIfEmpty"] = "Bootstrap If Empty",
+        ["Partial Bootstrap Prefix"] = "Partial Bootstrap Prefix",
+        ["PartialBootstrapPrefix"] = "Partial Bootstrap Prefix",
+        ["Partial Bootstrap Query"] = "Partial Bootstrap Query",
+        ["PartialBootstrapQuery"] = "Partial Bootstrap Query",
+        ["Partial Sync Segment Size"] = "Partial Sync Segment Size",
+        ["PartialSyncSegmentSize"] = "Partial Sync Segment Size",
+        ["Partial Sync Prefetch"] = "Partial Sync Prefetch",
+        ["PartialSyncPrefetch"] = "Partial Sync Prefetch",
+        ["Remote Encryption Cipher"] = "Remote Encryption Cipher",
+        ["RemoteEncryptionCipher"] = "Remote Encryption Cipher",
+        ["Remote Encryption Key"] = "Remote Encryption Key",
+        ["RemoteEncryptionKey"] = "Remote Encryption Key",
+        ["Push Operations Threshold"] = "Push Operations Threshold",
+        ["PushOperationsThreshold"] = "Push Operations Threshold",
+        ["Pull Bytes Threshold"] = "Pull Bytes Threshold",
+        ["PullBytesThreshold"] = "Pull Bytes Threshold",
+        ["Force Logical MVCC Pull"] = "Force Logical MVCC Pull",
+        ["ForceLogicalMvccPull"] = "Force Logical MVCC Pull",
+        ["Sync Experimental Features"] = "Sync Experimental Features",
+        ["SyncExperimentalFeatures"] = "Sync Experimental Features",
+        ["Tls"] = "Tls",
+        ["TLS"] = "Tls",
         ["DateTimeKind"] = "DateTimeKind",
         ["Date Time Kind"] = "DateTimeKind",
         ["DateTimeFormat"] = "DateTimeFormat",
@@ -57,15 +113,169 @@ public class SqliteConnectionStringBuilder : DbConnectionStringBuilder
     {
     }
 
+    public string AuthToken
+    {
+        get => GetString("Auth Token");
+        set => SetString("Auth Token", value);
+    }
+
+    public string ReplicaPath
+    {
+        get => GetString("Replica Path");
+        set => SetString("Replica Path", value);
+    }
+
+    public bool ReadYourWrites
+    {
+        get => GetBool("Read Your Writes", true);
+        set => this["Read Your Writes"] = value;
+    }
+
+    public int SyncInterval
+    {
+        get => GetInt("Sync Interval", 0);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            this["Sync Interval"] = value;
+        }
+    }
+
+    public string SyncClientName
+    {
+        get => GetString("Sync Client Name");
+        set => SetString("Sync Client Name", value);
+    }
+
+    public int SyncLongPollTimeout
+    {
+        get => GetInt("Sync Long Poll Timeout", 0);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            this["Sync Long Poll Timeout"] = value;
+        }
+    }
+
+    public bool BootstrapIfEmpty
+    {
+        get => GetBool("Bootstrap If Empty", true);
+        set => this["Bootstrap If Empty"] = value;
+    }
+
+    public int PartialBootstrapPrefix
+    {
+        get => GetInt("Partial Bootstrap Prefix", 0);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            this["Partial Bootstrap Prefix"] = value;
+        }
+    }
+
+    public string PartialBootstrapQuery
+    {
+        get => GetString("Partial Bootstrap Query");
+        set => SetString("Partial Bootstrap Query", value);
+    }
+
+    public long PartialSyncSegmentSize
+    {
+        get => GetLong("Partial Sync Segment Size", 0);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            this["Partial Sync Segment Size"] = value;
+        }
+    }
+
+    public bool PartialSyncPrefetch
+    {
+        get => GetBool("Partial Sync Prefetch");
+        set => this["Partial Sync Prefetch"] = value;
+    }
+
+    public string RemoteEncryptionCipher
+    {
+        get => GetString("Remote Encryption Cipher");
+        set => SetString("Remote Encryption Cipher", value);
+    }
+
+    public string RemoteEncryptionKey
+    {
+        get => GetString("Remote Encryption Key");
+        set => SetString("Remote Encryption Key", value);
+    }
+
+    public long PushOperationsThreshold
+    {
+        get => GetLong("Push Operations Threshold", 0);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            this["Push Operations Threshold"] = value;
+        }
+    }
+
+    public long PullBytesThreshold
+    {
+        get => GetLong("Pull Bytes Threshold", 0);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            this["Pull Bytes Threshold"] = value;
+        }
+    }
+
+    public bool ForceLogicalMvccPull
+    {
+        get => GetBool("Force Logical MVCC Pull");
+        set => this["Force Logical MVCC Pull"] = value;
+    }
+
+    public string SyncExperimentalFeatures
+    {
+        get => GetString("Sync Experimental Features");
+        set => SetString("Sync Experimental Features", value);
+    }
+
+    public bool? Tls
+    {
+        get => GetNullableBool("Tls");
+        set => SetNullable("Tls", value);
+    }
+
     public SqliteConnectionStringBuilder(string? connectionString)
     {
         ConnectionString = connectionString ?? string.Empty;
     }
 
+    public bool IsLocal => !IsDirectRemote && !IsReplica;
+
+    public bool IsDirectRemote
+    {
+        get
+        {
+            var options = TursoConnectionOptions.Parse(GetTursoConnectionString());
+            return options.IsRemote && !options.IsReplica;
+        }
+    }
+
+    public bool IsRemote => IsDirectRemote || IsReplica;
+
+    public bool IsReplica => TursoConnectionOptions.Parse(GetTursoConnectionString()).IsReplica;
+
     public string DataSource
     {
         get => GetString("Data Source");
         set => SetString("Data Source", value);
+    }
+
+    private long GetLong(string keyword, long defaultValue)
+    {
+        return base.TryGetValue(keyword, out var value)
+            ? Convert.ToInt64(value, CultureInfo.InvariantCulture)
+            : defaultValue;
     }
 
     public SqliteOpenMode Mode
@@ -205,13 +415,41 @@ public class SqliteConnectionStringBuilder : DbConnectionStringBuilder
     internal string GetTursoConnectionString()
     {
         var builder = new DbConnectionStringBuilder();
-        if (!string.IsNullOrEmpty(DataSource))
-            builder["Data Source"] = DataSource;
-        if (DefaultTimeout != 30)
-            builder["Default Timeout"] = DefaultTimeout;
+        foreach (var keyword in ManagedKeywords)
+        {
+            if (base.TryGetValue(keyword, out var value))
+                builder[keyword] = value;
+        }
+        if (!string.IsNullOrWhiteSpace(ReplicaPath) && !builder.ContainsKey("Pooling"))
+            builder["Pooling"] = Pooling;
 
         return builder.ConnectionString;
     }
+
+    private static readonly string[] ManagedKeywords =
+    [
+        "Data Source",
+        "Default Timeout",
+        "Pooling",
+        "Auth Token",
+        "Replica Path",
+        "Read Your Writes",
+        "Sync Interval",
+        "Sync Client Name",
+        "Sync Long Poll Timeout",
+        "Bootstrap If Empty",
+        "Partial Bootstrap Prefix",
+        "Partial Bootstrap Query",
+        "Partial Sync Segment Size",
+        "Partial Sync Prefetch",
+        "Remote Encryption Cipher",
+        "Remote Encryption Key",
+        "Push Operations Threshold",
+        "Pull Bytes Threshold",
+        "Force Logical MVCC Pull",
+        "Sync Experimental Features",
+        "Tls",
+    ];
 
     private static string NormalizeKeyword(string keyword)
     {
@@ -294,8 +532,14 @@ public class SqliteConnectionStringBuilder : DbConnectionStringBuilder
             "Mode" => ConvertOpenMode(value),
             "Cache" => ConvertCacheMode(value),
             "Foreign Keys" => ConvertToNullableBoolean(value),
-            "Recursive Triggers" or "Pooling" or "BinaryGUID" => Convert.ToBoolean(value, CultureInfo.InvariantCulture),
-            "Default Timeout" or "Version" => Convert.ToInt32(value, CultureInfo.InvariantCulture),
+            "Recursive Triggers" or "Pooling" or "BinaryGUID"
+                or "Read Your Writes" or "Bootstrap If Empty" or "Partial Sync Prefetch"
+                or "Force Logical MVCC Pull" => Convert.ToBoolean(value, CultureInfo.InvariantCulture),
+            "Default Timeout" or "Version" or "Sync Interval" or "Sync Long Poll Timeout"
+                or "Partial Bootstrap Prefix" => Convert.ToInt32(value, CultureInfo.InvariantCulture),
+            "Partial Sync Segment Size" or "Push Operations Threshold" or "Pull Bytes Threshold"
+                => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+            "Tls" => ConvertToNullableBoolean(value),
             "DateTimeKind" => ConvertDateTimeKind(value),
             _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
         };
@@ -326,6 +570,24 @@ public class SqliteConnectionStringBuilder : DbConnectionStringBuilder
             "Default Timeout" => 30,
             "Pooling" => true,
             "Vfs" => null!,
+            "Auth Token" => string.Empty,
+            "Replica Path" => string.Empty,
+            "Read Your Writes" => true,
+            "Sync Interval" => 0,
+            "Sync Client Name" => string.Empty,
+            "Sync Long Poll Timeout" => 0,
+            "Bootstrap If Empty" => true,
+            "Partial Bootstrap Prefix" => 0,
+            "Partial Bootstrap Query" => string.Empty,
+            "Partial Sync Segment Size" => 0L,
+            "Partial Sync Prefetch" => false,
+            "Remote Encryption Cipher" => string.Empty,
+            "Remote Encryption Key" => string.Empty,
+            "Push Operations Threshold" => 0L,
+            "Pull Bytes Threshold" => 0L,
+            "Force Logical MVCC Pull" => false,
+            "Sync Experimental Features" => string.Empty,
+            "Tls" => null!,
             "DateTimeKind" => System.DateTimeKind.Unspecified,
             "DateTimeFormat" => string.Empty,
             "BinaryGUID" => true,

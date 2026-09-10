@@ -158,6 +158,25 @@ public class SqliteParameter : DbParameter
         };
     }
 
+    internal global::Turso.TursoParameter ToManagedParameter(string parameterName)
+    {
+        var value = ToTursoValue();
+        return new global::Turso.TursoParameter(parameterName, value.ValueType switch
+        {
+            TursoValueType.Null or TursoValueType.Empty => DBNull.Value,
+            TursoValueType.Integer => value.IntValue,
+            TursoValueType.Real => value.RealValue,
+            TursoValueType.Text => value.StringValue,
+            TursoValueType.Blob => value.BlobValue,
+            _ => throw new ArgumentOutOfRangeException()
+        })
+        {
+            IsNullable = IsNullable,
+            SourceColumn = SourceColumn,
+            SourceColumnNullMapping = SourceColumnNullMapping,
+        };
+    }
+
     private static SqliteType InferSqliteType(object? value)
     {
         return value switch

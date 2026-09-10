@@ -74,6 +74,84 @@ fn test_database_rename_registry_stale() {
     );
 }
 
+fn open_plain_file(path: &std::path::Path) -> turso_core::Result<Arc<Database>> {
+    let io: Arc<dyn turso_core::IO + Send> = Arc::new(turso_core::PlatformIO::new().unwrap());
+    Database::open_file_with_flags(
+        io,
+        path.to_str().unwrap(),
+        OpenFlags::Create,
+        turso_core::DatabaseOpts::new(),
+        None,
+        Arc::new(SqliteDialect),
+    )
+}
+
+/// SQLite must refuse the file as "file is not a database" (SQLITE_NOTADB).
+/// Opening is lazy in SQLite, so run a query to make it read the header.
+fn assert_sqlite_says_not_a_database(path: &std::path::Path) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let err = conn
+        .query_row("SELECT count(*) FROM sqlite_schema", [], |_| Ok(()))
+        .unwrap_err();
+    match err {
+        rusqlite::Error::SqliteFailure(e, _) => assert_eq!(
+            e.code,
+            rusqlite::ErrorCode::NotADatabase,
+            "sqlite reported {err:?} for {}",
+            path.display()
+        ),
+        other => panic!("expected SQLITE_NOTADB from sqlite, got {other:?}"),
+    }
+}
+
+fn assert_turso_says_not_a_database(path: &std::path::Path) {
+    match open_plain_file(path) {
+        Err(turso_core::LimboError::NotADB) => {}
+        Err(other) => panic!("expected NotADB for {}, got {other:?}", path.display()),
+        Ok(_) => panic!(
+            "expected NotADB for {}, got a successful open",
+            path.display()
+        ),
+    }
+}
+
+/// A file whose header is garbage must report NotADB ("file is not a
+/// database"), like SQLite, and not a corruption error derived from a
+/// garbage header field such as the page size. The corrupt8.test cascade
+/// started with a garbage header being reported as "invalid page size",
+/// which the sqlite3 compat layer then surfaced as "out of memory".
+#[test]
+fn test_open_garbage_header_reports_not_a_database() {
+    let tmp_dir = tempfile::TempDir::new().unwrap();
+    let path = tmp_dir.path().join("garbage.db");
+    // 1050 zero bytes: no SQLite magic, page size field reads as 0.
+    std::fs::write(&path, vec![0u8; 1050]).unwrap();
+
+    assert_sqlite_says_not_a_database(&path);
+    assert_turso_says_not_a_database(&path);
+}
+
+/// A non-empty file shorter than the 512-byte header can never be a valid
+/// database. SQLite zero-fills the missing bytes and then rejects the header,
+/// so it reports "file is not a database" whether or not the file starts
+/// with the SQLite magic.
+#[test]
+fn test_open_short_file_reports_not_a_database() {
+    let tmp_dir = tempfile::TempDir::new().unwrap();
+
+    let garbage = tmp_dir.path().join("short-garbage.db");
+    std::fs::write(&garbage, vec![0x42u8; 100]).unwrap();
+    assert_sqlite_says_not_a_database(&garbage);
+    assert_turso_says_not_a_database(&garbage);
+
+    let truncated = tmp_dir.path().join("short-truncated.db");
+    let mut bytes = b"SQLite format 3\0".to_vec();
+    bytes.resize(100, 0);
+    std::fs::write(&truncated, bytes).unwrap();
+    assert_sqlite_says_not_a_database(&truncated);
+    assert_turso_says_not_a_database(&truncated);
+}
+
 /// Regression test: TursoConnection.close() must finalize outstanding statements
 /// so that the Statement → Arc<Connection> → Arc<Database> chain is broken.
 ///

@@ -89,6 +89,8 @@ jobs:
         run: scripts/nightly-bench.sh run prepare_params_benchmark
       - name: Bench record_recycling
         run: scripts/nightly-bench.sh run record_recycling
+      - name: Bench scan_loop_benchmark
+        run: scripts/nightly-bench.sh run scan_loop_benchmark
       - name: Bench select_star_benchmark
         run: scripts/nightly-bench.sh run select_star_benchmark
       - name: Bench sql_functions
@@ -97,6 +99,8 @@ jobs:
         run: scripts/nightly-bench.sh run struct_union_benchmark
       - name: Bench struct_union_profile
         run: scripts/nightly-bench.sh run struct_union_profile
+      - name: Bench text_validate_benchmark
+        run: scripts/nightly-bench.sh run text_validate_benchmark
       - name: Bench triggers
         run: scripts/nightly-bench.sh run triggers
       - name: Bench write_perf_benchmark

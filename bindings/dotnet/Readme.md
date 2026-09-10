@@ -221,6 +221,34 @@ For common embedded SQLite usage, the `Turso.Data.Sqlite.Provider` package expos
 + using var connection = new SqliteConnection("Data Source=app.db");
 ```
 
+The same facade can connect directly to a remote database:
+
+```C#
+using Turso.Data.Sqlite;
+
+await using var connection = new SqliteConnection(
+    "Data Source=libsql://example-org.turso.io;Auth Token=eyJ...");
+await connection.OpenAsync();
+```
+
+Add `Replica Path` to keep queries local while syncing an embedded replica:
+
+```C#
+await using var connection = new SqliteConnection(
+    "Data Source=libsql://example-org.turso.io;"
+    + "Auth Token=eyJ...;"
+    + "Replica Path=./replica.db;"
+    + "Sync Interval=30");
+await connection.OpenAsync();
+await connection.SyncAsync();
+```
+
+Local paths continue to use the native SQLite-compatible backend. Remote URLs without
+`Replica Path` use direct remote execution; remote URLs with `Replica Path` use the
+local replica backend. Client-side functions, aggregates, collations, backup, blob,
+and extension helpers are unavailable on direct remote connections because they
+require a local database handle.
+
 Supported common connection string keywords include:
 
 | Keyword | Notes |
@@ -236,9 +264,9 @@ Supported common connection string keywords include:
 | `Encryption Cipher` | Turso local encryption cipher. |
 | `Encryption Key` | Hex-encoded encryption key used with `Encryption Cipher`. |
 | `Auth Token` | Bearer token for remote Turso/libSQL URLs. Aliases include `AuthToken` and `Authentication Token`. |
-| `Replica Path` | Reserved for embedded replicas. The .NET provider currently fails early with a clear unsupported error. |
+| `Replica Path` | Local path for an embedded replica of the remote `Data Source`. |
 | `Read Your Writes` | Keeps the remote Hrana session baton across commands. Defaults to `True`. Set `False` for stateless one-shot remote requests. |
-| `Sync Interval` | Reserved for embedded replicas. Automatic sync is not enabled yet. |
+| `Sync Interval` | Embedded replica automatic pull interval in seconds. `0` disables automatic sync. |
 | `Tls` | Optional override for `libsql://` development URLs. Conflicting values with explicit `http://` or `https://` schemes fail early. |
 
 ## SQLite-compatible facade coverage
@@ -252,7 +280,7 @@ Supported common connection string keywords include:
 
 ## Entity Framework Core
 
-`Turso.EntityFrameworkCore.Sqlite` adds a `UseTurso` provider hook for local and embedded Turso databases. It reuses EF Core SQLite's LINQ translation pipeline and executes generated SQL through the `Turso.Data.Sqlite` facade.
+`Turso.EntityFrameworkCore.Sqlite` adds a `UseTurso` provider hook for local, direct remote, and embedded-replica Turso databases. It reuses EF Core SQLite's LINQ translation pipeline and executes generated SQL through the `Turso.Data.Sqlite` facade.
 
 ```bash
 dotnet add package Turso.EntityFrameworkCore.Sqlite
@@ -282,6 +310,6 @@ var options = new DbContextOptionsBuilder<AppDbContext>()
     .Options;
 ```
 
-The local provider supports the normal EF Core SQLite query pipeline, including composed `IQueryable<T>` filters, navigation-property joins, ordering, paging, grouping, aggregates, async materialization, and `SaveChangesAsync`. Schema creation can use the standard EF Core SQLite mechanisms such as `EnsureCreated`, `EnsureCreatedAsync`, and migrations against local database files.
+The provider supports normal EF Core CRUD, generated keys, transactions, migrations, and schema creation through `EnsureCreated` and `EnsureCreatedAsync`. Use the same remote and replica connection strings shown above with `UseTurso`.
 
-Remote `libsql://`/auth-token EF Core support is not part of the local provider. Use the local/embedded provider for EF Core today; remote/serverless EF support needs a separate connection, retry, and transaction design.
+Direct remote connections cannot run EF's client-side SQLite helpers, including `REGEXP`, decimal `ef_*` functions, and the `EF_DECIMAL` collation; queries that need them fail before SQL is sent. `EnsureDeleted` cannot delete a direct remote database and points callers to the Turso platform API. For embedded replicas, `EnsureDeleted` removes only the local replica and its sidecar files, never the remote database.

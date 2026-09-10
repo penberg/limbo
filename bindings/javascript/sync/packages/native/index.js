@@ -81,8 +81,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-android-arm64')
         const bindingPackageVersion = require('@tursodatabase/sync-android-arm64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -97,8 +97,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-android-arm-eabi')
         const bindingPackageVersion = require('@tursodatabase/sync-android-arm-eabi/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -117,8 +117,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-win32-x64-msvc')
         const bindingPackageVersion = require('@tursodatabase/sync-win32-x64-msvc/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -133,8 +133,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-win32-ia32-msvc')
         const bindingPackageVersion = require('@tursodatabase/sync-win32-ia32-msvc/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -149,8 +149,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-win32-arm64-msvc')
         const bindingPackageVersion = require('@tursodatabase/sync-win32-arm64-msvc/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -168,8 +168,8 @@ function requireNative() {
     try {
       const binding = require('@tursodatabase/sync-darwin-universal')
       const bindingPackageVersion = require('@tursodatabase/sync-darwin-universal/package.json').version
-      if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-        throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+      if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+        throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
       }
       return binding
     } catch (e) {
@@ -184,8 +184,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-darwin-x64')
         const bindingPackageVersion = require('@tursodatabase/sync-darwin-x64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -200,8 +200,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-darwin-arm64')
         const bindingPackageVersion = require('@tursodatabase/sync-darwin-arm64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -220,8 +220,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-freebsd-x64')
         const bindingPackageVersion = require('@tursodatabase/sync-freebsd-x64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -236,8 +236,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-freebsd-arm64')
         const bindingPackageVersion = require('@tursodatabase/sync-freebsd-arm64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -257,8 +257,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-x64-musl')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-x64-musl/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -273,8 +273,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-x64-gnu')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-x64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -291,8 +291,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-arm64-musl')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-arm64-musl/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -307,8 +307,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-arm64-gnu')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-arm64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -325,8 +325,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-arm-musleabihf')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-arm-musleabihf/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -341,8 +341,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-arm-gnueabihf')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-arm-gnueabihf/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -359,8 +359,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-riscv64-musl')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-riscv64-musl/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -375,8 +375,8 @@ function requireNative() {
         try {
           const binding = require('@tursodatabase/sync-linux-riscv64-gnu')
           const bindingPackageVersion = require('@tursodatabase/sync-linux-riscv64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -392,8 +392,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-linux-ppc64-gnu')
         const bindingPackageVersion = require('@tursodatabase/sync-linux-ppc64-gnu/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -408,8 +408,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-linux-s390x-gnu')
         const bindingPackageVersion = require('@tursodatabase/sync-linux-s390x-gnu/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -428,8 +428,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-openharmony-arm64')
         const bindingPackageVersion = require('@tursodatabase/sync-openharmony-arm64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -444,8 +444,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-openharmony-x64')
         const bindingPackageVersion = require('@tursodatabase/sync-openharmony-x64/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -460,8 +460,8 @@ function requireNative() {
       try {
         const binding = require('@tursodatabase/sync-openharmony-arm')
         const bindingPackageVersion = require('@tursodatabase/sync-openharmony-arm/package.json').version
-        if (bindingPackageVersion !== '0.8.0-pre.3' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.3 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.8.0-pre.10' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.8.0-pre.10 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {

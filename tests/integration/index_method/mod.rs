@@ -6237,3 +6237,374 @@ fn multiprocess_shared_cache_serves_snapshot_consistent_pages() {
         );
     }
 }
+
+/// B1 write-path auto-merge: single-row autocommit inserts must not let the
+/// visible segment set grow past `PRAGMA fts_merge_threshold` by more than
+/// the one segment the triggering statement itself appends. Runs in both
+/// WAL and MVCC modes (the maintenance lease is a no-op in WAL).
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+#[test]
+fn fts_auto_merge_bounds_segment_count() {
+    for mvcc in [false, true] {
+        let tmp_db = TempDatabase::builder()
+            .with_opts(turso_core::DatabaseOpts::new().with_index_method(true))
+            .with_mvcc(mvcc)
+            .build();
+        let conn = tmp_db.connect_limbo();
+        conn.execute("CREATE TABLE docs(id INTEGER PRIMARY KEY, body TEXT)")
+            .unwrap();
+        conn.execute("CREATE INDEX docs_fts ON docs USING fts(body)")
+            .unwrap();
+        conn.execute("PRAGMA fts_merge_threshold = 4").unwrap();
+        assert_eq!(
+            limbo_exec_rows(&conn, "PRAGMA fts_merge_threshold"),
+            vec![vec![rusqlite::types::Value::Integer(4)]]
+        );
+
+        const ROWS: i64 = 30;
+        for id in 0..ROWS {
+            conn.execute(format!("INSERT INTO docs VALUES ({id}, 'common doc {id}')"))
+                .unwrap();
+        }
+
+        let stats = fts_stats_in_txn(&tmp_db, &conn, "docs", "docs_fts");
+        let segment_count = stats.segment_count.expect("snapshot must be loaded");
+        assert!(
+            segment_count <= 5,
+            "auto-merge must keep the visible set at threshold + 1 at most, \
+             got {segment_count} segments (mvcc={mvcc})"
+        );
+
+        // Every document still matches exactly once through the merged view.
+        assert_eq!(
+            limbo_exec_rows(
+                &conn,
+                "SELECT count(*) FROM docs WHERE fts_match(body, 'common')"
+            ),
+            vec![vec![rusqlite::types::Value::Integer(ROWS)]],
+            "mvcc={mvcc}"
+        );
+    }
+}
+
+/// B1: a merge-threshold of 0 disables the write path merge entirely — each
+/// autocommit insert keeps appending its own segment.
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+#[test]
+fn fts_auto_merge_disabled_by_zero_threshold() {
+    let tmp_db = TempDatabase::builder()
+        .with_opts(turso_core::DatabaseOpts::new().with_index_method(true))
+        .build();
+    let conn = tmp_db.connect_limbo();
+    conn.execute("CREATE TABLE docs(id INTEGER PRIMARY KEY, body TEXT)")
+        .unwrap();
+    conn.execute("CREATE INDEX docs_fts ON docs USING fts(body)")
+        .unwrap();
+    conn.execute("PRAGMA fts_merge_threshold = 0").unwrap();
+    for id in 0..12 {
+        conn.execute(format!("INSERT INTO docs VALUES ({id}, 'plain doc {id}')"))
+            .unwrap();
+    }
+    assert_eq!(
+        fts_stats_in_txn(&tmp_db, &conn, "docs", "docs_fts").segment_count,
+        Some(12),
+        "threshold 0 must leave one segment per single-row insert"
+    );
+    assert!(
+        conn.execute("PRAGMA fts_merge_threshold = -1").is_err(),
+        "negative thresholds must be rejected"
+    );
+}
+
+/// B1: a concurrent transaction holding the maintenance lease makes the
+/// write-path merge skip silently — the writer's inserts must succeed, and
+/// the deferred merge happens on a later, uncontended insert.
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+#[test]
+fn fts_auto_merge_skips_when_lease_contended() {
+    let tmp_db = TempDatabase::builder()
+        .with_opts(turso_core::DatabaseOpts::new().with_index_method(true))
+        .with_mvcc(true)
+        .build();
+    let writer = tmp_db.connect_limbo();
+    let merger = tmp_db.connect_limbo();
+
+    writer
+        .execute("CREATE TABLE docs(id INTEGER PRIMARY KEY, body TEXT)")
+        .unwrap();
+    writer
+        .execute("CREATE INDEX docs_fts ON docs USING fts(body)")
+        .unwrap();
+    writer.execute("PRAGMA fts_merge_threshold = 2").unwrap();
+    for id in 0..3 {
+        writer
+            .execute(format!("INSERT INTO docs VALUES ({id}, 'early doc {id}')"))
+            .unwrap();
+    }
+
+    // The merger's open transaction holds the maintenance lease.
+    merger.execute("BEGIN CONCURRENT").unwrap();
+    merger.execute("OPTIMIZE INDEX docs_fts").unwrap();
+
+    // Every insert is past the threshold, so each one attempts the merge;
+    // the held lease must make it skip, never fail the writer.
+    for id in 10..16 {
+        writer
+            .execute(format!("INSERT INTO docs VALUES ({id}, 'later doc {id}')"))
+            .unwrap_or_else(|e| {
+                panic!("a contended auto-merge must skip, not fail the writer: {e}")
+            });
+    }
+    merger.execute("COMMIT").unwrap();
+
+    // The lease is free again: the next insert merges everything down.
+    writer
+        .execute("INSERT INTO docs VALUES (100, 'final doc')")
+        .unwrap();
+    let fresh = tmp_db.connect_limbo();
+    let stats = fts_stats_in_txn(&tmp_db, &fresh, "docs", "docs_fts");
+    let segment_count = stats.segment_count.expect("snapshot must be loaded");
+    assert!(
+        segment_count <= 3,
+        "the deferred merge must collapse the backlog, got {segment_count} segments"
+    );
+    assert_eq!(
+        limbo_exec_rows(
+            &fresh,
+            "SELECT count(*) FROM docs WHERE fts_match(body, 'doc')"
+        ),
+        vec![vec![rusqlite::types::Value::Integer(10)]],
+        "every document must match exactly once after skipped and deferred merges"
+    );
+}
+
+/// B2 helper: build one large (>100KB) merged segment from `rows` documents
+/// with wide vocabulary, then return the connection. The follow-up OPTIMIZE
+/// compacts the batch flushes into a single segment.
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+fn fts_build_large_segment(conn: &Arc<turso_core::Connection>, rows: usize) {
+    conn.execute("CREATE TABLE docs(id INTEGER PRIMARY KEY, body TEXT)")
+        .unwrap();
+    conn.execute("CREATE INDEX docs_fts ON docs USING fts(body)")
+        .unwrap();
+    let mut sql = String::from("INSERT INTO docs VALUES ");
+    for id in 0..rows {
+        if id > 0 {
+            sql.push(',');
+        }
+        sql.push_str(&format!(
+            "({id}, 'bulk document number{id} vocab{} vocab{} filler{} extra{} common corpus text')",
+            id * 7 % 3000,
+            id * 13 % 3000,
+            id * 17 % 3000,
+            id * 19 % 3000,
+        ));
+    }
+    conn.execute(sql).unwrap();
+    conn.execute("OPTIMIZE INDEX docs_fts").unwrap();
+}
+
+/// B2 tiered candidacy: the write-path merge must only rewrite the small
+/// tier — one large segment plus many single-row segments merge down to
+/// exactly two segments (the untouched large one and the merged smalls),
+/// not one.
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+#[test]
+fn fts_auto_merge_spares_large_segments() {
+    let tmp_db = TempDatabase::builder()
+        .with_opts(turso_core::DatabaseOpts::new().with_index_method(true))
+        .build();
+    let conn = tmp_db.connect_limbo();
+    fts_build_large_segment(&conn, 3000);
+    let stats = fts_stats_in_txn(&tmp_db, &conn, "docs", "docs_fts");
+    assert_eq!(stats.segment_count, Some(1));
+    assert!(
+        stats.cached_bytes.unwrap() > 100 * 1024,
+        "premise: the merged segment must exceed the smallest merge layer \
+         (100KB), got {} bytes",
+        stats.cached_bytes.unwrap()
+    );
+
+    conn.execute("PRAGMA fts_merge_threshold = 2").unwrap();
+    for id in 10_000..10_006 {
+        conn.execute(format!("INSERT INTO docs VALUES ({id}, 'tiny doc {id}')"))
+            .unwrap();
+    }
+
+    let stats = fts_stats_in_txn(&tmp_db, &conn, "docs", "docs_fts");
+    assert_eq!(
+        stats.segment_count,
+        Some(2),
+        "the large segment must not be rewritten by the small-tier merge"
+    );
+    assert_eq!(
+        limbo_exec_rows(
+            &conn,
+            "SELECT count(*) FROM docs WHERE fts_match(body, 'tiny')"
+        ),
+        vec![vec![rusqlite::types::Value::Integer(6)]]
+    );
+    assert_eq!(
+        limbo_exec_rows(
+            &conn,
+            "SELECT count(*) FROM docs WHERE fts_match(body, 'corpus')"
+        ),
+        vec![vec![rusqlite::types::Value::Integer(3000)]]
+    );
+}
+
+/// B2 dead-space awareness: a segment that is at least half tombstoned is
+/// picked by the write-path merge even when its size tier would spare it.
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+#[test]
+fn fts_auto_merge_rewrites_tombstone_heavy_segments() {
+    let tmp_db = TempDatabase::builder()
+        .with_opts(turso_core::DatabaseOpts::new().with_index_method(true))
+        .build();
+    let conn = tmp_db.connect_limbo();
+    fts_build_large_segment(&conn, 3000);
+    let stats = fts_stats_in_txn(&tmp_db, &conn, "docs", "docs_fts");
+    assert!(
+        stats.cached_bytes.unwrap() > 100 * 1024,
+        "premise: large segment"
+    );
+
+    // Tombstone 60% of the large segment, then trigger the write-path merge
+    // exactly once (the second small insert pushes the count past the
+    // threshold).
+    conn.execute("DELETE FROM docs WHERE id < 1800").unwrap();
+    conn.execute("PRAGMA fts_merge_threshold = 2").unwrap();
+    for id in 10_000..10_002 {
+        conn.execute(format!("INSERT INTO docs VALUES ({id}, 'tiny doc {id}')"))
+            .unwrap();
+    }
+
+    let stats = fts_stats_in_txn(&tmp_db, &conn, "docs", "docs_fts");
+    assert_eq!(
+        stats.segment_count,
+        Some(1),
+        "a >=50% tombstoned segment must be rewritten regardless of its size tier"
+    );
+    assert_eq!(
+        limbo_exec_rows(
+            &conn,
+            "SELECT count(*) FROM docs WHERE fts_match(body, 'corpus')"
+        ),
+        vec![vec![rusqlite::types::Value::Integer(1200)]],
+        "only the live documents survive the compaction"
+    );
+    assert_eq!(
+        limbo_exec_rows(
+            &conn,
+            "SELECT count(*) FROM docs WHERE fts_match(body, 'tiny')"
+        ),
+        vec![vec![rusqlite::types::Value::Integer(2)]]
+    );
+}
+
+/// B3 starvation probe: under a loop of concurrent single-row UPDATEs
+/// (each one a short-lived deleter transaction), an OPTIMIZE issued
+/// repeatedly from another connection must succeed within a bounded number
+/// of attempts — contention refusals are fine, permanent starvation is not.
+#[cfg(all(feature = "fts", feature = "test_helper", not(target_family = "wasm")))]
+#[test]
+fn fts_optimize_succeeds_under_concurrent_update_churn() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let tmp_db = Arc::new(
+        TempDatabase::builder()
+            .with_opts(turso_core::DatabaseOpts::new().with_index_method(true))
+            .with_mvcc(true)
+            .build(),
+    );
+    let setup = tmp_db.connect_limbo();
+    setup
+        .execute("CREATE TABLE docs(id INTEGER PRIMARY KEY, body TEXT)")
+        .unwrap();
+    setup
+        .execute("CREATE INDEX docs_fts ON docs USING fts(body)")
+        .unwrap();
+    for id in 0..40 {
+        setup
+            .execute(format!("INSERT INTO docs VALUES ({id}, 'seed doc {id}')"))
+            .unwrap();
+    }
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut updaters = Vec::new();
+    // Two updaters on disjoint id ranges: they contend with OPTIMIZE via
+    // deleter registration, never with each other on base rows.
+    for (lo, hi) in [(0i64, 20i64), (20, 40)] {
+        let tmp_db = Arc::clone(&tmp_db);
+        let stop = Arc::clone(&stop);
+        updaters.push(std::thread::spawn(move || {
+            let conn = tmp_db.connect_limbo();
+            // Keep the churn manual-OPTIMIZE-shaped: no write-path merges.
+            conn.execute("PRAGMA fts_merge_threshold = 0").unwrap();
+            let mut round = 0i64;
+            while !stop.load(Ordering::Acquire) {
+                for id in lo..hi {
+                    if stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    match conn.execute(format!(
+                        "UPDATE docs SET body = 'round {round} doc {id}' WHERE id = {id}"
+                    )) {
+                        Ok(_) => {}
+                        Err(
+                            turso_core::LimboError::Busy
+                            | turso_core::LimboError::WriteWriteConflict
+                            | turso_core::LimboError::SchemaUpdated,
+                        ) => {}
+                        Err(e) => panic!("updater failed abnormally: {e}"),
+                    }
+                }
+                round += 1;
+            }
+        }));
+    }
+
+    // Give the churn a moment to be genuinely concurrent.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let optimizer = tmp_db.connect_limbo();
+    const MAX_ATTEMPTS: usize = 500;
+    let mut attempts = 0;
+    let succeeded = loop {
+        attempts += 1;
+        match optimizer.execute("OPTIMIZE INDEX docs_fts") {
+            Ok(_) => break true,
+            Err(
+                turso_core::LimboError::Busy
+                | turso_core::LimboError::WriteWriteConflict
+                | turso_core::LimboError::SchemaUpdated,
+            ) => {
+                if attempts >= MAX_ATTEMPTS {
+                    break false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(e) => panic!("OPTIMIZE failed abnormally: {e}"),
+        }
+    };
+
+    stop.store(true, Ordering::Release);
+    for updater in updaters {
+        updater.join().unwrap();
+    }
+    assert!(
+        succeeded,
+        "OPTIMIZE was starved for {MAX_ATTEMPTS} attempts under concurrent UPDATE churn"
+    );
+    println!("OPTIMIZE succeeded after {attempts} attempt(s)");
+
+    // The index is still coherent after the churn + merge.
+    let check = tmp_db.connect_limbo();
+    assert_eq!(
+        limbo_exec_rows(
+            &check,
+            "SELECT count(*) FROM docs WHERE fts_match(body, 'doc')"
+        ),
+        vec![vec![rusqlite::types::Value::Integer(40)]]
+    );
+}

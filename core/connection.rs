@@ -434,6 +434,10 @@ pub struct Connection {
     pub(crate) temp: TempDbContext,
     /// Attached databases
     pub(super) attached_databases: RwLock<DatabaseCatalog>,
+    /// Set before the first temp or attached database is installed and
+    /// never cleared, so the statement paths that visit the non-main pagers
+    /// can skip the catalog locks while no such pager can exist.
+    pub(super) has_non_main_pagers: AtomicBool,
     pub(super) query_only: AtomicBool,
     pub(super) vdbe_trace: AtomicBool,
     /// If enabled, the UPDATE/DELETE statements must have a WHERE clause
@@ -441,6 +445,10 @@ pub struct Connection {
     /// PRAGMA count_changes: when ON, each INSERT, UPDATE and DELETE returns
     /// one row with the number of rows it changed.
     pub(super) count_changes: AtomicBool,
+    /// PRAGMA fts_merge_threshold: number of visible FTS index segments a
+    /// statement flush may leave behind before the write path merges them.
+    /// 0 disables write-path merging.
+    pub(super) fts_merge_threshold: AtomicI64,
     /// SQLite DQS misfeature: when ON (default), unresolved double-quoted identifiers
     /// in DML statements fall back to string literals instead of raising an error.
     pub(super) dqs_dml: AtomicBool,
@@ -780,6 +788,7 @@ impl Connection {
         let temp_db = self.create_temp_database()?;
         let mut guard = self.temp.database.write();
         if guard.is_none() {
+            self.has_non_main_pagers.store(true, Ordering::Release);
             *guard = Some(temp_db);
         }
         Ok(())
@@ -2020,16 +2029,22 @@ impl Connection {
         if self.schema_reparse_in_progress() {
             return;
         }
+        // Inside a transaction the schema cannot change under the
+        // connection, so there is nothing to adopt. This runs on every step
+        // of every statement in MVCC mode, and the check below takes the
+        // database's shared schema lock, which every connection contends
+        // for: decide without it whenever possible.
+        if !self.has_no_open_transaction_state() {
+            return;
+        }
         let current_schema = self.schema.read().clone();
         let schema = self.db.schema.lock();
         // MVCC checkpoint can publish physical btree roots into the shared
         // schema without changing SQLite's schema cookie. If this connection
         // still has the older schema snapshot, prepared statements must be
         // invalidated and recompiled with the published roots.
-        if self.has_no_open_transaction_state()
-            && (current_schema.schema_version != schema.schema_version
-                || self
-                    .has_mvcc_schema_snapshot_changed_with_same_version(&current_schema, &schema))
+        if current_schema.schema_version != schema.schema_version
+            || self.has_mvcc_schema_snapshot_changed_with_same_version(&current_schema, &schema)
         {
             let mut adopted = schema.clone();
             // Resolve placeholder (negative) roots to the real pages a checkpoint has
@@ -2232,7 +2247,7 @@ impl Connection {
     ) -> Result<bool> {
         let content = page_ref.get_contents();
         // empty read - attempt to read absent page
-        if content.buffer.as_ref().is_none_or(|b| b.is_empty()) {
+        if content.buffer().is_none_or(|b| b.is_empty()) {
             return Ok(false);
         }
         page.copy_from_slice(content.as_ptr());
@@ -3654,6 +3669,7 @@ impl Connection {
                     };
                 }
                 AttachDatabaseState::Publish { alias, db, pager } => {
+                    self.has_non_main_pagers.store(true, Ordering::Release);
                     self.attached_databases.write().insert(
                         alias.as_str(),
                         db.clone(),
@@ -3755,21 +3771,34 @@ impl Connection {
     /// (temp + attached).The internal locks are released before `f` runs, which also
     /// makes it safe for `f` to call back into the connection (e.g. `mv_store_for_db`,
     /// which re-reads the attached-database catalog).
+    #[inline(always)]
     pub(crate) fn with_all_attached_pagers_with_index<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&[(usize, Arc<Pager>)]) -> R,
     {
-        let mut pagers: SmallVec<[(usize, Arc<Pager>); 8]> = SmallVec::new();
-        if let Some(temp_db) = self.temp.database.read().as_ref() {
-            pagers.push((crate::TEMP_DB_ID, temp_db.pager.clone()));
-        }
+        return if !self.has_non_main_pagers.load(Ordering::Acquire) {
+            f(&[])
+        } else {
+            attach_all_pagers_cold(self, f)
+        };
+
+        #[inline(never)]
+        fn attach_all_pagers_cold<F, R>(conn: &Connection, f: F) -> R
+        where
+            F: FnOnce(&[(usize, Arc<Pager>)]) -> R,
         {
-            let catalog = self.attached_databases.read();
-            for (&idx, entry) in catalog.index_to_data.iter() {
-                pagers.push((idx, entry.pager.clone()));
+            let mut pagers: SmallVec<[(usize, Arc<Pager>); 8]> = SmallVec::new();
+            if let Some(temp_db) = conn.temp.database.read().as_ref() {
+                pagers.push((crate::TEMP_DB_ID, temp_db.pager.clone()));
             }
+            {
+                let catalog = conn.attached_databases.read();
+                for (&idx, entry) in catalog.index_to_data.iter() {
+                    pagers.push((idx, entry.pager.clone()));
+                }
+            }
+            f(&pagers)
         }
-        f(&pagers)
     }
 
     pub(crate) fn database_schemas(&self) -> &RwLock<HashMap<usize, Arc<Schema>>> {
@@ -3927,6 +3956,14 @@ impl Connection {
 
     pub fn get_dml_require_where(&self) -> bool {
         self.dml_require_where.load(Ordering::SeqCst)
+    }
+
+    pub fn get_fts_merge_threshold(&self) -> i64 {
+        self.fts_merge_threshold.load(Ordering::SeqCst)
+    }
+
+    pub fn set_fts_merge_threshold(&self, value: i64) {
+        self.fts_merge_threshold.store(value, Ordering::SeqCst);
     }
 
     pub fn set_dml_require_where(&self, value: bool) {
@@ -4795,8 +4832,8 @@ impl Connection {
     }
 
     /// Get the query timeout duration.
-    pub fn get_query_timeout(&self) -> Duration {
-        Duration::from_millis(self.query_timeout_ms.load(Ordering::SeqCst))
+    pub fn get_query_timeout_ms(&self) -> u64 {
+        self.query_timeout_ms.load(Ordering::SeqCst)
     }
 
     /// Get a reference to the busy handler.

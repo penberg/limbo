@@ -35,6 +35,17 @@ expect {
     10
 }
 
+test generate-series-null-arguments-return-no-rows {
+    SELECT count(*) FROM generate_series(NULL, 3);
+    SELECT count(*) FROM generate_series(1, NULL);
+    SELECT count(*) FROM generate_series(1, 3, NULL);
+}
+expect {
+    0
+    0
+    0
+}
+
 test generate-series-explicit-negative-stop {
     SELECT count(*) FROM generate_series(1, -1);
 }

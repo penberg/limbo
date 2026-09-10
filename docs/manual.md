@@ -1241,7 +1241,9 @@ Each Index Method consists of three traits that work together (for details, see 
 * **`IndexMethodAttachment`** — represents an Index Method instance bound to a specific table. It can create cursors for query execution and defines the metadata needed for integration with the query planner.
 * **`IndexMethodCursor`** — provides methods for accessing and updating data, as well as for managing the underlying storage during `CREATE INDEX` and `DROP INDEX` operations.
 
-While Index Methods can implement arbitrary logic internally, it's generally recommended to use a B-tree as the underlying storage mechanism. To support this, `tursodb` provides a special `backing_btree` Index Method that other Index Methods can use to create auxiliary tables for storing supporting data.
+An Index Method can store its data in any way. We recommend a B-tree, because the engine already versions B-tree rows under MVCC. For this, the `IndexMethodContext` gives the method backing stores that core owns. A `BackingSchema` lists the tables and the indexes that the method owns. A `BackingTable` is a table that core creates. A `BackingIndex` is a `backing_btree` index on a backing table or on any existing table, with the key layout that the method writes through it. `create_backing_schema` and `drop_backing_schema` return an operation. The cursor steps this operation from `create` and `destroy`. `backing_store` takes one `BackingIndex` and returns a `BackingStore` handle. `open_cursor` on the handle gives a cursor over the rows of the store.
+
+Under MVCC, the handle is bound to the current transaction and snapshot. Rows written through the handle are versioned like the rows of any other table, and the method needs no MVCC-specific code. The method never finds the index or its root page itself.
 
 For more details, see [`toy_vector_sparse_ivf`](../core/index_method/toy_vector_sparse_ivf.rs) implementation.
 

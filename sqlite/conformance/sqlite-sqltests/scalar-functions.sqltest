@@ -1,6 +1,31 @@
 @database :default:
 @database :default-no-rowidalias:
 
+test abs-integer-boundaries {
+    SELECT abs(-9223372036854775807), abs(9223372036854775807), abs(0), abs(NULL) IS NULL;
+}
+expect {
+    9223372036854775807|9223372036854775807|0|1
+}
+
+test abs-integer-overflow {
+    SELECT abs(-9223372036854775808);
+}
+expect error {
+    integer overflow
+}
+
+test scalar-result-followed-by-null {
+    WITH t(id, v) AS (VALUES (1, 'ABC'), (2, NULL), (3, 'DEF'))
+    SELECT id, coalesce(lower(v), '-'), coalesce(sign(v), 9),
+           coalesce(length(v), -1) FROM t ORDER BY id;
+}
+expect {
+    1|abc|9|3
+    2|-|9|-1
+    3|def|9|3
+}
+
 test concat-chars {
     select concat('l', 'i');
 }
@@ -1053,6 +1078,23 @@ expect {
 
 test min-int-float {
     select min(1,5.0)
+}
+expect {
+    1
+}
+
+test min-int-equals-float {
+    select min(1, 1.0)
+}
+expect {
+    1.0
+}
+expect @js {
+    1
+}
+
+test min-float-equals-int {
+    select min(1.0, 1)
 }
 expect {
     1

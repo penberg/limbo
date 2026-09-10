@@ -321,6 +321,7 @@ pub(super) fn translate_sequence_function(
             cursor_id,
             pc_if_next: loop_label,
             fullscan: false,
+            is_index: false,
         });
         program.preassign_label_to_next_insn(empty_label);
 

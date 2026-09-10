@@ -629,3 +629,21 @@ test ctas_compound_select_column_names {
 expect {
     CREATE TABLE dst(a INT,b TEXT)
 }
+
+@cross-check-integrity
+test ctas_compound_select_keeps_mixed_value_types {
+    CREATE TABLE source(x REAL);
+    INSERT INTO source VALUES (2.5);
+    CREATE TABLE dst AS
+        SELECT x FROM source
+        UNION ALL
+        SELECT '3.5';
+
+    SELECT name, type FROM pragma_table_info('dst');
+    SELECT quote(x), typeof(x) FROM dst;
+}
+expect {
+    x|
+    2.5|real
+    '3.5'|text
+}

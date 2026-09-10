@@ -26,6 +26,96 @@ The crate is split into a library and binaries. The workload engine lives in
 dhat/RSS measurement. Randomized profiles (`read-heavy`, `mixed`) use a fixed
 RNG seed (`profile::WORKLOAD_RNG_SEED`) so workloads are identical across runs.
 
+## FTS Query Allocations
+
+The `fts-memory` binary and `perf/memory/codspeed/benches/fts_queries.rs` share
+`memory_benchmark::fts`, independently of the existing SQL profile runner.
+See `perf/memory/README.md` for commands, corpus details, and measurement limits.
+
+```bash
+cargo run -p memory-benchmark --features fts --bin fts-memory -- \
+  --query common --state warm --documents 10000 --queries 100 \
+  --dhat-file /tmp/fts-warm.json > /tmp/fts-warm-report.json
+python3 perf/memory/analyze-dhat.py /tmp/fts-warm.json --modules --top 20
+cargo test -p memory-benchmark-codspeed --features fts --bench fts_queries -- --test
+```
+
+Use debug runs for correctness only; use `--profile bench-profile` for optimized
+dhat investigations with debug information and no LTO. Query cases are `rare`,
+`common`, `and`, `or`, `phrase`, and `ranked`. State `first` requires one query
+(the default); `warm` defaults to 100 queries on one persistent connection after
+one unmeasured warm-up. The default corpus has 10000 documents; 1000 and 100000
+are useful local comparison sizes. WAL and one connection remain the defaults.
+
+For full transaction lifecycles, pass `--mode mvcc --connections 2
+--transactions-per-connection 10 --queries-per-transaction 2`. This measures 20
+transactions and 40 queries, including `BEGIN CONCURRENT` and `COMMIT`. WAL uses
+`BEGIN`. Explicit transaction counts conflict with `--queries`; query counts are
+otherwise per connection. All transactions begin before query workers start,
+and all workers finish before commits. Connections persist across rounds.
+One connection covers repeated transactions; two/four cover overlapping snapshots.
+Warm-up runs one complete transaction with one query per connection when explicit
+transactions are selected. Reports include completed transaction/query counts and
+`max_active_transactions`; heap totals aggregate all connections and scheduling.
+
+`FtsWorkload` emits `setup`, `open`, `warmup`, `run`, `cleanup`, and `done` through
+`FtsObserver`. The CLI's `DhatObserver` starts profiling on `run` and stops on
+`cleanup`, before connections are dropped. Each transition emits a JSON phase
+event to stderr, also saved in the final report's `phases` array. stderr includes
+dhat diagnostics; filter phase events with `jq -Rc 'fromjson? | select(.event == "phase")'`.
+Elapsed event times include profiler overhead; check exit status for success.
+`after_batch` samples live heap after a query per connection or after all commits
+in one transaction round. Worker errors are joined before rollback and cleanup.
+
+Setup, database opening, warm-up, and cleanup are excluded. Heap totals, peaks,
+retained bytes, and per-query live-byte samples track query-phase allocations,
+not caches allocated before profiling. RSS after profiling includes dhat's own
+stack/report overhead. JSON goes to stdout and allocation stacks to `--dhat-file`.
+
+The Divan target uses the workspace's CodSpeed-compatible Divan dependency,
+without dhat's allocator, and runs in the `fts-queries` memory CI shard. Build
+with `cargo codspeed build -m memory -p memory-benchmark-codspeed --features codspeed,fts`
+and run with `cargo codspeed run -m memory -p memory-benchmark-codspeed --bench fts_queries`.
+Each query has first/warm variants at 1000 and 10000 documents and extra 10/100-query
+warm variants at 10000 documents. Names encode `(state, documents, queries)`.
+The 24 extra `transactions` cases use 1000 documents, ten transactions per
+connection, and two queries per transaction: WAL/one connection and MVCC/one,
+two, or four connections for all six query cases. Names encode `(mode,
+connections, transactions_per_connection, queries_per_transaction)`. Divan uses
+the same `FtsWorkload::prepare` and `run` methods with a no-op observer.
+Local builds without the `codspeed` feature install Divan's `AllocProfiler` over
+the system allocator. Run `cargo bench --profile bench-profile -p memory-benchmark-codspeed
+--features fts --bench fts_queries -- transactions --sample-count 3 --sample-size 1`
+for local allocation output. Divan counts only its measured threads, not Tokio
+worker threads: multi-connection allocation figures are incomplete. Use the dhat
+CLI for process-wide concurrent totals and peaks. `alloc` counts allocation calls;
+realloc growth is separate under `grow`. `max alloc` is peak live memory for the
+whole measured sequence, not per query.
+The existing Criterion memory profiles and their setup-inclusive metrics are unchanged.
+
+For above-cache investigations, use `--documents 20000 --extra-tokens 1024
+--cache-pages 200 --min-index-bytes 268435456` with the transaction flags above.
+Extra tokens use a fixed seed and do not change query matches. The minimum is
+checked against stored FTS chunk bytes, not corpus or database size. Setup uses
+the core test-helper backing-row reader, then closes inspection connections.
+The JSON `index` reports `segment_bytes`, `segments`, `largest_segment_bytes`,
+`page_size`, and `configured_cache_pages`; `corpus` records the three options.
+An `event: "index"` stderr record reports sizes before measurement or rejection.
+Cache pages must be at least 200; omitted means engine default. Zero extra tokens
+and zero minimum preserve the small corpus. A 256 MiB index exceeds the current
+192 MiB retained-segment budget, but cached searchers can retain segment data and
+live cursors load every visible segment. This is not proof of cache eviction or
+a memory ceiling. Read-only transactions do not exercise the four-searcher limit
+across changing snapshots. Writer arena (64 MiB) and document flush (1000) limits
+apply during setup, outside query profiling. See the README for all caveats.
+The matching Divan case is opt-in: `--features fts-stress --bench fts_queries --
+oversized_index`, with one/two MVCC connections, three transactions, two queries
+per transaction, and one sample. CI builds with `codspeed,fts`, excluding the
+large cases at compile time, and runs the smaller cases in `fts-queries`.
+The large case took about 18 minutes per configuration under CodSpeed; positional
+filters did not isolate Divan cases. Use local Divan or dhat for above-cache runs.
+The build job also runs `cargo test -p memory-benchmark --features fts --locked`.
+
 ## Running Stack Reports
 
 Use this when investigating stack usage from SQL translation/execution probes.

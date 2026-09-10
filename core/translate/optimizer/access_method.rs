@@ -9,7 +9,7 @@ use turso_parser::ast::{self, SortOrder, TableInternalId};
 use crate::alloc::{TursoIteratorExt, TursoTryWithCapacityExt, TursoVecExt};
 use crate::schema::Schema;
 use crate::stats::AnalyzeStats;
-use crate::translate::expr::{as_binary_components, walk_expr, WalkControl};
+use crate::translate::expr::{as_binary_components, comparison_affinity, walk_expr, WalkControl};
 use crate::translate::optimizer::constraints::{
     convert_to_vtab_constraint, expr_uses_custom_collation, ordered_ephemeral_key_columns,
     partial_index, partial_index_predicate_terms, BinaryExprSide, Constraint, ConstraintOperator,
@@ -608,7 +608,7 @@ pub(super) fn choose_best_in_seek_candidate(
                 continue;
             }
 
-            let affinity = if let Some(col_pos) = constraint.table_col_pos {
+            let lhs_affinity = if let Some(col_pos) = constraint.table_col_pos {
                 btree
                     .columns()
                     .get(col_pos)
@@ -617,6 +617,7 @@ pub(super) fn choose_best_in_seek_candidate(
             } else {
                 Affinity::Integer
             };
+            let affinity = comparison_affinity(lhs_affinity, Affinity::None, None, None);
             best_in_seek_cost = in_cost;
             best_in_seek = Some(ChosenInSeekCandidate {
                 index: candidate.index.clone(),

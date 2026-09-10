@@ -15,6 +15,8 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
 
 [features]
 codspeed = []
+fts = ["memory-benchmark/fts"]
+fts-stress = ["fts"]
 
 [dev-dependencies]
 memory-benchmark = { path = ".." }
@@ -22,7 +24,13 @@ tokio = { workspace = true, default-features = true, features = ["full"] }
 criterion = { workspace = true }
 codspeed-criterion-compat = { workspace = true }
 turso_macros = { workspace = true }
+divan = { workspace = true }
 
 [[bench]]
 name = "memory_profiles"
 harness = false
+
+[[bench]]
+name = "fts_queries"
+harness = false
+required-features = ["fts"]
