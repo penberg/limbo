@@ -1,5 +1,56 @@
 @database :memory:
 
+test finalize-mixed-aggregates-across-groups {
+    CREATE TABLE t(g INTEGER, v INTEGER, s TEXT);
+    INSERT INTO t VALUES (1, 2, 'a'), (1, 4, 'a'),
+                         (2, NULL, NULL), (2, NULL, NULL),
+                         (3, 7, 'c'), (4, 9, 'd');
+    SELECT g, count(*), count(v), count(DISTINCT v),
+           coalesce(sum(v), -1), total(v), coalesce(avg(v), -1),
+           coalesce(min(s), '-'), coalesce(max(s), '-'),
+           coalesce(group_concat(s), '-'), count(*) FILTER (WHERE 0)
+    FROM t GROUP BY g ORDER BY g;
+}
+expect {
+    1|2|2|2|6|6.0|3.0|a|a|a,a|0
+    2|2|0|0|-1|0.0|-1|-|-|-|0
+    3|1|1|1|7|7.0|7.0|c|c|c|0
+    4|1|1|1|9|9.0|9.0|d|d|d|0
+}
+expect @js {
+    1|2|2|2|6|6|3|a|a|a,a|0
+    2|2|0|0|-1|0|-1|-|-|-|0
+    3|1|1|1|7|7|7|c|c|c|0
+    4|1|1|1|9|9|9|d|d|d|0
+}
+
+test aggregate-values-preserve-state-across-window-rows {
+    CREATE TABLE t(id INTEGER, g INTEGER, v INTEGER);
+    INSERT INTO t VALUES (1, 1, 2), (2, 1, NULL), (3, 1, 4),
+                         (4, 2, NULL), (5, 2, 7);
+    SELECT id, count(*) OVER w, count(v) OVER w,
+           coalesce(sum(v) OVER w, -1), total(v) OVER w,
+           count(*) FILTER (WHERE 0) OVER w
+    FROM t
+    WINDOW w AS (PARTITION BY g ORDER BY id
+                 ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)
+    ORDER BY id;
+}
+expect {
+    1|1|1|2|2.0|0
+    2|2|1|2|2.0|0
+    3|2|1|4|4.0|0
+    4|1|0|-1|0.0|0
+    5|2|1|7|7.0|0
+}
+expect @js {
+    1|1|1|2|2|0
+    2|2|1|2|2|0
+    3|2|1|4|4|0
+    4|1|0|-1|0|0
+    5|2|1|7|7|0
+}
+
 @cross-check-integrity
 test min-null-regression-test {
     CREATE TABLE t (a);

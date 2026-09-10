@@ -1271,7 +1271,7 @@ impl ProgramState {
 
     /// Whether this statement may finish the implicit autocommit transaction
     /// now, including re-entry while its commit is in progress.
-    #[inline]
+    #[inline(always)]
     /// `self_counted` is true while this statement is still included in
     /// `Connection::n_active_root_statements`. It is false when a statement
     /// that already finished (released on Done or on its step error) is being
@@ -3709,7 +3709,7 @@ pub(crate) fn split_registers(
 
 pub fn registers_to_ref_values<'a>(
     registers: &'a [Register],
-) -> impl ExactSizeIterator<Item = ValueRef<'a>> {
+) -> impl ExactSizeIterator<Item = ValueRef<'a>> + Clone {
     registers.iter().map(|reg| reg.get_value().as_ref())
 }
 

@@ -29,7 +29,7 @@ use crate::storage::sqlite3_ondisk::{DatabaseHeader, PageSize, RawVersion};
 use crate::translate::collate::CollationSeq;
 use crate::types::IOResultOr;
 use crate::types::{
-    compare_immutable, compare_immutable_single, compare_records_generic, AsValueRef, Extendable,
+    compare_immutable, compare_immutable_single, compare_record, AsValueRef, Extendable,
     IOCompletions, IOResult, ImmutableRecord, IndexInfo, SeekResult, Text, ValueIterator,
 };
 use crate::util::{
@@ -6904,15 +6904,11 @@ pub fn op_idx_ge(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            // Create the comparison record from registers
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(
-                idx_record,  // The serialized record from the index
-                values,      // The record built from registers
-                &index_info, // Sort order flags
-                0,
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
                 tie_breaker,
             )?;
 
@@ -6974,10 +6970,13 @@ pub fn op_idx_le(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(idx_record, values, &index_info, 0, tie_breaker)?;
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
+                tie_breaker,
+            )?;
 
             if ord.is_le() {
                 target_pc.as_offset_int()
@@ -7021,10 +7020,13 @@ pub fn op_idx_gt(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(idx_record, values, &index_info, 0, tie_breaker)?;
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
+                tie_breaker,
+            )?;
 
             if ord.is_gt() {
                 target_pc.as_offset_int()
@@ -7068,11 +7070,13 @@ pub fn op_idx_lt(
         let index_info = cursor.get_index_info().clone();
 
         let pc = if let Some(idx_record) = return_if_io!(state, cursor.record()) {
-            let values =
-                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]);
-
             let tie_breaker = get_tie_breaker_from_idx_comp_op(insn);
-            let ord = compare_records_generic(idx_record, values, &index_info, 0, tie_breaker)?;
+            let ord = compare_record(
+                idx_record.get_payload(),
+                registers_to_ref_values(&state.registers[*start_reg..*start_reg + *num_regs]),
+                &index_info,
+                tie_breaker,
+            )?;
 
             if ord.is_lt() {
                 target_pc.as_offset_int()
@@ -8914,6 +8918,28 @@ fn op_agg_step_slow(program: &Program, state: &mut ProgramState, data: &AggStepD
 
     // Initialize aggregate state if not already done
     if let Register::Value(Value::Null) = state.registers[*acc_reg] {
+        // Fast path for the first row of a COUNT group
+        if let AggFunc::Count | AggFunc::Count0 = func {
+            let counts = match (func, &state.registers[*col]) {
+                (AggFunc::Count0, _) => Some(true),
+                (_, Register::Value(Value::Null)) => Some(false),
+                (_, Register::Value(_) | Register::Record(_)) => Some(true),
+                (_, Register::Aggregate(_)) => None,
+            };
+            if let Some(counts) = counts {
+                let mut payload = state
+                    .spare_agg_payloads
+                    .pop()
+                    .unwrap_or_else(|| crate::alloc::vec![]);
+                init_agg_payload(func, &mut payload)?;
+                if counts {
+                    payload[0] = Value::from_i64(1);
+                }
+                state.registers[*acc_reg] = Register::Aggregate(AggContext::Builtin(payload));
+                state.pc += 1;
+                return Ok(InsnFunctionStepResult::Step);
+            }
+        }
         state.registers[*acc_reg] = match func {
             AggFunc::External(ext_func) => match ext_func.as_ref() {
                 ExtFunc::Aggregate {
@@ -9088,24 +9114,28 @@ pub fn op_agg_final(
                     // External aggregates use FFI finalization
                     agg.compute_external()?
                 }
-                AggContext::Builtin(payload) => {
-                    // Built-in aggregates use shared finalization
-                    finalize_agg_payload(func, payload)?
-                }
+                AggContext::Builtin(payload) => match func {
+                    AggFunc::Count | AggFunc::Count0 => {
+                        let [Value::Numeric(Numeric::Integer(count))] = payload.as_slice() else {
+                            unreachable!("COUNT payload must contain one integer");
+                        };
+                        Value::from_i64(*count)
+                    }
+                    _ => finalize_agg_payload(func, payload)?,
+                },
             };
             if acc_reg == dest_reg {
-                // The result will replace the allocator, so we hold on to the allocated Vec so that
-                // another group can reuse the allocation.
                 let accumulator =
-                    std::mem::replace(&mut state.registers[acc_reg], Register::Value(Value::Null));
+                    std::mem::replace(&mut state.registers[acc_reg], Register::Value(value));
                 if let Register::Aggregate(AggContext::Builtin(mut payload)) = accumulator {
                     if state.spare_agg_payloads.len() < SPARE_AGG_PAYLOADS {
                         payload.clear();
                         state.spare_agg_payloads.push(payload);
                     }
                 }
+            } else {
+                state.registers[dest_reg].set_value(value);
             }
-            state.registers[dest_reg].set_value(value);
         }
         Register::Value(Value::Null) => {
             // No row was stepped: write the empty-set default explicitly.
@@ -10196,7 +10226,13 @@ pub fn op_function(
                     ScalarFunc::Soundex => Some(reg_value.exec_soundex()),
                     _ => unreachable!(),
                 };
-                state.registers[*dest].set_value(result.unwrap_or(Value::Null));
+                // this is a `match` instead of `unwrap_or_else` because on the current pinned
+                // toolchain, it compiles to fewer instructions
+                let value = match result {
+                    Some(value) => value,
+                    None => Value::Null,
+                };
+                state.registers[*dest].set_value(value);
             }
             ScalarFunc::Hex => {
                 let reg_value = state.registers[*start_reg].borrow_mut();

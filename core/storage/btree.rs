@@ -2257,6 +2257,7 @@ impl BTreeCursor {
         // read can yield here, and it returns before the range changes, so
         // re-entry retries the same cell. The caller persists the state once
         // per call instead of once per compare.
+        let payload_limits = self.payload_limits;
         while state.min_cell_idx <= state.max_cell_idx {
             let cur_cell_idx = (state.min_cell_idx + state.max_cell_idx) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
             self.stack.set_cell_index(cur_cell_idx as i32);
@@ -2265,7 +2266,7 @@ impl BTreeCursor {
                 .stack
                 .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
+                .cell_read_payload_ptr(cur_cell_idx as usize, payload_limits)?;
 
             let cell_payload: &[u8] = if let Some(next_page) = first_overflow_page {
                 let res = self.process_overflow_read(payload, next_page, payload_size)?;
@@ -2286,7 +2287,6 @@ impl BTreeCursor {
                     self.index_info
                         .as_ref()
                         .expect("indexbtree_move_to: index_info required"),
-                    0,
                     tie_breaker,
                 )?;
 
@@ -2788,6 +2788,7 @@ impl BTreeCursor {
         };
         let iter_dir = seek_op.iteration_direction();
         let eq_seen = state.eq_seen;
+        let payload_limits = self.payload_limits;
         loop {
             let min = state.min_cell_idx;
             let max = state.max_cell_idx;
@@ -2827,7 +2828,7 @@ impl BTreeCursor {
                 .stack
                 .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
+                .cell_read_payload_ptr(cur_cell_idx as usize, payload_limits)?;
 
             let cell_payload: &[u8] = if let Some(next_page) = first_overflow_page {
                 let res = self.process_overflow_read(payload, next_page, payload_size)?;
@@ -2894,7 +2895,7 @@ impl BTreeCursor {
         ) -> Result<(Ordering, bool)> {
             let tie_breaker = get_tie_breaker_from_seek_op(seek_op);
             let cmp =
-                record_comparer.compare_payload(payload, key_values, index_info, 0, tie_breaker)?;
+                record_comparer.compare_payload(payload, key_values, index_info, tie_breaker)?;
 
             let found = match seek_op {
                 SeekOp::GT => cmp.is_gt(),
