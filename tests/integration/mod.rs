@@ -9,7 +9,6 @@ mod custom_types;
 mod database;
 mod expr_depth_stack_overflow;
 mod external_apis;
-mod foreign_keys;
 mod functions;
 mod fuzz_transaction;
 mod index_method;

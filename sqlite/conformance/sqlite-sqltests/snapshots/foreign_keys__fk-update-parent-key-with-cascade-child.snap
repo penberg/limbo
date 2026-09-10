@@ -1,0 +1,88 @@
+---
+source: foreign_keys.sqltest
+expression: UPDATE parent SET k = k + 1 WHERE id = 1;
+info:
+  statement_type: UPDATE
+  tables:
+  - parent
+  setup_blocks:
+  - fk_bytecode_cascade_child
+  database: ':memory:'
+---
+QUERY PLAN
+`--SEARCH parent USING INTEGER PRIMARY KEY (rowid=?)
+
+BYTECODE
+addr  opcode             p1  p2  p3  p4                 p5  comment
+   0  Init                0  43   0                      0  Start at 43
+   1  OpenEphemeral       0   1   0                      0  cursor=0 is_table=true
+   2  OpenRead            1   2   0  k(3,B,B,B)          0  table=parent, root=2, iDb=0
+   3    SeekRowid         1   2   7                      0  if (r[2]!=cursor 1 for table parent.rowid) goto 7
+   4    RowId             1   1   0                      0  r[1]=parent.rowid
+   5    MakeRecord        1   1   3                      0  r[3]=mkrec(r[1..1]); for ephemeral_scratch
+   6    Insert            0   3   1  ephemeral_scratch   6  intkey=r[1] data=r[3]
+   7    OpenWrite         1   2   0                      0  root=2; iDb=0
+   8    OpenWrite         2   3   0                      0  root=3; iDb=0
+   9    Rewind            0  42   0                      0  Rewind table ephemeral(ephemeral_scratch)
+  10      RowId           0   5   0                      0  r[5]=ephemeral(ephemeral_scratch).rowid
+  11      NotExists       1  41   5                      0
+  12      Null            0   6   0                      0  r[6]=NULL
+  13      Column          1   1   9                      0  r[9]=parent.k
+  14      Add             9  10   7                      0  r[7]=r[9]+r[10]
+  15      Column          1   2   8                      0  r[8]=parent.v
+  16      Affinity        6   3   0                      0  r[6..9] = D, D, D
+  17      RowId           1  11   0                      0  r[11]=parent.rowid
+  18      ColumnRange     1   1  12  2                   0  r[12..13]=parent.k..v
+  19      Copy            5   6   0                      0  r[6]=r[5]
+  20      Copy            7  14   0                      0  r[14]=r[7]
+  21      Copy            5  15   0                      0  r[15]=r[5]
+  22      Affinity       14   1   0                      0  r[14..15] = D
+  23      MakeRecord     14   2   4                      0  r[4]=mkrec(r[14..15]); for sqlite_autoindex_parent_1
+  24      NoConflict      2  28  14  1                   0  key=r[14..14]
+  25      IdxRowId        2  16   0                      0  r[16]=cursor 2.rowid
+  26      Eq              5  16  28  Binary              0  if r[5]==r[16] goto 28
+  27      Halt         2067   0   0  parent.k            0
+  28      Column          1   1  17                      0  r[17]=parent.k
+  29      RowId           1  18   0                      0  r[18]=parent.rowid
+  30      IdxDelete       2  17   2                      1
+  31      IdxInsert       2   4  14                      2  key=r[4]
+  32      MakeRecord      6   3  19                      0  r[19]=mkrec(r[6..8])
+  33      NotExists       1  41   5                      0
+  34      Delete          1   0   0  parent              0
+  35      Insert          1  19   5  parent             11  intkey=r[5] data=r[19]
+  36      Copy           12  20   0                      0  r[20]=r[12]
+  37      Copy            7  21   0                      0  r[21]=r[7]
+  38      Eq             20  21  41                      0  if r[20]==r[21] goto 41
+  39      Goto            0  40   0                      0
+  40      Program        20  41   2  fk cascade update   0  subprogram=fk cascade update
+  41    Next              0  10   0                      1
+  42    Halt              0   0   0                      0
+  43    Transaction       0   2   2                      0  iDb=0 tx_mode=Write
+  44    Integer           1   2   0                      0  r[2]=1
+  45    Integer           1  10   0                      0  r[10]=1
+  46    Goto              0   1   0                      0
+   0    Init              0   1   0                      0  Start at 1
+   1    OpenWrite         0   4   0                      0  root=4; iDb=0
+   2    Rewind            0  24   0                      0  Rewind table child
+   3    Column            0   1   2                      0  r[2]=child.pk
+   4    Variable          1   3   0                      0  r[3]=parameter(1)
+   5    Ne                2   3  23  Binary              0  if r[2]!=r[3] goto 23
+   6    RowId             0   4   0                      0  r[4]=child.rowid
+   7    IsNull            4  24   0                      0  if (r[4]==NULL) goto 24
+   8    Null              0   5   0                      0  r[5]=NULL
+   9    Variable          2   6   0                      0  r[6]=parameter(2)
+  10    Affinity          5   2   0                      0  r[5..7] = D, D
+  11    Copy              4   5   0                      0  r[5]=r[4]
+  12    IsNull            6  21   0                      0  if (r[6]==NULL) goto 21
+  13    OpenRead          1   3   0  k(2,B)              0  =sqlite_autoindex_parent_1, root=3, iDb=0
+  14    Copy              6   7   0                      0  r[7]=r[6]
+  15    Affinity          7   1   0                      0  r[7..8] = D
+  16    Found             1  19   7                      0  if found goto 19
+  17    FkCounter         1   0   0                      0
+  18    Goto              0  19   0                      0
+  19    Close             1   0   0                      0
+  20    Goto              0  21   0                      0
+  21    MakeRecord        5   2   8                      0  r[8]=mkrec(r[5..6])
+  22    Insert            0   8   4  child               8  intkey=r[4] data=r[8]
+  23  Next                0   3   0                      1
+  24  Halt                0   0   0  fk action           0

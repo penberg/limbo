@@ -1,0 +1,70 @@
+---
+source: foreign_keys.sqltest
+expression: UPDATE parent SET k = k + 1 WHERE id = 1;
+info:
+  statement_type: UPDATE
+  tables:
+  - parent
+  setup_blocks:
+  - fk_bytecode_no_action_child
+  database: ':memory:'
+---
+QUERY PLAN
+`--SEARCH parent USING INTEGER PRIMARY KEY (rowid=?)
+
+BYTECODE
+addr  opcode         p1  p2  p3  p4        p5  comment
+   0  Init            0  50   0             0  Start at 50
+   1  OpenWrite       0   2   0             0  root=2; iDb=0
+   2  OpenWrite       1   3   0             0  root=3; iDb=0
+   3  SeekRowid       0   2  49             0  if (r[2]!=cursor 0 for table parent.rowid) goto 49
+   4  RowId           0   3   0             0  r[3]=parent.rowid
+   5  IsNull          3  49   0             0  if (r[3]==NULL) goto 49
+   6  Null            0   4   0             0  r[4]=NULL
+   7  Column          0   1   7             0  r[7]=parent.k
+   8  Add             7   8   5             0  r[5]=r[7]+r[8]
+   9  Column          0   2   6             0  r[6]=parent.v
+  10  Affinity        4   3   0             0  r[4..7] = D, D, D
+  11  Copy            3   4   0             0  r[4]=r[3]
+  12  Copy            5   9   0             0  r[9]=r[5]
+  13  Copy            3  10   0             0  r[10]=r[3]
+  14  Affinity        9   1   0             0  r[9..10] = D
+  15  MakeRecord      9   2   1             0  r[1]=mkrec(r[9..10]); for sqlite_autoindex_parent_1
+  16  NoConflict      1  20   9  1          0  key=r[9..9]
+  17  IdxRowId        1  11   0             0  r[11]=cursor 1.rowid
+  18  Eq              3  11  20  Binary     0  if r[3]==r[11] goto 20
+  19  Halt         2067   0   0  parent.k   0
+  20  Column          0   1  12             0  r[12]=parent.k
+  21  Copy            5  13   0             0  r[13]=r[5]
+  22  Eq             12  13  43             0  if r[12]==r[13] goto 43
+  23  Goto            0  24   0             0
+  24  IsNull         12  34   0             0  if (r[12]==NULL) goto 34
+  25  OpenRead        2   4   0  k(2,B,B)   0  =child, root=4, iDb=0
+  26  Rewind          2  33   0             0  Rewind  child
+  27    Column        2   1  14             0  r[14]=child.pk
+  28    IsNull       14  32   0             0  if (r[14]==NULL) goto 32
+  29    Eq           14  12  31  Binary     0  if r[14]==r[12] goto 31
+  30    Goto          0  32   0             0
+  31    FkCounter     1   0   0             0
+  32  Next            2  27   0             0
+  33  Close           2   0   0             0
+  34  IsNull         13  43   0             0  if (r[13]==NULL) goto 43
+  35  OpenRead        3   4   0  k(2,B,B)   0  =child, root=4, iDb=0
+  36  Rewind          3  42   0             0  Rewind  child
+  37    Column        3   1  15             0  r[15]=child.pk
+  38    IsNull       15  41   0             0  if (r[15]==NULL) goto 41
+  39    Eq           15  13  41  Binary     0  if r[15]==r[13] goto 41
+  40    Goto          0  41   0             0
+  41  Next            3  37   0             0
+  42  Close           3   0   0             0
+  43  Column          0   1  16             0  r[16]=parent.k
+  44  RowId           0  17   0             0  r[17]=parent.rowid
+  45  IdxDelete       1  16   2             1
+  46  IdxInsert       1   1   9             2  key=r[1]
+  47  MakeRecord      4   3  18             0  r[18]=mkrec(r[4..6])
+  48  Insert          0  18   3  parent     8  intkey=r[3] data=r[18]
+  49  Halt            0   0   0             0
+  50  Transaction     0   2   2             0  iDb=0 tx_mode=Write
+  51  Integer         1   2   0             0  r[2]=1
+  52  Integer         1   8   0             0  r[8]=1
+  53  Goto            0   1   0             0
