@@ -11,8 +11,9 @@ Performance comparison of Turso vs SQLite using the [TPC-H](http://www.tpc.org/t
 That builds `tursodb` in release mode, installs a local `sqlite3`,
 downloads the 1.2 GB TPC-H database if it is not there yet, times every
 query on both engines with the page cache dropped before each one, five
-passes over all the queries, and draws the figure. It takes about half an
-hour and asks for sudo once. You need Rust, `uv` for the plot, and `wget`
+passes over all the queries, and draws the figure. `tursodb` runs with
+the io_uring backend, since the CLI defaults to plain syscalls. It takes
+about half an hour and asks for sudo once. You need Rust, `uv` for the plot, and `wget`
 or `curl` for the download. `REPEATS=1 ./scripts/run.sh` makes one pass
 for a quick look.
 

@@ -65,7 +65,7 @@ run_query_with_limbo() {
     local query_file=$1
     local query_sql
     query_sql=$(load_query_sql "$query_file")
-    RUST_LOG=off run_timed "$LIMBO_BIN" "$DB_FILE" --quiet --output-mode list -- "$query_sql"
+    RUST_LOG=off run_timed "$LIMBO_BIN" "$DB_FILE" --vfs io_uring --quiet --output-mode list -- "$query_sql"
 }
 
 run_query_with_sqlite() {
