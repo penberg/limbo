@@ -88,9 +88,7 @@ pub(super) fn translate_in_list(
                     target_pc: condition_metadata.jump_target_when_null,
                 });
             }
-        }
-
-        if false_null_jump_targets_differ {
+        } else {
             check_null_in_row_values_reg = program.alloc_register();
             program.emit_insn(Insn::Integer {
                 dest: check_null_in_row_values_reg,
