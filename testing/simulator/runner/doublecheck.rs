@@ -95,8 +95,7 @@ pub(crate) fn execute_plans(
     env.clear_tables();
     doublecheck_env.clear_tables();
 
-    // Generate from the comparison environment so mode-gated interactions,
-    // such as simulated power loss, cannot leak in through the Default clone.
+    // Use the doublecheck environment so we don't generate unsupported power-loss operations.
     let mut interaction = plan
         .next(&mut doublecheck_env)
         .expect("we should always have at least 1 interaction to start");

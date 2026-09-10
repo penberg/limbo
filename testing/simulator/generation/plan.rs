@@ -60,16 +60,16 @@ impl InteractionPlan {
         }
 
         let num_interactions = env.opts.max_interactions as usize;
-        // After a fault or injected query, an empty expected schema still matters:
-        // it proves that the last table stayed dropped. Ordinary DML checks name
-        // one table, so those still require a non-empty schema.
         if let Some(i) = self.last_interactions()
             && i.check_tables()
-            && (!env
-                .connection_context(i.connection_index)
-                .tables()
-                .is_empty()
-                || !matches!(&i.interactions, InteractionsType::Query(_)))
+            && (
+                // no need to assert expected state if there are no tables
+                // and the last interaction was a query
+                !env.connection_context(i.connection_index)
+                    .tables()
+                    .is_empty()
+                    || !matches!(&i.interactions, InteractionsType::Query(_))
+            )
         {
             let interactions = if let InteractionsType::Query(query) = &i.interactions {
                 assert!(query.is_dml());
