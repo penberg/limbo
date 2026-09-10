@@ -5257,11 +5257,11 @@ mod tests {
 
     /// `read_wal_salt` is the first read `checkpoint()` performs, and it is
     /// written for a WAL file that may be shorter than one header: a short
-    /// read means "no salt". `SparseLinuxIo` (used only by partial sync)
-    /// returns `UnexpectedEof` instead of a short read, so the same empty
-    /// WAL file that full sync reads as "no salt" makes partial sync fail.
+    /// read means "no salt". Every IO backend must report that short read
+    /// rather than an error, otherwise partial sync (the only user of
+    /// `SparseLinuxIo`) cannot checkpoint an empty WAL.
     #[test]
-    fn read_wal_salt_of_empty_wal_file_diverges_between_platform_and_sparse_io() {
+    fn read_wal_salt_of_empty_wal_file_is_none_on_every_io() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let wal_path = temp_dir
             .path()
@@ -5274,10 +5274,7 @@ mod tests {
         let sparse_io: Arc<dyn turso_core::IO> =
             Arc::new(crate::sparse_io::SparseLinuxIo::new().unwrap());
 
-        for (name, io, expect_error) in [
-            ("PlatformIO", platform_io, false),
-            ("SparseLinuxIo", sparse_io, true),
-        ] {
+        for (name, io) in [("PlatformIO", platform_io), ("SparseLinuxIo", sparse_io)] {
             let mut gen = genawaiter::sync::Gen::new({
                 let io = io.clone();
                 let wal_path = wal_path.clone();
@@ -5293,22 +5290,7 @@ mod tests {
                     genawaiter::GeneratorState::Complete(result) => break result,
                 }
             };
-            if expect_error {
-                assert!(
-                    matches!(
-                        result,
-                        Err(Error::TursoError(turso_core::LimboError::CompletionError(
-                            turso_core::CompletionError::IOError(
-                                std::io::ErrorKind::UnexpectedEof,
-                                "pread"
-                            )
-                        )))
-                    ),
-                    "{name}: {result:?}"
-                );
-            } else {
-                assert!(matches!(result, Ok(None)), "{name}: {result:?}");
-            }
+            assert!(matches!(result, Ok(None)), "{name}: {result:?}");
         }
     }
 }
