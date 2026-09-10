@@ -1,0 +1,43 @@
+@database :memory:
+
+test upsert-target-alias-shadows-excluded {
+    CREATE TABLE t(k INT PRIMARY KEY, n INT);
+    INSERT INTO t VALUES(1,10);
+    INSERT INTO t AS excluded VALUES(1,99)
+        ON CONFLICT(k) DO UPDATE SET n = excluded.n;
+    SELECT n FROM t;
+}
+expect {
+    10
+}
+
+test upsert-target-alias-is-only-target-name {
+    CREATE TABLE t(k INT PRIMARY KEY, n INT);
+    INSERT INTO t VALUES(1,10);
+    INSERT INTO t AS x VALUES(1,7)
+        ON CONFLICT(k) DO UPDATE SET n = x.n + 1;
+    SELECT n FROM t;
+}
+expect {
+    11
+}
+
+test upsert-base-name-is-out-of-scope-when-aliased {
+    CREATE TABLE t(k INT PRIMARY KEY, n INT);
+    INSERT INTO t VALUES(1,10);
+    INSERT INTO t AS x VALUES(1,7)
+        ON CONFLICT(k) DO UPDATE SET n = t.n + 1;
+}
+expect error {
+    no such column
+}
+
+test plain-update-target-alias-still-works {
+    CREATE TABLE t(k INT PRIMARY KEY, n INT);
+    INSERT INTO t VALUES(1,10);
+    UPDATE t AS x SET n = x.n + 1;
+    SELECT n FROM t;
+}
+expect {
+    11
+}

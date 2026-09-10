@@ -755,7 +755,7 @@ set test_files {
   upfrom4              fail
   upsert1              fail
   upsert2              fail
-  upsert3              fail
+  upsert3              pass
   upsert4              fail
   upsert5              fail
   uri                  fail

@@ -1175,6 +1175,7 @@ pub fn translate_insert(
             &mut result_columns,
             connection,
             &mut table_references,
+            tbl_name.alias.as_ref().map(|alias| alias.as_str()),
         )?;
     }
 
@@ -1589,6 +1590,7 @@ fn resolve_upserts(
     result_columns: &mut [ResultSetColumn],
     connection: &Arc<crate::Connection>,
     table_references: &mut TableReferences,
+    table_alias: Option<&str>,
 ) -> Result<()> {
     for (_, label, upsert) in upsert_actions {
         program.preassign_label_to_next_insn(*label);
@@ -1612,6 +1614,7 @@ fn resolve_upserts(
                 result_columns,
                 connection,
                 table_references,
+                table_alias,
             )?;
         } else {
             // UpsertDo::Nothing case
