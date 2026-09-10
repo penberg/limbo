@@ -3258,8 +3258,8 @@ mod tests {
         },
         database_sync_engine_io::{DataCompletion, DataPollResult, SyncEngineIo},
         database_sync_operations::{
-            count_local_changes, max_local_change_id, read_last_change_id, update_last_change_id,
-            MutexSlot, PullUpdatesV1Result, SyncEngineIoStats,
+            count_local_changes, max_local_change_id, read_last_change_id, read_wal_salt,
+            update_last_change_id, MutexSlot, PullUpdatesV1Result, SyncEngineIoStats,
         },
         database_tape::{run_stmt_once, DatabaseTape, DatabaseTapeOpts},
         errors::Error,
@@ -3271,7 +3271,8 @@ mod tests {
         types::{
             Coro, DatabaseMetadata, DatabasePullRevision, DatabaseSavedConfiguration,
             DatabaseSyncEngineProtocolVersion, DbChangesStatus, DbChangesStreamKind,
-            PartialSyncOpts, RemotePullProtocol, SyncEngineIoResult, DATABASE_METADATA_VERSION,
+            PartialBootstrapStrategy, PartialSyncOpts, RemotePullProtocol, SyncEngineIoResult,
+            DATABASE_METADATA_VERSION,
         },
         Result,
     };
@@ -5118,6 +5119,195 @@ mod tests {
             match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.step().unwrap(),
                 genawaiter::GeneratorState::Complete(result) => break result.unwrap(),
+            }
+        }
+    }
+    /// Bootstraps a replica from a canned page stream, makes one local write,
+    /// then checkpoints twice: the first checkpoint folds the WAL frames and
+    /// truncates the WAL file to zero, the second one runs with an empty WAL.
+    fn bootstrap_and_checkpoint_twice(
+        io: Arc<dyn turso_core::IO>,
+        partial_sync_opts: Option<PartialSyncOpts>,
+        db_name: &str,
+    ) -> Result<()> {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let main_path = temp_dir.path().join(db_name).to_string_lossy().to_string();
+        let remote_path = temp_dir
+            .path()
+            .join("remote.db")
+            .to_string_lossy()
+            .to_string();
+
+        let platform_io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
+        let remote_db = turso_core::Database::open_file(
+            platform_io.clone(),
+            &remote_path,
+            Arc::new(SqliteDialect),
+        )
+        .unwrap();
+        let remote_conn = remote_db.connect().unwrap();
+        remote_conn
+            .execute("CREATE TABLE items(id INTEGER PRIMARY KEY, value TEXT)")
+            .unwrap();
+        remote_conn
+            .execute("INSERT INTO items VALUES (1, 'remote-a')")
+            .unwrap();
+        let remote_wal_state = remote_conn.wal_state().unwrap();
+        remote_conn
+            .checkpoint(turso_core::CheckpointMode::Truncate {
+                upper_bound_inclusive: Some(remote_wal_state.max_frame),
+            })
+            .unwrap();
+        drop(remote_conn);
+        drop(remote_db);
+        let remote_bytes = std::fs::read(&remote_path).unwrap();
+        assert!(!remote_bytes.is_empty());
+
+        let bootstrap_response =
+            encoded_page_stream_response(&remote_bytes, "g1:o0", PullUpdatesProtocol::Pages);
+        let sync_io = Arc::new(QueuedSyncEngineIo {
+            responses: Mutex::new(vec![bootstrap_response].into_iter().collect()),
+            requests: Mutex::new(Vec::new()),
+        });
+        let sync_engine_io = SyncEngineIoStats::new(sync_io);
+
+        let mut opts = default_test_opts();
+        opts.remote_url = Some("https://example.com".to_string());
+        opts.bootstrap_if_empty = true;
+        opts.logical_mvcc_pull = Some(false);
+        opts.partial_sync_opts = partial_sync_opts;
+
+        let main_wal_path = create_main_db_wal_path(&main_path);
+        let mut gen = genawaiter::sync::Gen::new({
+            let io = io.clone();
+            move |coro| async move {
+                let coro: Coro<()> = coro.into();
+                let engine = DatabaseSyncEngine::create_db(
+                    &coro,
+                    io.clone(),
+                    sync_engine_io.clone(),
+                    &main_path,
+                    opts,
+                )
+                .await?;
+
+                let conn = engine.connect_rw(&coro).await?;
+                conn.execute("INSERT INTO items VALUES (2, 'local-b')")?;
+                drop(conn);
+
+                assert!(
+                    std::fs::metadata(&main_wal_path).unwrap().len() > 0,
+                    "local write must leave frames in the main WAL"
+                );
+                engine.checkpoint(&coro).await?;
+                assert_eq!(
+                    std::fs::metadata(&main_wal_path).unwrap().len(),
+                    0,
+                    "TRUNCATE checkpoint must leave an empty main WAL file"
+                );
+
+                engine.checkpoint(&coro).await
+            }
+        });
+
+        loop {
+            match gen.resume_with(Ok(())) {
+                genawaiter::GeneratorState::Yielded(..) => io.step().unwrap(),
+                genawaiter::GeneratorState::Complete(result) => break result,
+            }
+        }
+    }
+
+    /// Reported bug: on a partial-sync database `checkpoint()` succeeds while
+    /// the main WAL holds frames, and then fails with
+    /// `I/O error (pread): unexpected end of file` on every checkpoint that
+    /// runs while the WAL is empty.
+    #[test]
+    fn partial_sync_checkpoint_succeeds_when_main_wal_is_empty() {
+        let io: Arc<dyn turso_core::IO> = Arc::new(crate::sparse_io::SparseLinuxIo::new().unwrap());
+        // A prefix covering the whole remote database leaves no holes, so the
+        // failure does not depend on any page being unmaterialized.
+        let result = bootstrap_and_checkpoint_twice(
+            io,
+            Some(PartialSyncOpts {
+                bootstrap_strategy: Some(PartialBootstrapStrategy::Prefix {
+                    length: usize::MAX / 2,
+                }),
+                segment_size: 128 * 1024,
+                prefetch: false,
+            }),
+            "partial.db",
+        );
+        assert!(
+            result.is_ok(),
+            "checkpoint on an empty WAL must not fail: {:?}",
+            result.err()
+        );
+    }
+
+    /// Control for [`partial_sync_checkpoint_succeeds_when_main_wal_is_empty`]:
+    /// the very same sequence over a full-sync replica never fails, because
+    /// `PlatformIO` reports a short read where `SparseLinuxIo` errors out.
+    #[test]
+    fn full_sync_checkpoint_succeeds_when_main_wal_is_empty() {
+        let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
+        let result = bootstrap_and_checkpoint_twice(io, None, "full.db");
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    /// `read_wal_salt` is the first read `checkpoint()` performs, and it is
+    /// written for a WAL file that may be shorter than one header: a short
+    /// read means "no salt". `SparseLinuxIo` (used only by partial sync)
+    /// returns `UnexpectedEof` instead of a short read, so the same empty
+    /// WAL file that full sync reads as "no salt" makes partial sync fail.
+    #[test]
+    fn read_wal_salt_of_empty_wal_file_diverges_between_platform_and_sparse_io() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let wal_path = temp_dir
+            .path()
+            .join("empty.db-wal")
+            .to_string_lossy()
+            .to_string();
+        std::fs::write(&wal_path, []).unwrap();
+
+        let platform_io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
+        let sparse_io: Arc<dyn turso_core::IO> =
+            Arc::new(crate::sparse_io::SparseLinuxIo::new().unwrap());
+
+        for (name, io, expect_error) in [
+            ("PlatformIO", platform_io, false),
+            ("SparseLinuxIo", sparse_io, true),
+        ] {
+            let mut gen = genawaiter::sync::Gen::new({
+                let io = io.clone();
+                let wal_path = wal_path.clone();
+                move |coro| async move {
+                    let coro: Coro<()> = coro.into();
+                    let wal = io.try_open(&wal_path)?.expect("wal file exists");
+                    read_wal_salt(&coro, &wal).await
+                }
+            });
+            let result = loop {
+                match gen.resume_with(Ok(())) {
+                    genawaiter::GeneratorState::Yielded(..) => io.step().unwrap(),
+                    genawaiter::GeneratorState::Complete(result) => break result,
+                }
+            };
+            if expect_error {
+                assert!(
+                    matches!(
+                        result,
+                        Err(Error::TursoError(turso_core::LimboError::CompletionError(
+                            turso_core::CompletionError::IOError(
+                                std::io::ErrorKind::UnexpectedEof,
+                                "pread"
+                            )
+                        )))
+                    ),
+                    "{name}: {result:?}"
+                );
+            } else {
+                assert!(matches!(result, Ok(None)), "{name}: {result:?}");
             }
         }
     }
