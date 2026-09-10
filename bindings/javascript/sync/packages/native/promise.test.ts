@@ -445,6 +445,35 @@ test('select-after-push', async ({ server }) => {
     }
 })
 
+test('cdc-operations-count', async ({ server }) => {
+    const db = await connect({ path: ':memory:', url: server.dbUrl() });
+    const cdcOperations = async () => (await db.stats()).cdcOperations;
+
+    await db.exec("CREATE TABLE t(x)");
+    expect(await cdcOperations()).toBe(1);
+
+    await db.exec("INSERT INTO t VALUES (1)");
+    expect(await cdcOperations()).toBe(2);
+
+    await db.exec("INSERT INTO t VALUES (2), (3)");
+    expect(await cdcOperations()).toBe(4);
+
+    await db.push();
+    expect(await cdcOperations()).toBe(0);
+
+    // pull writes the sync high-water mark into the internal
+    // turso_sync_last_change_id table, which push never sends
+    await db.pull();
+    expect(await cdcOperations()).toBe(0);
+
+    await db.exec("UPDATE t SET x = 10 WHERE x = 1");
+    await db.exec("DELETE FROM t WHERE x = 2");
+    expect(await cdcOperations()).toBe(2);
+
+    await db.push();
+    expect(await cdcOperations()).toBe(0);
+})
+
 test('select-without-push', async ({ server }) => {
     {
         const db = await connect({ path: ':memory:', url: server.dbUrl() });
