@@ -132,3 +132,12 @@ test simple-count-correlated-outer-join-null-extension {
 expect {
     0
 }
+
+test simple-count-regexp-invalid-pattern-correctness {
+    CREATE TABLE t(x TEXT NOT NULL);
+    INSERT INTO t VALUES ('a'),('b');
+    SELECT count(x REGEXP '(') FROM t;
+}
+expect {
+    0
+}

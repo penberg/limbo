@@ -3465,6 +3465,10 @@ impl Optimizable for ast::Expr {
             Expr::InTable { .. } => false,
             Expr::IsNull(..) => true,
             Expr::Like {
+                op: ast::LikeOperator::Regexp,
+                ..
+            } => false,
+            Expr::Like {
                 lhs, rhs, escape, ..
             } => {
                 lhs.is_nonnull(tables)
