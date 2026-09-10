@@ -253,3 +253,38 @@ test row-value-false-null-check-matches-after-null-in {
 expect {
     1
 }
+
+test row-value-null-in-lhs-resolves-to-false-on-mismatch-after-in {
+    SELECT (NULL,1) IN ((2,2)) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-lhs-resolves-to-true-on-mismatch-after-not-in {
+    SELECT (NULL,1) NOT IN ((2,2)) IS TRUE;
+}
+expect {
+    1
+}
+
+test row-value-mismatch-in-lhs-resolves-to-false-on-null-after-in {
+    SELECT (1,NULL) IN ((2,2)) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-lhs-resolves-to-false-on-mismatch-after-multiple-rhs-in {
+    SELECT (NULL,1) IN ((2,2),(3,3)) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-both-lhs-rhs-in {
+    SELECT (NULL,1) IN ((NULL,2)) IS FALSE;
+}
+expect {
+    1
+}

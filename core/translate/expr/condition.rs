@@ -80,11 +80,14 @@ pub(super) fn translate_in_list(
         });
     } else if lhs_arity > 1 {
         // Checking for NULL values in LHS so we can resolve to NULL early if found.
-        for j in 0..lhs_arity {
-            program.emit_insn(Insn::IsNull {
-                reg: lhs_reg + j,
-                target_pc: condition_metadata.jump_target_when_null,
-            });
+        // We can only early-jump if the expression can treat FALSE and NULL values the same.
+        if !false_null_jump_targets_differ {
+            for j in 0..lhs_arity {
+                program.emit_insn(Insn::IsNull {
+                    reg: lhs_reg + j,
+                    target_pc: condition_metadata.jump_target_when_null,
+                });
+            }
         }
 
         if false_null_jump_targets_differ {
@@ -177,6 +180,13 @@ pub(super) fn translate_in_list(
                     skip_label
                 };
                 for j in 0..lhs_arity {
+                    // keep this explicit so NULL checks are not unnecessarily emitted
+                    if false_null_jump_targets_differ {
+                        program.emit_insn(Insn::IsNull {
+                            reg: lhs_reg + j,
+                            target_pc: null_target_label,
+                        })
+                    }
                     program.emit_insn(Insn::IsNull {
                         reg: rhs_reg + j,
                         target_pc: null_target_label,
