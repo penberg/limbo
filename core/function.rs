@@ -423,7 +423,9 @@ impl Display for FtsFunc {
 #[derive(Debug, Clone, strum::EnumIter)]
 pub enum AggFunc {
     Avg,
+    /// COUNT(expr)
     Count,
+    /// COUNT(*) or COUNT()
     Count0,
     GroupConcat,
     Max,
