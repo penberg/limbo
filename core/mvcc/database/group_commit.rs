@@ -70,7 +70,7 @@ impl CommitCoordinator {
     pub(crate) fn new() -> Self {
         Self {
             pager_commit_lock: Arc::new(TursoRwLock::new()),
-            group_commit_enabled: AtomicBool::new(false),
+            group_commit_enabled: AtomicBool::new(true),
             group: Mutex::new(GroupState {
                 next_ticket: 0,
                 durable_through: 0,

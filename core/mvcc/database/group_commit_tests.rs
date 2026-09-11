@@ -27,22 +27,22 @@ fn exec_retry(conn: &Arc<Connection>, sql: &str) -> Result<(), LimboError> {
 }
 
 #[test]
-fn group_commit_pragma_defaults_off_and_round_trips() {
+fn group_commit_pragma_defaults_on_and_round_trips() {
     let db = MvccTestDbNoConn::new_with_random_db();
     let conn = db.connect();
 
-    assert_eq!(pragma_int(&conn, "PRAGMA mvcc_group_commit"), 0);
+    assert_eq!(pragma_int(&conn, "PRAGMA mvcc_group_commit"), 1);
 
-    for on in ["yes", "on", "true", "1"] {
-        conn.execute(format!("PRAGMA mvcc_group_commit = {on}"))
+    for off in ["no", "off", "false", "0"] {
+        conn.execute(format!("PRAGMA mvcc_group_commit = {off}"))
             .unwrap();
         assert_eq!(
             pragma_int(&conn, "PRAGMA mvcc_group_commit"),
-            1,
-            "`= {on}` should enable group commit"
+            0,
+            "`= {off}` should disable group commit"
         );
-        conn.execute("PRAGMA mvcc_group_commit = off").unwrap();
-        assert_eq!(pragma_int(&conn, "PRAGMA mvcc_group_commit"), 0);
+        conn.execute("PRAGMA mvcc_group_commit = on").unwrap();
+        assert_eq!(pragma_int(&conn, "PRAGMA mvcc_group_commit"), 1);
     }
 }
 
