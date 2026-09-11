@@ -161,3 +161,130 @@ expect {
     m5|-1
     m6|-1
 }
+
+setup row_values_with_null_schema {
+    CREATE TABLE w(a, b);
+    INSERT INTO w VALUES (NULL,1),(1,1),(2,NULL),(2,2);
+}
+
+@setup row_values_with_null_schema
+test row-value-filter-nulls-literal-list-in {
+    SELECT a, b FROM w WHERE (a,b) IN ((1,1),(2,2)) ORDER BY 1,2;
+}
+expect {
+    1|1
+    2|2
+}
+
+@setup row_values_with_null_schema
+test row-value-filter-nulls-literal-list-not-in {
+    SELECT a, b FROM w WHERE (a,b) NOT IN ((1,1),(2,2)) ORDER BY 1,2;
+}
+expect {
+}
+
+@setup row_values_with_null_schema
+test row-value-filter-nulls-literal-list-containing-null-in {
+    SELECT a, b FROM w WHERE (a,b) IN ((2,NULL),(2,2)) ORDER BY 1,2;
+}
+expect {
+    2|2
+}
+
+test row-value-false-null-first-in {
+    SELECT ((NULL,1) IN ((1,1))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-second-in {
+    SELECT ((2,NULL) IN ((2,2))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-second-not-in {
+    SELECT ((2,NULL) NOT IN ((2,2))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-three-values-in {
+    SELECT ((1,NULL,3) IN ((1,2,3))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-multiple-tuples-in {
+    SELECT ((NULL,1) IN ((1,1),(9,9))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-multiple-tuples-with-null-in {
+   SELECT ((2,2) IN ((2,NULL),(9,9))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-multiple-tuples-with-null-not-in {
+   SELECT ((2,2) NOT IN ((2,NULL),(9,9))) IS NULL;
+}
+expect {
+    1
+}
+
+test row-value-false-null-check-inequality-after-null-in {
+   SELECT ((1,2,3) IN ((1,NULL,9))) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-false-null-check-matches-after-null-in {
+   SELECT ((2,2) IN ((2,NULL),(2,2))) IS TRUE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-lhs-resolves-to-false-on-mismatch-after-in {
+    SELECT (NULL,1) IN ((2,2)) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-lhs-resolves-to-true-on-mismatch-after-not-in {
+    SELECT (NULL,1) NOT IN ((2,2)) IS TRUE;
+}
+expect {
+    1
+}
+
+test row-value-mismatch-in-lhs-resolves-to-false-on-null-after-in {
+    SELECT (1,NULL) IN ((2,2)) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-lhs-resolves-to-false-on-mismatch-after-multiple-rhs-in {
+    SELECT (NULL,1) IN ((2,2),(3,3)) IS FALSE;
+}
+expect {
+    1
+}
+
+test row-value-null-in-both-lhs-rhs-in {
+    SELECT (NULL,1) IN ((NULL,2)) IS FALSE;
+}
+expect {
+    1
+}
