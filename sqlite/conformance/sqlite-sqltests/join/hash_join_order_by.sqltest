@@ -1,0 +1,141 @@
+@database :memory:
+
+setup hash_join_order_by {
+    CREATE TABLE a(id INTEGER PRIMARY KEY, k INTEGER);
+    INSERT INTO a VALUES (1, 10), (2, 20), (3, 30);
+    CREATE TABLE b(k INTEGER);
+    INSERT INTO b VALUES (30), (10), (20);
+}
+
+@setup hash_join_order_by
+test hash-join-order-by-build-table-ascending {
+    SELECT a.id
+    FROM a JOIN b ON b.k = a.k
+    WHERE a.id > 0
+    ORDER BY a.id;
+}
+expect {
+    1
+    2
+    3
+}
+
+@setup hash_join_order_by
+test hash-join-order-by-build-table-descending-page {
+    SELECT a.id
+    FROM a JOIN b ON b.k = a.k
+    WHERE a.id > 0
+    ORDER BY a.id DESC
+    LIMIT 1 OFFSET 1;
+}
+expect {
+    2
+}
+
+@setup hash_join_order_by
+test hash-join-window-order-by-build-table {
+    SELECT a.id, row_number() OVER (ORDER BY a.id)
+    FROM a JOIN b ON b.k = a.k
+    WHERE a.id > 0;
+}
+expect {
+    1|1
+    2|2
+    3|3
+}
+
+@setup hash_join_order_by
+@skip-if sqlite "query plan explanation output is different in sqlite"
+test hash-join-order-by-build-table-uses-sorter {
+    EXPLAIN QUERY PLAN
+    SELECT a.id
+    FROM a JOIN b ON b.k = a.k
+    WHERE a.id > 0
+    ORDER BY a.id;
+}
+expect pattern {
+    (?s)HASH JOIN b.*SEARCH a USING INTEGER PRIMARY KEY.*USE SORTER FOR ORDER BY
+}
+
+setup hash_join_with_outer_table {
+    CREATE TABLE c(id INTEGER PRIMARY KEY);
+    INSERT INTO c VALUES (3), (1), (2);
+    CREATE TABLE a(id INTEGER PRIMARY KEY, k INTEGER);
+    INSERT INTO a VALUES (1, 10), (2, 20), (3, 30);
+    CREATE TABLE b(k INTEGER);
+    INSERT INTO b VALUES (30), (10), (20);
+}
+
+@setup hash_join_with_outer_table
+@skip-if sqlite "query plan explanation output is different in sqlite"
+test hash-join-keeps-outer-table-order-elision {
+    EXPLAIN QUERY PLAN
+    SELECT c.id, a.id
+    FROM c, a JOIN b ON b.k = a.k
+    WHERE c.id > 0
+    ORDER BY c.id;
+}
+expect {
+    1|0|0|SEARCH c USING INTEGER PRIMARY KEY (rowid=?)
+    2|0|0|HASH JOIN b
+    3|0|0|SCAN a
+}
+
+@setup hash_join_with_outer_table
+test hash-join-keeps-outer-table-runtime-order {
+    SELECT c.id
+    FROM c, a JOIN b ON b.k = a.k
+    WHERE c.id > 0
+    ORDER BY c.id;
+}
+expect {
+    1
+    1
+    1
+    2
+    2
+    2
+    3
+    3
+    3
+}
+
+setup materialized_hash_join_order_by {
+    CREATE TABLE c(id INTEGER PRIMARY KEY);
+    INSERT INTO c VALUES (1), (2), (3);
+    CREATE TABLE a(id INTEGER PRIMARY KEY, c_id INTEGER, k INTEGER);
+    INSERT INTO a VALUES (1, 1, 10), (2, 2, 20), (3, 3, 30);
+    CREATE INDEX a_c_id ON a(c_id);
+    CREATE TABLE b(k INTEGER);
+    INSERT INTO b VALUES (30), (10), (20);
+}
+
+@setup materialized_hash_join_order_by
+test hash-join-materialized-prefix-keeps-order {
+    SELECT c.id
+    FROM c
+    JOIN a ON a.c_id = c.id
+    JOIN b ON b.k = a.k
+    WHERE c.id > 0
+    ORDER BY c.id;
+}
+expect {
+    1
+    2
+    3
+}
+
+@setup materialized_hash_join_order_by
+@skip-if sqlite "query plan explanation output is different in sqlite"
+test hash-join-materialized-prefix-uses-sorter {
+    EXPLAIN QUERY PLAN
+    SELECT c.id
+    FROM c
+    JOIN a ON a.c_id = c.id
+    JOIN b ON b.k = a.k
+    WHERE c.id > 0
+    ORDER BY c.id;
+}
+expect pattern {
+    (?s)MATERIALIZE hash build input for a.*HASH JOIN b.*USE SORTER FOR ORDER BY
+}
