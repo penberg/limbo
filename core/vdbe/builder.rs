@@ -256,6 +256,10 @@ pub struct ProgramBuilder {
     /// references in non-recursive CTEs and to prevent fallthrough to schema
     /// resolution for same-named tables/views.
     ctes_being_defined: Vec<String>,
+    /// Stack of views currently being expanded, keyed by `(database_id, name)`
+    /// so a view is distinguished from a same-named view in another attached or
+    /// temp schema. Used to detect self-referential views.
+    views_being_expanded: Vec<(usize, String)>,
     /// If this ProgramBuilder is building trigger subprogram, a ref to the trigger is stored here.
     pub trigger: Option<Arc<Trigger>>,
     pub table_reference_counter: TableRefIdCounter,
@@ -736,6 +740,7 @@ impl ProgramBuilder {
             next_cte_id: 0,
             materialized_ctes: HashMap::default(),
             ctes_being_defined: Vec::new(),
+            views_being_expanded: Vec::new(),
             next_subquery_eqp_id: 1,
             target_union_type: None,
         }
@@ -816,15 +821,36 @@ impl ProgramBuilder {
         self.ctes_being_defined.extend(masked);
     }
 
-    /// Temporarily take the CTE-being-defined stack (e.g. during view
-    /// expansion, which should not see CTE context from the caller).
-    pub fn take_ctes_being_defined(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.ctes_being_defined)
-    }
+    /// Expand a view with circular-reference tracking and without the caller's
+    /// CTE context. Restore both stacks even when expansion returns an error.
+    pub fn with_view_expansion<T>(
+        &mut self,
+        database_id: usize,
+        name: &str,
+        expand: impl FnOnce(&mut Self) -> crate::Result<T>,
+    ) -> crate::Result<T> {
+        // check
+        if self
+            .views_being_expanded
+            .iter()
+            .any(|(db, n)| *db == database_id && n == name)
+        {
+            crate::bail_parse_error!("view {} is circularly defined", name);
+        }
 
-    /// Restore the CTE-being-defined stack after a context-isolated expansion.
-    pub fn restore_ctes_being_defined(&mut self, saved: Vec<String>) {
-        self.ctes_being_defined = saved;
+        // push
+        self.views_being_expanded
+            .push((database_id, name.to_owned()));
+        let saved_ctes = std::mem::take(&mut self.ctes_being_defined);
+
+        // expand
+        let result = expand(self);
+
+        // pop
+        self.ctes_being_defined = saved_ctes;
+        self.views_being_expanded.pop();
+
+        result
     }
 
     pub const fn set_resolve_type(&mut self, resolve_type: ResolveType) {

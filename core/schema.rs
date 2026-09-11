@@ -21,22 +21,14 @@ use crate::vdbe::affinity::Affinity;
 use crate::vdbe::CursorID;
 use crate::{turso_assert, turso_debug_assert};
 use smallvec::SmallVec;
-use turso_macros::AtomicEnum;
-
-#[derive(Debug, Clone, AtomicEnum)]
-pub enum ViewState {
-    Ready,
-    InProgress,
-}
 
 /// Simple view structure for non-materialized views
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct View {
     pub name: String,
     pub sql: String,
     pub select_stmt: ast::Select,
     pub columns: Vec<Column>,
-    pub state: AtomicViewState,
 }
 
 impl View {
@@ -46,42 +38,6 @@ impl View {
             sql,
             select_stmt,
             columns,
-            state: AtomicViewState::new(ViewState::Ready),
-        }
-    }
-
-    pub fn process(&self) -> Result<()> {
-        let state = self.state.get();
-        match state {
-            ViewState::InProgress => {
-                bail_parse_error!("view {} is circularly defined", self.name)
-            }
-            ViewState::Ready => {
-                self.state.set(ViewState::InProgress);
-                Ok(())
-            }
-        }
-    }
-
-    pub fn done(&self) {
-        let state = self.state.get();
-        match state {
-            ViewState::InProgress => {
-                self.state.set(ViewState::Ready);
-            }
-            ViewState::Ready => {}
-        }
-    }
-}
-
-impl Clone for View {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            sql: self.sql.clone(),
-            select_stmt: self.select_stmt.clone(),
-            columns: self.columns.clone(),
-            state: AtomicViewState::new(ViewState::Ready),
         }
     }
 }
@@ -2699,7 +2655,6 @@ impl TryClone for View {
             sql: self.sql.clone(),
             select_stmt: self.select_stmt.clone(),
             columns: self.columns.try_clone()?,
-            state: AtomicViewState::new(ViewState::Ready),
         })
     }
 }

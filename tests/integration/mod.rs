@@ -27,6 +27,7 @@ mod storage;
 mod suspended_statement_checkpoint;
 mod trigger;
 mod unreliable_io;
+mod views;
 mod wal;
 
 #[cfg(test)]
