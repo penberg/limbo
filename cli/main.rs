@@ -22,7 +22,7 @@ use std::{
     sync::{atomic::Ordering, LazyLock},
 };
 
-use crate::sync_server::TursoSyncServer;
+use crate::sync_server::{OpenConfig, TursoSyncServer};
 
 #[cfg(all(feature = "mimalloc", not(target_family = "wasm"), not(miri)))]
 #[global_allocator]
@@ -50,10 +50,27 @@ fn run_mcp_server(app: app::Limbo) -> anyhow::Result<()> {
 
 fn run_sync_server(app: app::Limbo) -> anyhow::Result<()> {
     let address = app.opts.sync_server_address.clone().unwrap();
-    let conn = app.get_connection();
-    let db_path = app.opts.db_file.clone();
     let interrupt_count = app.get_interrupt_count();
-    let sync_server = TursoSyncServer::new(address, db_path, conn, interrupt_count)?;
+
+    let sync_server = match app.opts.sync_dir.clone() {
+        Some(dir) => TursoSyncServer::new_dir(
+            address,
+            dir,
+            interrupt_count,
+            OpenConfig {
+                vfs: app.opts.vfs.clone(),
+                flags: app.opts.flags,
+                db_opts: app.db_opts,
+                max_open: app.opts.sync_max_databases,
+            },
+        )?,
+        None => TursoSyncServer::new(
+            address,
+            app.opts.db_file.clone(),
+            app.get_connection(),
+            interrupt_count,
+        )?,
+    };
 
     sync_server.run()
 }

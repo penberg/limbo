@@ -3,9 +3,10 @@ use clap::ValueEnum;
 use std::{
     fmt::{Display, Formatter},
     io::{self, Write},
+    path::PathBuf,
     sync::Arc,
 };
-use turso_core::LimboError;
+use turso_core::{LimboError, OpenFlags};
 
 #[derive(Copy, Clone)]
 pub enum DbLocation {
@@ -91,7 +92,17 @@ pub struct Settings {
     pub headers: bool,
     pub mcp: bool,
     pub sync_server_address: Option<String>,
+    pub sync_dir: Option<PathBuf>,
+    pub sync_max_databases: usize,
+    pub vfs: Option<String>,
+    pub flags: OpenFlags,
     pub stats: bool,
+}
+
+pub fn open_flags(readonly: bool) -> OpenFlags {
+    let mut flags = OpenFlags::default();
+    flags.set(OpenFlags::ReadOnly, readonly);
+    flags
 }
 
 impl From<Opts> for Settings {
@@ -120,6 +131,10 @@ impl From<Opts> for Settings {
             headers: false,
             mcp: opts.mcp,
             sync_server_address: opts.sync_server,
+            sync_dir: opts.sync_dir,
+            sync_max_databases: opts.sync_max_databases,
+            flags: open_flags(opts.readonly),
+            vfs: opts.vfs,
             stats: false,
         }
     }

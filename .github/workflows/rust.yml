@@ -126,6 +126,15 @@ jobs:
           LOCAL_SYNC_SERVER: "../../target/debug/tursodb"
         run: cargo nextest run --workspace --all-features --locked --no-fail-fast --exclude memory-benchmark -E 'not binary(fuzz_tests) and not binary(pending_byte_tests)' --failure-output=final
         timeout-minutes: 30
+      # Same suite against a --sync-dir server, so directory mode's per-database
+      # routing gets the coverage the single-database run above provides.
+      - name: Test sync suite against --sync-dir
+        if: runner.os == 'Linux'
+        env:
+          LOCAL_SYNC_SERVER: "../../target/debug/tursodb"
+          LOCAL_SYNC_SERVER_DIR: "1"
+        run: cargo nextest run -p turso --all-features --locked --no-fail-fast -E 'test(/^sync::/)' --no-tests=fail --failure-output=final
+        timeout-minutes: 20
       - name: Test doctests
         env:
           LOCAL_SYNC_SERVER: "../../target/debug/tursodb"

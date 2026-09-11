@@ -37,7 +37,7 @@ Turso is a drop-in replacement for SQLite, but adds features that SQLite doesn't
 - **Native Vector Search** — `vector32`/`vector64` types with distance functions (`vector_distance_cos`, `vector_distance_l2`)
 - **Change Data Capture** — track row-level changes per connection with `PRAGMA capture_data_changes_conn`
 - **MCP Server** — run as a [Model Context Protocol](https://modelcontextprotocol.io/) server for AI assistants (`--mcp`)
-- **Local Sync Server** — serve a database over HTTP for client SDKs to sync against (`--sync-server`)
+- **Local Sync Server** — serve a database over HTTP for client SDKs to sync against (`--sync-server`), or serve a whole directory of databases at once (`--sync-dir`)
 - **Array Types** — array columns in STRICT tables with operators like `@>`, `<@`, `||`
 - **Built-in Extensions** — crypto, regexp, fuzzy matching, IP address functions, CSV, percentile
 
@@ -112,6 +112,14 @@ Start a local HTTP server that implements the Turso sync protocol. The `@tursoda
 ```bash
 npx turso myapp.db --sync-server "0.0.0.0:8080"
 ```
+
+To serve a directory of databases instead of a single file, pass `--sync-dir`. Each database is addressed by name at `/db/{name}` and created on first request:
+
+```bash
+npx turso --sync-server "127.0.0.1:8080" --sync-dir ./dbs
+```
+
+A client syncing against `http://localhost:8080/db/db1` reads and writes `./dbs/db1/data`. Names must match `^[a-z0-9_-]+$`. This mode has no authentication and is meant for local development; see the [CLI documentation](https://docs.turso.tech) for the full details and limits.
 
 ### MCP Server
 

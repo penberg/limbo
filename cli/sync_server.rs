@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,7 +12,9 @@ use prost::Message;
 use roaring::RoaringBitmap;
 use tracing::{debug, error, info};
 
-use turso_core::{Connection, Value as CoreValue};
+use turso_core::{
+    Connection, Database, DatabaseOpts, OpenFlags, SqliteDialect, Value as CoreValue,
+};
 use turso_sync_engine::server_proto::{
     BatchCond, BatchResult, BatchStep, BatchStreamReq, BatchStreamResp, Col, Error,
     ExecuteStreamReq, ExecuteStreamResp, MvccLogicalLogMetadataProto, MvccLogicalLogRangeProto,
@@ -39,10 +41,35 @@ const MVCC_TX_TRAILER_SIZE: usize = 8;
 const MVCC_TX_FRAME_FLAG_HAS_EXTENSION_BLOCK: u32 = 1 << 0;
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 
+pub struct OpenConfig {
+    pub vfs: Option<String>,
+    pub flags: OpenFlags,
+    pub db_opts: DatabaseOpts,
+    pub max_open: usize,
+}
+
+struct DbHandle {
+    conn: Mutex<Arc<Connection>>,
+    path: String,
+}
+
+struct OpenHandles {
+    handles: HashMap<String, Arc<DbHandle>>,
+    capacity: usize,
+}
+
+enum DbSource {
+    Single(Arc<DbHandle>),
+    Dir {
+        base: PathBuf,
+        config: OpenConfig,
+        open_handles: Mutex<OpenHandles>,
+    },
+}
+
 pub struct TursoSyncServer {
     address: String,
-    db_path: String,
-    conn: Arc<Mutex<Arc<Connection>>>,
+    source: DbSource,
     interrupt_count: Arc<AtomicUsize>,
 }
 
@@ -57,10 +84,88 @@ impl TursoSyncServer {
 
         Ok(Self {
             address,
-            db_path,
-            conn: Arc::new(Mutex::new(conn)),
+            source: DbSource::Single(Arc::new(DbHandle {
+                conn: Mutex::new(conn),
+                path: db_path,
+            })),
             interrupt_count,
         })
+    }
+
+    pub fn new_dir(
+        address: String,
+        base: PathBuf,
+        interrupt_count: Arc<AtomicUsize>,
+        config: OpenConfig,
+    ) -> Result<Self> {
+        if !base.is_dir() {
+            return Err(anyhow!(
+                "sync dir path does not exist or is not a directory: {}",
+                base.display()
+            ));
+        }
+        let open_handles = Mutex::new(OpenHandles::new(config.max_open));
+        Ok(Self {
+            address,
+            source: DbSource::Dir {
+                base: base.canonicalize()?,
+                config,
+                open_handles,
+            },
+            interrupt_count,
+        })
+    }
+
+    fn resolve_db(
+        &self,
+        requested: Option<&str>,
+    ) -> std::result::Result<Arc<DbHandle>, HttpResponse> {
+        match (&self.source, requested) {
+            (DbSource::Single(h), None) => Ok(h.clone()),
+            (DbSource::Single(_), Some(_)) => Err(text_response(404, "Not Found")),
+            (DbSource::Dir { .. }, None) => Err(text_response(404, "Not Found")),
+            (
+                DbSource::Dir {
+                    base,
+                    config,
+                    open_handles,
+                },
+                Some(name),
+            ) => {
+                if !validate_db_name(name) {
+                    return Err(text_response(400, "Invalid database name"));
+                }
+                let mut open_handles = open_handles.lock().unwrap();
+                open_handles.get_or_open(name, || {
+                    let path = db_path_for(base, name);
+                    let dir = path.parent().expect("database path has a parent directory");
+                    if !config.flags.contains(OpenFlags::ReadOnly) {
+                        if let Err(err) = std::fs::create_dir_all(dir) {
+                            error!("failed to create directory for database {name}: {err}");
+                            return Err(text_response(
+                                500,
+                                &format!("Internal Server Error: {err}"),
+                            ));
+                        }
+                    }
+                    if !dir.canonicalize().is_ok_and(|dir| dir.starts_with(base)) {
+                        return Err(text_response(404, "Not Found"));
+                    }
+                    match open_db_handle(&path, config) {
+                        Ok(handle) => Ok(handle),
+                        // Sync clients retry a 500 forever but can act on a 404.
+                        Err(err) if path.exists() => {
+                            error!("failed to open database {name}: {err}");
+                            Err(text_response(500, &format!("Internal Server Error: {err}")))
+                        }
+                        Err(err) => {
+                            debug!("no database named {name}: {err}");
+                            Err(text_response(404, "Not Found"))
+                        }
+                    }
+                })
+            }
+        }
     }
 
     pub fn run(&self) -> Result<()> {
@@ -152,27 +257,25 @@ impl TursoSyncServer {
         let (method, path, body) = parse_http_request(&request_data)?;
         info!("Request: {} {}", method, path);
 
-        let response = match (method.as_str(), path.as_str()) {
-            ("OPTIONS", _) => Ok(HttpResponse {
-                status: 204,
-                content_type: "text/plain".to_string(),
-                body: Vec::new(),
-            }),
-            ("POST", "/v2/pipeline") => {
-                debug!("Handling /v2/pipeline request");
-                self.handle_pipeline(&body)
-            }
-            ("POST", "/pull-updates") => {
-                debug!("Handling /pull-updates request");
-                self.handle_pull_updates(&body)
-            }
-            _ => {
+        let response = match parse_route(&method, &path) {
+            Route::Options => Ok(text_response(204, "")),
+            Route::Pipeline { db } => match self.resolve_db(db) {
+                Ok(handle) => {
+                    debug!("Handling /v2/pipeline request");
+                    self.handle_pipeline(&handle, &body)
+                }
+                Err(resp) => Ok(resp),
+            },
+            Route::PullUpdates { db } => match self.resolve_db(db) {
+                Ok(handle) => {
+                    debug!("Handling /pull-updates request");
+                    self.handle_pull_updates(&handle, &body)
+                }
+                Err(resp) => Ok(resp),
+            },
+            Route::NotFound => {
                 info!("Unknown endpoint: {} {}", method, path);
-                Ok(HttpResponse {
-                    status: 404,
-                    content_type: "text/plain".to_string(),
-                    body: b"Not Found".to_vec(),
-                })
+                Ok(text_response(404, "Not Found"))
             }
         };
 
@@ -195,13 +298,13 @@ impl TursoSyncServer {
         Ok(())
     }
 
-    fn handle_pipeline(&self, body: &[u8]) -> Result<HttpResponse> {
+    fn handle_pipeline(&self, db: &DbHandle, body: &[u8]) -> Result<HttpResponse> {
         let req: PipelineReqBody = serde_json::from_slice(body)
             .map_err(|e| anyhow!("Failed to parse pipeline request: {}", e))?;
 
         debug!("Pipeline request: {:?}", req);
 
-        let conn = self.conn.lock().unwrap();
+        let conn = db.conn.lock().unwrap();
 
         let mut results = Vec::new();
 
@@ -483,7 +586,7 @@ impl TursoSyncServer {
         }
     }
 
-    fn handle_pull_updates(&self, body: &[u8]) -> Result<HttpResponse> {
+    fn handle_pull_updates(&self, db: &DbHandle, body: &[u8]) -> Result<HttpResponse> {
         let req = <PullUpdatesReqProtoBody as Message>::decode(body)
             .map_err(|e| anyhow!("Failed to decode PullUpdatesRequest: {}", e))?;
 
@@ -502,18 +605,19 @@ impl TursoSyncServer {
         if PullUpdatesStreamKind::try_from(req.stream_kind).unwrap_or(PullUpdatesStreamKind::Pages)
             == PullUpdatesStreamKind::MvccLogicalLog
         {
-            return self.handle_logical_pull_updates(&req);
+            return self.handle_logical_pull_updates(db, &req);
         }
 
-        self.handle_page_pull_updates(&req, PullUpdatesApplyMode::Incremental)
+        self.handle_page_pull_updates(db, &req, PullUpdatesApplyMode::Incremental)
     }
 
     fn handle_page_pull_updates(
         &self,
+        db: &DbHandle,
         req: &PullUpdatesReqProtoBody,
         apply_mode: PullUpdatesApplyMode,
     ) -> Result<HttpResponse> {
-        let conn = self.conn.lock().unwrap();
+        let conn = db.conn.lock().unwrap();
 
         let wal_state = conn.wal_state()?;
         debug!("WAL state: max_frame={}", wal_state.max_frame);
@@ -643,9 +747,13 @@ impl TursoSyncServer {
         })
     }
 
-    fn handle_logical_pull_updates(&self, req: &PullUpdatesReqProtoBody) -> Result<HttpResponse> {
+    fn handle_logical_pull_updates(
+        &self,
+        db: &DbHandle,
+        req: &PullUpdatesReqProtoBody,
+    ) -> Result<HttpResponse> {
         let (db_size, fallback_revision, legacy_current_revision) = {
-            let conn = self.conn.lock().unwrap();
+            let conn = db.conn.lock().unwrap();
             let wal_state = conn.wal_state()?;
             (
                 current_db_size_pages(&conn, wal_state.max_frame)?,
@@ -653,13 +761,13 @@ impl TursoSyncServer {
                 wal_state.max_frame.to_string(),
             )
         };
-        let log_path = match logical_log_path(&self.db_path) {
+        let log_path = match logical_log_path(&db.path) {
             Ok(path) => path,
-            Err(_) if is_in_memory_db_path(&self.db_path) => {
+            Err(_) if is_in_memory_db_path(&db.path) => {
                 info!(
                     "logical pull requested for in-memory sync server database; returning incremental pages"
                 );
-                return self.handle_page_pull_updates(req, PullUpdatesApplyMode::Incremental);
+                return self.handle_page_pull_updates(db, req, PullUpdatesApplyMode::Incremental);
             }
             Err(err) => return Err(err),
         };
@@ -671,6 +779,7 @@ impl TursoSyncServer {
                     log_path.display()
                 );
                 return self.handle_logical_fallback(
+                    db,
                     req,
                     fallback_revision,
                     &legacy_current_revision,
@@ -686,6 +795,7 @@ impl TursoSyncServer {
                     "logical pull requested but MVCC log is not portable; returning replace-base pages: {err}"
                 );
                 return self.handle_logical_fallback(
+                    db,
                     req,
                     fallback_revision,
                     &legacy_current_revision,
@@ -765,6 +875,7 @@ impl TursoSyncServer {
 
     fn handle_logical_fallback(
         &self,
+        db: &DbHandle,
         req: &PullUpdatesReqProtoBody,
         server_revision: String,
         legacy_current_revision: &str,
@@ -777,7 +888,7 @@ impl TursoSyncServer {
             return self.handle_empty_logical_pull(req.client_revision.clone(), db_size);
         }
 
-        self.handle_replace_base_pages(server_revision)
+        self.handle_replace_base_pages(db, server_revision)
     }
 
     fn handle_empty_logical_pull(
@@ -807,8 +918,12 @@ impl TursoSyncServer {
         })
     }
 
-    fn handle_replace_base_pages(&self, server_revision: String) -> Result<HttpResponse> {
-        let (db_size, pages) = self.read_replace_base_pages()?;
+    fn handle_replace_base_pages(
+        &self,
+        db: &DbHandle,
+        server_revision: String,
+    ) -> Result<HttpResponse> {
+        let (db_size, pages) = self.read_replace_base_pages(db)?;
 
         let header = PullUpdatesRespProtoBody {
             server_revision,
@@ -843,8 +958,8 @@ impl TursoSyncServer {
     }
 
     #[allow(clippy::type_complexity)]
-    fn read_replace_base_pages(&self) -> Result<(u64, Vec<(u64, Vec<u8>)>)> {
-        let conn = self.conn.lock().unwrap();
+    fn read_replace_base_pages(&self, db: &DbHandle) -> Result<(u64, Vec<(u64, Vec<u8>)>)> {
+        let conn = db.conn.lock().unwrap();
         let wal_state = conn.wal_state()?;
         let frame_watermark = Some(wal_state.max_frame);
         let db_size = current_snapshot_db_size_pages(&conn, wal_state.max_frame)?;
@@ -1186,12 +1301,22 @@ fn parse_http_request(data: &[u8]) -> Result<(String, String, Vec<u8>)> {
     Ok((method, path, body))
 }
 
+fn text_response(status: u16, body: &str) -> HttpResponse {
+    HttpResponse {
+        status,
+        content_type: "text/plain".to_string(),
+        body: body.as_bytes().to_vec(),
+    }
+}
+
 fn format_http_response(resp: &HttpResponse) -> Vec<u8> {
     let status_text = match resp.status {
         200 => "OK",
         204 => "No Content",
+        400 => "Bad Request",
         404 => "Not Found",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "Unknown",
     };
 
@@ -1214,6 +1339,100 @@ fn format_http_response(resp: &HttpResponse) -> Vec<u8> {
     let mut result = header.into_bytes();
     result.extend_from_slice(&resp.body);
     result
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Route<'a> {
+    Pipeline { db: Option<&'a str> },
+    PullUpdates { db: Option<&'a str> },
+    Options,
+    NotFound,
+}
+
+fn parse_route<'a>(method: &str, path: &'a str) -> Route<'a> {
+    if method == "OPTIONS" {
+        return Route::Options;
+    }
+    if method != "POST" {
+        return Route::NotFound;
+    }
+    match path {
+        "/v2/pipeline" => return Route::Pipeline { db: None },
+        "/pull-updates" => return Route::PullUpdates { db: None },
+        _ => {}
+    }
+    let Some(rest) = path.strip_prefix("/db/") else {
+        return Route::NotFound;
+    };
+    let Some((name, tail)) = rest.split_once('/') else {
+        return Route::NotFound;
+    };
+    match tail {
+        "v2/pipeline" => Route::Pipeline { db: Some(name) },
+        "pull-updates" => Route::PullUpdates { db: Some(name) },
+        _ => Route::NotFound,
+    }
+}
+
+fn validate_db_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn db_path_for(base: &Path, name: &str) -> PathBuf {
+    // Extensionless like sqld's layout: the files appear as data, data-wal,
+    // data-shm (and data.db-log under MVCC) inside the database's directory.
+    base.join(name).join("data")
+}
+
+impl OpenHandles {
+    fn new(capacity: usize) -> Self {
+        Self {
+            handles: HashMap::new(),
+            capacity,
+        }
+    }
+
+    fn get_or_open(
+        &mut self,
+        name: &str,
+        open: impl FnOnce() -> std::result::Result<Arc<DbHandle>, HttpResponse>,
+    ) -> std::result::Result<Arc<DbHandle>, HttpResponse> {
+        if let Some(handle) = self.handles.get(name) {
+            return Ok(handle.clone());
+        }
+        if self.handles.len() >= self.capacity {
+            error!(
+                "refusing to open {name}: {} databases are open",
+                self.capacity
+            );
+            return Err(text_response(503, "Too many open databases"));
+        }
+        let handle = open()?;
+        self.handles.insert(name.to_string(), handle.clone());
+        Ok(handle)
+    }
+}
+
+fn open_db_handle(path: &Path, config: &OpenConfig) -> Result<Arc<DbHandle>> {
+    let path_str = path.to_string_lossy().to_string();
+    let (_io, db) = Database::open_new(
+        &path_str,
+        config.vfs.as_deref(),
+        config.flags,
+        config.db_opts,
+        None,
+        Arc::new(SqliteDialect),
+    )?;
+    let conn = db.connect()?;
+    conn.wal_auto_actions_disable();
+    Ok(Arc::new(DbHandle {
+        conn: Mutex::new(conn),
+        path: path_str,
+    }))
 }
 
 fn encode_length_delimited(output: &mut Vec<u8>, data: &[u8]) {
@@ -1258,6 +1477,31 @@ fn convert_core_to_value(value: CoreValue) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn validates_database_names() {
+        for ok in ["db1", "a-b_c", "x", "nul", "con", &"n".repeat(128)] {
+            assert!(validate_db_name(ok), "expected {ok:?} to be valid");
+        }
+        for bad in [
+            "",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            ".hidden",
+            "a.b",
+            "a%2fb",
+            "a b",
+            "A1",
+            "Db1",
+            "DB1",
+            &"n".repeat(129),
+        ] {
+            assert!(!validate_db_name(bad), "expected {bad:?} to be rejected");
+        }
+    }
 
     /// Mirrors the read loop: the terminator must be found whatever the chunk
     /// boundaries, including when it straddles two reads.
@@ -1285,5 +1529,114 @@ mod tests {
     fn rejects_content_length_that_overflows() {
         assert!(request_end(0, usize::MAX).is_err());
         assert_eq!(request_end(10, 5).unwrap(), 19);
+    }
+
+    #[test]
+    fn parses_single_and_multi_routes() {
+        assert_eq!(
+            parse_route("POST", "/v2/pipeline"),
+            Route::Pipeline { db: None }
+        );
+        assert_eq!(
+            parse_route("POST", "/pull-updates"),
+            Route::PullUpdates { db: None }
+        );
+        assert_eq!(
+            parse_route("POST", "/db/db1/v2/pipeline"),
+            Route::Pipeline { db: Some("db1") }
+        );
+        assert_eq!(
+            parse_route("POST", "/db/db1/pull-updates"),
+            Route::PullUpdates { db: Some("db1") }
+        );
+        assert_eq!(parse_route("OPTIONS", "/anything"), Route::Options);
+        assert_eq!(parse_route("GET", "/v2/pipeline"), Route::NotFound);
+        assert_eq!(parse_route("POST", "/nope"), Route::NotFound);
+        assert_eq!(parse_route("POST", "/db/a/b/v2/pipeline"), Route::NotFound);
+        assert_eq!(
+            parse_route("POST", "/db//v2/pipeline"),
+            Route::Pipeline { db: Some("") }
+        );
+    }
+
+    #[test]
+    fn each_database_resolves_its_own_files() {
+        let base = Path::new("/tmp/dbs");
+        let db1 = db_path_for(base, "db1");
+        let db2 = db_path_for(base, "db2");
+
+        assert_eq!(db1, Path::new("/tmp/dbs/db1/data"));
+        assert_ne!(db1, db2);
+
+        let log1 = logical_log_path(&db1.to_string_lossy()).unwrap();
+        let log2 = logical_log_path(&db2.to_string_lossy()).unwrap();
+        assert_ne!(log1, log2, "databases must not share a logical log");
+        assert_eq!(log1, Path::new("/tmp/dbs/db1/data.db-log"));
+    }
+
+    const TEST_MAX_OPEN: usize = 4;
+
+    fn dir_server(base: &Path) -> TursoSyncServer {
+        TursoSyncServer::new_dir(
+            "127.0.0.1:0".to_string(),
+            base.to_path_buf(),
+            Arc::new(AtomicUsize::new(0)),
+            OpenConfig {
+                vfs: None,
+                flags: OpenFlags::default(),
+                db_opts: DatabaseOpts::new(),
+                max_open: TEST_MAX_OPEN,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn refuses_new_databases_once_the_open_map_is_full() {
+        let base = tempfile::TempDir::new().unwrap();
+        let server = dir_server(base.path());
+
+        for i in 0..TEST_MAX_OPEN {
+            let name = format!("db{i}");
+            if let Err(resp) = server.resolve_db(Some(&name)) {
+                panic!(
+                    "opening {name} under the cap must succeed, got {}",
+                    resp.status
+                );
+            }
+        }
+
+        assert!(
+            server.resolve_db(Some("db0")).is_ok(),
+            "an already open database stays reachable at capacity"
+        );
+        let Err(refused) = server.resolve_db(Some("overflow")) else {
+            panic!("a full open map must refuse an unknown database");
+        };
+        assert_eq!(refused.status, 503);
+        assert!(
+            !base.path().join("overflow").exists(),
+            "a refused database must not reach the filesystem"
+        );
+    }
+
+    #[test]
+    fn refuses_a_database_directory_that_escapes_the_served_tree() {
+        let base = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), base.path().join("escaped")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(outside.path(), base.path().join("escaped")).unwrap();
+
+        let server = dir_server(base.path());
+        let Err(refused) = server.resolve_db(Some("escaped")) else {
+            panic!("a symlinked database directory must be refused");
+        };
+        assert_eq!(refused.status, 404);
+        assert!(
+            !outside.path().join("data").exists(),
+            "a refused name must not create files outside the served tree"
+        );
     }
 }
