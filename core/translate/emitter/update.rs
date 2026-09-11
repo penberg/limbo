@@ -30,9 +30,10 @@ use crate::{
             NoConstantOptReason, ReturningBufferCtx,
         },
         fkeys::{
-            emit_fk_child_update_counters, emit_fk_parent_deferred_new_key_probes,
-            emit_fk_update_parent_actions, fire_fk_update_actions, stabilize_new_row_for_fk,
-            ForeignKeyActions, ParentKeyNewProbeMode,
+            affected_parent_fks_for_update, emit_fk_child_update_counters,
+            emit_fk_parent_deferred_new_key_probes, emit_fk_update_parent_actions,
+            fire_fk_update_actions, stabilize_new_row_for_fk, ForeignKeyActions,
+            ParentKeyNewProbeMode,
         },
         main_loop::{CloseLoop, InitLoop, OpenLoop},
         plan::{
@@ -59,7 +60,7 @@ use crate::{
 use std::num::NonZeroUsize;
 use tracing::{instrument, Level};
 use turso_macros::{turso_assert, turso_assert_eq};
-use turso_parser::ast::{ResolveType, TriggerEvent, TriggerTime};
+use turso_parser::ast::{RefAct, ResolveType, TriggerEvent, TriggerTime};
 
 /// Info about position of rowid alias in the table if present + whether the current UPDATE statement will update the rowid.
 struct RowidUpdateInfo {
@@ -1241,10 +1242,29 @@ fn emit_update_insns<'a>(
     let table_name = target_table.table.get_name();
     let start = if is_virtual_table { beg + 2 } else { beg + 1 };
     let layout = ColumnLayout::from_table(&target_table.as_ref().table)?;
-    let affected_columns = match target_table.table.btree() {
-        Some(btree) => btree.columns_affected_by_update(&updated_column_indices)?,
+    let target_btree = target_table.table.btree();
+    let affected_columns = match target_btree.as_deref() {
+        Some(table) => table.columns_affected_by_update(&updated_column_indices)?,
         None => updated_column_indices.clone(),
     };
+    let affected_parent_fks = match (connection.foreign_keys_enabled(), target_btree.as_deref()) {
+        (true, Some(table)) => affected_parent_fks_for_update(
+            &t_ctx.resolver,
+            table,
+            &updated_column_indices,
+            update_database_id,
+        )?,
+        _ => crate::alloc::vec![],
+    };
+    let has_parent_fk_checks = affected_parent_fks
+        .iter()
+        .any(|fk| matches!(fk.fk.on_update, RefAct::NoAction | RefAct::Restrict));
+    let has_parent_fk_actions = affected_parent_fks.iter().any(|fk| {
+        matches!(
+            fk.fk.on_update,
+            RefAct::Cascade | RefAct::SetNull | RefAct::SetDefault
+        )
+    });
     let column_ctx = UpdateColumnCtx {
         cdc_update_alter_statement,
         target_table: &target_table,
@@ -1328,12 +1348,8 @@ fn emit_update_insns<'a>(
                 &btree_table,
             );
 
-            let has_fk_cascade = connection.foreign_keys_enabled()
-                && t_ctx.resolver.with_schema(update_database_id, |s| {
-                    s.any_resolved_fks_referencing(table_name)
-                });
-
-            let needs_old_registers = has_before_triggers || has_after_triggers || has_fk_cascade;
+            let needs_old_registers =
+                has_before_triggers || has_after_triggers || has_parent_fk_actions;
 
             // Only read OLD row values when triggers or FK cascades need them
             let columns = target_table.table.columns();
@@ -2124,9 +2140,7 @@ fn emit_update_insns<'a>(
             // RESTRICT halts immediately, while NO ACTION increments the FK
             // counter so the statement/transaction can fail later if nothing
             // fixes it.
-            if t_ctx.resolver.with_schema(update_database_id, |s| {
-                s.any_resolved_fks_referencing(table_name)
-            }) {
+            if has_parent_fk_checks {
                 let new_key_probe_mode = if any_effective_replace(
                     program.flags.has_statement_conflict(),
                     or_conflict,
@@ -2140,6 +2154,7 @@ fn emit_update_insns<'a>(
                 deferred_new_key_plans = emit_fk_update_parent_actions(
                     program,
                     &table_btree,
+                    &affected_parent_fks,
                     indexes_to_update.iter(),
                     target_table_cursor_id,
                     beg,
@@ -2383,11 +2398,7 @@ fn emit_update_insns<'a>(
 
             // Fire FK CASCADE/SET NULL actions AFTER the parent row is updated
             // This ensures the new parent key exists when cascade actions update child rows
-            if connection.foreign_keys_enabled()
-                && t_ctx.resolver.with_schema(update_database_id, |s| {
-                    s.any_resolved_fks_referencing(table_name)
-                })
-            {
+            if has_parent_fk_actions {
                 // OLD column values are stored in preserved_old_registers (contiguous registers)
                 let old_values_start = preserved_old_registers
                     .as_ref()
@@ -2402,6 +2413,7 @@ fn emit_update_insns<'a>(
                     effective_rowid_reg,
                     connection,
                     update_database_id,
+                    &affected_parent_fks,
                 )?;
             }
 

@@ -175,6 +175,30 @@ pub struct DeferredNewKeyProbePlan {
     new_key_len: usize,
 }
 
+pub fn affected_parent_fks_for_update(
+    resolver: &Resolver,
+    table_btree: &BTreeTable,
+    updated_positions: &ColumnMask,
+    database_id: usize,
+) -> Result<crate::alloc::Vec<ResolvedFkRef>> {
+    let mut affected_fks = resolver.with_schema(database_id, |s| {
+        s.resolved_fks_referencing(&table_btree.name)
+    })?;
+    let affected_positions = if affected_fks.iter().any(|fk| !fk.parent_uses_rowid) {
+        table_btree.columns_affected_by_update(updated_positions)?
+    } else {
+        ColumnMask::default()
+    };
+    affected_fks.retain(|fk| {
+        fk.parent_key_may_change_with_affected_columns(
+            updated_positions,
+            &affected_positions,
+            table_btree,
+        )
+    });
+    Ok(affected_fks)
+}
+
 /// Emit parent-side OLD/NEW key probes when a parent key actually changes.
 ///
 /// In `AfterReplace` mode this returns the deferred NEW-key probe needed after
@@ -182,7 +206,7 @@ pub struct DeferredNewKeyProbePlan {
 #[expect(clippy::too_many_arguments)]
 fn emit_parent_key_change_probes(
     program: &mut ProgramBuilder,
-    incoming: &[ResolvedFkRef],
+    incoming: &[&ResolvedFkRef],
     old_key_start: usize,
     new_key_start: usize,
     n_cols: usize,
@@ -199,6 +223,7 @@ fn emit_parent_key_change_probes(
         if matches!(new_key_probe_mode, ParentKeyNewProbeMode::AfterReplace) {
             let deferred_fks: Vec<_> = incoming
                 .iter()
+                .copied()
                 .filter(|fk_ref| fk_ref.fk.deferred)
                 .cloned()
                 .collect();
@@ -616,7 +641,7 @@ pub fn stabilize_new_row_for_fk(
 #[allow(clippy::too_many_arguments)]
 pub fn emit_rowid_pk_change_check(
     program: &mut ProgramBuilder,
-    incoming: &[ResolvedFkRef],
+    incoming: &[&ResolvedFkRef],
     old_rowid_reg: usize,
     new_rowid_reg: usize,
     parent_table: &BTreeTable,
@@ -648,7 +673,7 @@ pub fn emit_parent_index_key_change_checks(
     new_values_start: usize,
     old_rowid_reg: usize,
     new_rowid_reg: usize,
-    incoming: &[ResolvedFkRef],
+    incoming: &[&ResolvedFkRef],
     table_btree: &BTreeTable,
     index: &Index,
     updated_positions: &ColumnMask,
@@ -659,13 +684,13 @@ pub fn emit_parent_index_key_change_checks(
     // Only process FKs that reference this specific index.
     let matching_fks: Vec<_> = incoming
         .iter()
+        .copied()
         .filter(|fk_ref| {
             fk_ref
                 .parent_unique_index
                 .as_ref()
                 .is_some_and(|idx| idx.name == index.name)
         })
-        .cloned()
         .collect();
 
     if matching_fks.is_empty() {
@@ -747,7 +772,7 @@ pub fn emit_parent_index_key_change_checks(
 #[allow(clippy::too_many_arguments)]
 pub fn emit_fk_parent_pk_change_counters(
     program: &mut ProgramBuilder,
-    incoming: &[ResolvedFkRef],
+    incoming: &[&ResolvedFkRef],
     old_pk_start: usize,
     new_pk_start: usize,
     n_cols: usize,
@@ -758,7 +783,7 @@ pub fn emit_fk_parent_pk_change_counters(
     database_id: usize,
     resolver: &Resolver,
 ) -> Result<()> {
-    for fk_ref in incoming {
+    for &fk_ref in incoming {
         // Self-referential UPDATEs ask two different questions:
         //
         // 1. Does removing/changing the OLD parent key orphan a child row?
@@ -1464,6 +1489,7 @@ fn emit_fk_delete_parent_existence_check_single(
 pub fn emit_fk_update_parent_actions(
     program: &mut ProgramBuilder,
     table_btree: &BTreeTable,
+    affected_parent_fks: &[ResolvedFkRef],
     indexes_to_update: impl Iterator<Item = impl AsRef<Index>>,
     cursor_id: usize,
     old_rowid_reg: usize,
@@ -1476,19 +1502,10 @@ pub fn emit_fk_update_parent_actions(
     resolver: &Resolver,
 ) -> Result<Vec<DeferredNewKeyProbePlan>> {
     let mut deferred_new_key_plans = Vec::new();
-    let mut check_fks: Vec<_> = Vec::new();
-    let referencing = resolver.with_schema(database_id, |s| {
-        s.resolved_fks_referencing(&table_btree.name)
-    })?;
-    for fk in referencing {
-        if !fk.parent_key_may_change(updated_positions, table_btree)? {
-            continue;
-        }
-        if !matches!(fk.fk.on_update, RefAct::NoAction | RefAct::Restrict) {
-            continue;
-        }
-        check_fks.push(fk);
-    }
+    let check_fks: Vec<_> = affected_parent_fks
+        .iter()
+        .filter(|fk| matches!(fk.fk.on_update, RefAct::NoAction | RefAct::Restrict))
+        .collect();
     if check_fks.is_empty() {
         return Ok(deferred_new_key_plans);
     }
@@ -1497,8 +1514,8 @@ pub fn emit_fk_update_parent_actions(
     if primary_key_is_rowid_alias || table_btree.primary_key_columns.is_empty() {
         let rowid_fks: Vec<_> = check_fks
             .iter()
+            .copied()
             .filter(|fk| fk.parent_uses_rowid)
-            .cloned()
             .collect();
         if !rowid_fks.is_empty() {
             if let Some(plan) = emit_rowid_pk_change_check(
@@ -2279,6 +2296,7 @@ pub fn fire_fk_update_actions(
     new_rowid_reg: usize,
     connection: &Arc<Connection>,
     database_id: usize,
+    affected_parent_fks: &[ResolvedFkRef],
 ) -> Result<()> {
     let parent_bt = resolver
         .with_schema(database_id, |s| s.get_btree_table(parent_table_name))
@@ -2291,9 +2309,11 @@ pub fn fire_fk_update_actions(
     };
     let new_image_layout = ColumnLayout::from_btree(&parent_bt)?;
 
-    for fk_ref in resolver.with_schema(database_id, |s| {
-        s.resolved_fks_referencing(parent_table_name)
-    })? {
+    for fk_ref in affected_parent_fks {
+        if matches!(fk_ref.fk.on_update, RefAct::NoAction | RefAct::Restrict) {
+            continue;
+        }
+
         let parent_cols: &[String] = &fk_ref.parent_cols;
         let ncols = parent_cols.len();
 
@@ -2344,19 +2364,18 @@ pub fn fire_fk_update_actions(
         let ctx = FkActionContext::new_for_update(old_key_registers, new_key_registers);
 
         match fk_ref.fk.on_update {
-            RefAct::NoAction | RefAct::Restrict => {
-                // NO ACTION/RESTRICT checks are handled by emit_fk_update_parent_actions
-                // which is called BEFORE the update using the counter-based approach.
-            }
             RefAct::Cascade => {
-                fire_fk_cascade_update(program, resolver, &fk_ref, connection, &ctx, database_id)?;
+                fire_fk_cascade_update(program, resolver, fk_ref, connection, &ctx, database_id)?;
             }
             RefAct::SetNull => {
-                fire_fk_set_null(program, resolver, &fk_ref, connection, &ctx, database_id)?;
+                fire_fk_set_null(program, resolver, fk_ref, connection, &ctx, database_id)?;
             }
             RefAct::SetDefault => {
-                fire_fk_set_default(program, resolver, &fk_ref, connection, &ctx, database_id)?;
+                fire_fk_set_default(program, resolver, fk_ref, connection, &ctx, database_id)?;
             }
+            RefAct::NoAction | RefAct::Restrict => unreachable!(
+                "NO ACTION and RESTRICT foreign keys were skipped before emitting actions"
+            ),
         }
 
         program.preassign_label_to_next_insn(skip_action);

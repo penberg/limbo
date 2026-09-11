@@ -4334,3 +4334,70 @@ test fk-deferred-null-parent-key-does-not-repay {
 }
 expect error {
 }
+
+# UPDATE and UPSERT only emit parent-side foreign-key bytecode when the
+# statement can change the key that the children point at. These snapshots record
+# which statements get the OLD/NEW key probes and which get the CASCADE,
+# SET NULL or SET DEFAULT action subprograms.
+
+setup fk_bytecode_no_action_child {
+    PRAGMA foreign_keys=ON;
+    CREATE TABLE parent(id INTEGER PRIMARY KEY, k INTEGER UNIQUE, v INTEGER);
+    CREATE TABLE child(id INTEGER PRIMARY KEY, pk INTEGER REFERENCES parent(k) ON UPDATE NO ACTION);
+}
+
+setup fk_bytecode_cascade_child {
+    PRAGMA foreign_keys=ON;
+    CREATE TABLE parent(id INTEGER PRIMARY KEY, k INTEGER UNIQUE, v INTEGER);
+    CREATE TABLE child(id INTEGER PRIMARY KEY, pk INTEGER REFERENCES parent(k) ON UPDATE CASCADE);
+}
+
+setup fk_bytecode_mixed_children {
+    PRAGMA foreign_keys=ON;
+    CREATE TABLE parent(id INTEGER PRIMARY KEY, k INTEGER UNIQUE);
+    CREATE TABLE child_no_action(id INTEGER PRIMARY KEY, pk INTEGER REFERENCES parent(k) ON UPDATE NO ACTION);
+    CREATE TABLE child_cascade(id INTEGER PRIMARY KEY, pk INTEGER REFERENCES parent(k) ON UPDATE CASCADE);
+}
+
+# No child points at parent.v, so this UPDATE gets no key probe and no action.
+@setup fk_bytecode_no_action_child
+@skip-if mvcc "MVCC uses negative root page numbers, so the bytecode snapshot differs"
+snapshot fk-update-column-no-child-points-at {
+    UPDATE parent SET v = v + 1 WHERE id = 1;
+}
+
+# The UPDATE changes parent.k, so the NO ACTION child gets its key probe.
+@setup fk_bytecode_no_action_child
+@skip-if mvcc "MVCC uses negative root page numbers, so the bytecode snapshot differs"
+snapshot fk-update-parent-key-with-no-action-child {
+    UPDATE parent SET k = k + 1 WHERE id = 1;
+}
+
+# The UPDATE changes parent.k, so the CASCADE child gets its action subprogram.
+@setup fk_bytecode_cascade_child
+@skip-if mvcc "MVCC uses negative root page numbers, so the bytecode snapshot differs"
+snapshot fk-update-parent-key-with-cascade-child {
+    UPDATE parent SET k = k + 1 WHERE id = 1;
+}
+
+# Both children point at parent.k, but only the CASCADE child gets an action
+# subprogram after the row is written.
+@setup fk_bytecode_mixed_children
+@skip-if mvcc "MVCC uses negative root page numbers, so the bytecode snapshot differs"
+snapshot fk-update-parent-key-with-mixed-children {
+    UPDATE parent SET k = k + 1 WHERE id = 1;
+}
+
+# The upsert writes parent.v only, so the CASCADE child gets no action.
+@setup fk_bytecode_cascade_child
+@skip-if mvcc "MVCC uses negative root page numbers, so the bytecode snapshot differs"
+snapshot fk-upsert-column-no-child-points-at {
+    INSERT INTO parent(id, k, v) VALUES (1, 10, 2) ON CONFLICT(id) DO UPDATE SET v = excluded.v;
+}
+
+# The upsert writes parent.k, so the CASCADE child gets its action subprogram.
+@setup fk_bytecode_cascade_child
+@skip-if mvcc "MVCC uses negative root page numbers, so the bytecode snapshot differs"
+snapshot fk-upsert-parent-key-with-cascade-child {
+    INSERT INTO parent(id, k, v) VALUES (1, 10, 2) ON CONFLICT(id) DO UPDATE SET k = excluded.k;
+}

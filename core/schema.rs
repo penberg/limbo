@@ -5179,6 +5179,28 @@ impl ResolvedFkRef {
         parent_tbl: &BTreeTable,
     ) -> Result<bool> {
         if self.parent_uses_rowid {
+            return Ok(self.parent_key_may_change_with_affected_columns(
+                updated_parent_positions,
+                updated_parent_positions,
+                parent_tbl,
+            ));
+        }
+        let affected_parent_positions =
+            parent_tbl.columns_affected_by_update(updated_parent_positions)?;
+        Ok(self.parent_key_may_change_with_affected_columns(
+            updated_parent_positions,
+            &affected_parent_positions,
+            parent_tbl,
+        ))
+    }
+
+    pub(crate) fn parent_key_may_change_with_affected_columns(
+        &self,
+        updated_parent_positions: &ColumnMask,
+        affected_parent_positions: &ColumnMask,
+        parent_tbl: &BTreeTable,
+    ) -> bool {
+        if self.parent_uses_rowid {
             // parent rowid changes if the parent's rowid or alias is updated
             if let Some((idx, _)) = parent_tbl
                 .columns
@@ -5186,13 +5208,14 @@ impl ResolvedFkRef {
                 .enumerate()
                 .find(|(_, c)| c.is_rowid_alias())
             {
-                return Ok(updated_parent_positions.get(idx));
+                return updated_parent_positions.get(idx);
             }
             // Without a rowid alias, a direct rowid update is represented separately with ROWID_SENTINEL
-            return Ok(true);
+            return true;
         }
-        let affected = parent_tbl.columns_affected_by_update(updated_parent_positions)?;
-        Ok(self.parent_pos.iter().any(|p| affected.get(*p)))
+        self.parent_pos
+            .iter()
+            .any(|p| affected_parent_positions.get(*p))
     }
 
     /// Returns if any child column of this FK is in `updated_child_positions`
