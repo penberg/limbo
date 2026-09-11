@@ -1,0 +1,26 @@
+---
+source: aggregation.sqltest
+expression: SELECT count(x) FROM t3;
+info:
+  statement_type: SELECT
+  tables:
+  - t3
+  setup_blocks:
+  - simple_table_notnull
+  database: ':memory:'
+---
+QUERY PLAN
+`--SCAN t3
+
+BYTECODE
+addr  opcode       p1  p2  p3  p4      p5  comment
+   0  Init          0   8   0           0  Start at 8
+   1  Null          0   2   0           0  r[2]=NULL
+   2  OpenRead      0   2   0  k(2,B)   0  table=t3, root=2, iDb=0
+   3  Count         0   3   0           0
+   4  Close         0   0   0           0
+   5  Copy          3   1   0           0  r[1]=r[3]
+   6  ResultRow     1   1   0           0  output=r[1]
+   7  Halt          0   0   0           0
+   8  Transaction   0   1   1           0  iDb=0 tx_mode=Read
+   9  Goto          0   1   0           0

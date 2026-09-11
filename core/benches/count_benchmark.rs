@@ -30,7 +30,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const N: usize = 1_000_000;
 
-// All three drive the count through the covering index on `g` (small, resident working set)
+// The first three drive the count through the covering index on `g` (small, resident working set)
 // so the measurement isolates the per-row aggregate path and stays stable under memory
 // pressure -- a full table scan thrashes the OS memory compressor and is too noisy to A/B.
 const QUERIES: &[(&str, &str)] = &[
@@ -44,18 +44,21 @@ const QUERIES: &[(&str, &str)] = &[
     ("count_text_col", "SELECT COUNT(g) FROM t"),
     // count with group by: covering-index streaming aggregate.
     ("count_groupby", "SELECT g, COUNT(*) FROM t GROUP BY g"),
+    // count of a NOT NULL column: no NULLs to check for, so it's as fast as count(*).
+    ("count_notnull_col", "SELECT COUNT(v) FROM t"),
 ];
 
 /// Seed a self-contained db file via rusqlite. `g` has low cardinality (16 groups) and is
 /// indexed so every benchmarked query runs through the covering index on `g`; `payload` and
-/// `v` are unused by the queries (they just give the rows realistic width).
+/// `v` are unused by the queries (they just give the rows realistic width), except
+/// count_notnull_col that counts v and needs it NOT NULL.
 fn seed_db(n: usize) -> TempDir {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("count.db");
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
         "PRAGMA journal_mode=DELETE;
-         CREATE TABLE t(id INTEGER PRIMARY KEY, g TEXT, payload TEXT, v INTEGER);",
+         CREATE TABLE t(id INTEGER PRIMARY KEY, g TEXT, payload TEXT, v INTEGER NOT NULL);",
     )
     .unwrap();
     let tx = conn.unchecked_transaction().unwrap();

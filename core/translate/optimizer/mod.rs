@@ -823,13 +823,17 @@ fn detect_simple_aggregate(plan: &SelectPlan) -> Option<SimpleAggregate> {
         return None;
     }
 
+    let is_unfiltered_btree_count = matches!(table_ref.table, Table::BTree(..))
+        && plan.table_references.outer_query_refs().is_empty()
+        && plan.where_clause.is_empty()
+        && plan.offset.is_none();
+
     match agg.func {
-        AggFunc::Count0
-            if matches!(table_ref.table, Table::BTree(..))
-                && plan.table_references.outer_query_refs().is_empty()
-                && plan.where_clause.is_empty()
-                && plan.limit.is_none()
-                && plan.offset.is_none() =>
+        AggFunc::Count0 if is_unfiltered_btree_count => Some(SimpleAggregate::Count),
+        AggFunc::Count
+            if is_unfiltered_btree_count
+                && matches!(agg.distinctness, super::plan::Distinctness::NonDistinct)
+                && agg.args[0].is_nonnull(&plan.table_references) =>
         {
             Some(SimpleAggregate::Count)
         }
@@ -3460,6 +3464,10 @@ impl Optimizable for ast::Expr {
             Expr::InSelect { .. } => false,
             Expr::InTable { .. } => false,
             Expr::IsNull(..) => true,
+            Expr::Like {
+                op: ast::LikeOperator::Regexp,
+                ..
+            } => false,
             Expr::Like {
                 lhs, rhs, escape, ..
             } => {

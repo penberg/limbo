@@ -109,3 +109,36 @@ expect {
     1
     1
 }
+
+@skip-if sqlite "Deliberately break up with sqlite here to return the actual value instead of error"
+test simple-count-unusable-partial-index-column-correctness {
+    CREATE TABLE t(x NOT NULL);
+    CREATE INDEX pi ON t(x) WHERE x > 5;
+    INSERT INTO t VALUES (9), (1), (2);
+    SELECT count(x) FROM t INDEXED BY pi;
+}
+expect {
+    3
+}
+
+test simple-count-correlated-outer-join-null-extension {
+    CREATE TABLE t0(z);
+    CREATE TABLE t1(a INTEGER NOT NULL);
+    CREATE TABLE t2(b);
+    INSERT INTO t0 VALUES (1);
+    INSERT INTO t2 VALUES (1),(2);
+    SELECT (SELECT count(t2.rowid + t1.a) FROM t2) FROM t0 LEFT JOIN t1 ON t1.a = t0.z;
+}
+expect {
+    0
+}
+
+@skip-if sqlite "sqlite errors on an invalid regexp pattern instead of returning NULL"
+test simple-count-regexp-invalid-pattern-correctness {
+    CREATE TABLE t(x TEXT NOT NULL);
+    INSERT INTO t VALUES ('a'),('b');
+    SELECT count(x REGEXP '(') FROM t;
+}
+expect {
+    0
+}

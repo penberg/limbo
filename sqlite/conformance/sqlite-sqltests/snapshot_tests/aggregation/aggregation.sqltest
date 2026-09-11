@@ -347,6 +347,17 @@ snapshot count-column {
     SELECT count(x) FROM t1;
 }
 
+setup simple_table_notnull {
+    CREATE TABLE t3(x NOT NULL);
+}
+
+# count(col) can use the Count opcode when col is NOT NULL, since it can
+# never skip a row
+@setup simple_table_notnull
+snapshot count-notnull-column {
+    SELECT count(x) FROM t3;
+}
+
 # Mixed case must also use the Count opcode
 @setup simple_table
 snapshot simple-count-mixed-case {
