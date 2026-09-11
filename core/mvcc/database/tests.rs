@@ -19573,7 +19573,16 @@ fn dropped_attached_commit_rolls_back_remaining_attached_mvcc_txs() {
 /// DurableStorage::log_tx returning Busy should not leak pager_commit_lock.
 /// https://github.com/tursodatabase/turso/issues/6753.
 #[test]
-fn busy_from_log_tx_strands_pager_commit_lock_then_blocks_subsequent_commit() {
+fn busy_from_log_tx_does_not_block_subsequent_commit_with_group_commit() {
+    busy_from_log_tx_does_not_block_subsequent_commit(true);
+}
+
+#[test]
+fn busy_from_log_tx_does_not_block_subsequent_commit_without_group_commit() {
+    busy_from_log_tx_does_not_block_subsequent_commit(false);
+}
+
+fn busy_from_log_tx_does_not_block_subsequent_commit(group_commit: bool) {
     use crate::io::FileSyncType;
     use crate::mvcc;
     use crate::mvcc::database::{LogRecord, RowVersion};
@@ -19747,6 +19756,12 @@ fn busy_from_log_tx_strands_pager_commit_lock_then_blocks_subsequent_commit() {
     let conn_a = db.connect().unwrap();
     let conn_b = db.connect().unwrap();
     conn_a
+        .execute(format!(
+            "PRAGMA mvcc_group_commit = {}",
+            if group_commit { "on" } else { "off" }
+        ))
+        .unwrap();
+    conn_a
         .execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
         .unwrap();
 
@@ -19773,7 +19788,7 @@ fn busy_from_log_tx_strands_pager_commit_lock_then_blocks_subsequent_commit() {
     conn_b.execute("INSERT INTO t VALUES (2, 'b')").unwrap();
 
     let mut commit_b = conn_b.prepare("COMMIT").unwrap();
-    drive_to_done_or_timeout(&mut commit_b, 30); // this times out if pager_commit_lock is leaked
+    drive_to_done_or_timeout(&mut commit_b, 30); // this times out if pager_commit_lock or the group retry set is leaked
 }
 
 // https://github.com/tursodatabase/turso/issues/6757
