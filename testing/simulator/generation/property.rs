@@ -295,7 +295,10 @@ impl Property {
     ) -> Vec<Interaction> {
         let interactions: Vec<InteractionBuilder> = match self {
             Property::AllTableHaveExpectedContent { tables } => {
-                assert_all_table_values(tables, connection_index).collect()
+                let mut interactions = vec![assert_schema_names(tables, connection_index)];
+                interactions.extend(assert_all_table_values(tables, connection_index));
+                interactions.push(assert_integrity_check(tables, connection_index));
+                interactions
             }
             Property::TableHasExpectedContent { table } => {
                 let table = table.to_string();
@@ -1596,10 +1599,99 @@ fn random_main_table_delete<R: rand::Rng + ?Sized>(rng: &mut R, table: &Table) -
     })
 }
 
+fn assert_schema_names(tables: &[String], connection_index: usize) -> InteractionBuilder {
+    let expected = tables.to_vec();
+    let dependencies = expected.clone();
+    InteractionBuilder::with_interaction(InteractionType::Assertion(Assertion::new(
+        "database schema should contain exactly the modeled tables".to_string(),
+        move |_stack: &Vec<ResultSet>, env: &mut SimulatorEnv| {
+            let actual = read_user_table_names(env, connection_index)?;
+            Ok(compare_table_names(&expected, &actual))
+        },
+        dependencies,
+    )))
+}
+
+fn compare_table_names(expected: &[String], actual: &[String]) -> Result<(), String> {
+    let mut expected = expected.to_vec();
+    let mut actual = actual.to_vec();
+    expected.sort_unstable();
+    actual.sort_unstable();
+
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected tables {expected:?}, database has {actual:?}"
+        ))
+    }
+}
+
+fn read_user_table_names(
+    env: &mut SimulatorEnv,
+    connection_index: usize,
+) -> turso_core::Result<Vec<String>> {
+    let schemas = std::iter::once("main".to_string())
+        .chain(env.attached_dbs.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut names = Vec::new();
+    for schema in schemas {
+        let query = format!(
+            "SELECT name FROM {schema}.sqlite_schema \
+             WHERE type='table' AND name NOT LIKE 'sqlite_%' \
+             AND name NOT LIKE '__turso_internal_%' ORDER BY name"
+        );
+        match &mut env.connections[connection_index] {
+            crate::runner::env::SimConnection::LimboConnection(conn) => {
+                let mut rows = conn.query(query)?.ok_or_else(|| {
+                    LimboError::InternalError(format!(
+                        "sqlite_schema returned no rows for {schema}"
+                    ))
+                })?;
+                rows.run_with_row_callback(|row| {
+                    let turso_core::Value::Text(name) = row.get_value(0) else {
+                        return Err(LimboError::InternalError(format!(
+                            "sqlite_schema returned a non-text table name for {schema}"
+                        )));
+                    };
+                    names.push(if schema == "main" {
+                        name.as_str().to_string()
+                    } else {
+                        format!("{schema}.{name}")
+                    });
+                    Ok(())
+                })?;
+            }
+            crate::runner::env::SimConnection::SQLiteConnection(conn) => {
+                let mut stmt = conn
+                    .prepare(&query)
+                    .map_err(|err| LimboError::InternalError(err.to_string()))?;
+                let rows = stmt
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|err| LimboError::InternalError(err.to_string()))?;
+                for row in rows {
+                    let name = row.map_err(|err| LimboError::InternalError(err.to_string()))?;
+                    names.push(if schema == "main" {
+                        name
+                    } else {
+                        format!("{schema}.{name}")
+                    });
+                }
+            }
+            crate::runner::env::SimConnection::Disconnected => {
+                return Err(LimboError::InternalError(
+                    "connection is disconnected during schema assertion".into(),
+                ));
+            }
+        }
+    }
+    Ok(names)
+}
+
 fn assert_integrity_check(tables: &[String], connection_index: usize) -> InteractionBuilder {
     let tables = tables.to_vec();
     InteractionBuilder::with_interaction(InteractionType::Assertion(Assertion::new(
-        "PRAGMA integrity_check should be ok after savepoint rollback".to_string(),
+        "PRAGMA integrity_check should return ok".to_string(),
         move |_stack: &Vec<ResultSet>, env: &mut SimulatorEnv| {
             let result = run_integrity_check(env, connection_index)?;
             if result == "ok" {
@@ -1616,39 +1708,67 @@ fn run_integrity_check(
     env: &mut SimulatorEnv,
     connection_index: usize,
 ) -> turso_core::Result<String> {
+    let schemas: Vec<_> = std::iter::once("main".to_string())
+        .chain(env.attached_dbs.iter().cloned())
+        .collect();
     match &mut env.connections[connection_index] {
         crate::runner::env::SimConnection::LimboConnection(conn) => {
-            let mut rows = conn.query("PRAGMA integrity_check")?.ok_or_else(|| {
-                LimboError::InternalError("integrity_check returned no rows".into())
-            })?;
-            let mut result = Vec::new();
-            rows.run_with_row_callback(|row| {
-                let value = row
-                    .get_value(0)
-                    .to_text()
-                    .ok_or_else(|| {
-                        LimboError::InternalError(
-                            "integrity_check returned a non-text value".to_string(),
-                        )
-                    })?
-                    .to_string();
-                result.push(value);
-                Ok(())
-            })?;
-            Ok(result.join("\n"))
+            let mut failures = Vec::new();
+            for schema in schemas {
+                let query = format!("PRAGMA {schema}.integrity_check");
+                let mut rows = conn.query(query)?.ok_or_else(|| {
+                    LimboError::InternalError(format!(
+                        "integrity_check returned no rows for {schema}"
+                    ))
+                })?;
+                let mut result = Vec::new();
+                rows.run_with_row_callback(|row| {
+                    let value = row
+                        .get_value(0)
+                        .to_text()
+                        .ok_or_else(|| {
+                            LimboError::InternalError(format!(
+                                "integrity_check returned a non-text value for {schema}"
+                            ))
+                        })?
+                        .to_string();
+                    result.push(value);
+                    Ok(())
+                })?;
+                let result = result.join("\n");
+                if result != "ok" {
+                    failures.push(format!("{schema}: {result}"));
+                }
+            }
+            Ok(if failures.is_empty() {
+                "ok".to_string()
+            } else {
+                failures.join("\n")
+            })
         }
         crate::runner::env::SimConnection::SQLiteConnection(conn) => {
-            let mut stmt = conn
-                .prepare("PRAGMA integrity_check")
-                .map_err(|e| LimboError::InternalError(e.to_string()))?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(|e| LimboError::InternalError(e.to_string()))?;
-            let mut result = Vec::new();
-            for row in rows {
-                result.push(row.map_err(|e| LimboError::InternalError(e.to_string()))?);
+            let mut failures = Vec::new();
+            for schema in schemas {
+                let mut stmt = conn
+                    .prepare(&format!("PRAGMA {schema}.integrity_check"))
+                    .map_err(|e| LimboError::InternalError(e.to_string()))?;
+                let rows = stmt
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|e| LimboError::InternalError(e.to_string()))?;
+                let mut result = Vec::new();
+                for row in rows {
+                    result.push(row.map_err(|e| LimboError::InternalError(e.to_string()))?);
+                }
+                let result = result.join("\n");
+                if result != "ok" {
+                    failures.push(format!("{schema}: {result}"));
+                }
             }
-            Ok(result.join("\n"))
+            Ok(if failures.is_empty() {
+                "ok".to_string()
+            } else {
+                failures.join("\n")
+            })
         }
         crate::runner::env::SimConnection::Disconnected => Err(LimboError::InternalError(
             "connection is disconnected during integrity_check assertion".into(),
@@ -1676,7 +1796,9 @@ fn assert_all_table_values(
             Predicate::true_(),
         )));
 
-        let assertion = InteractionType::Assertion(Assertion::new(format!("table {table} should contain all of its expected values"), {
+        let assertion = InteractionType::Assertion(Assertion::new(
+            format!("table {table} should contain all of its expected values"),
+            {
                 let table = table.clone();
                 move |stack: &Vec<ResultSet>, env: &mut SimulatorEnv| {
                     let conn_ctx = env.get_conn_tables(connection_index);
@@ -1688,45 +1810,35 @@ fn assert_all_table_values(
                     let last = stack.last().unwrap();
                     match last {
                         Ok(vals) => {
-                            let expected: Vec<Vec<SimValue>> = table.rows.iter().map(|r| strip_virtual_cols(table, r)).collect();
-                            let actual: Vec<Vec<SimValue>> = vals.iter().map(|r| strip_virtual_cols(table, r)).collect();
+                            let mut expected: Vec<Vec<SimValue>> = table
+                                .rows
+                                .iter()
+                                .map(|r| strip_virtual_cols(table, r))
+                                .collect();
+                            let mut actual: Vec<Vec<SimValue>> =
+                                vals.iter().map(|r| strip_virtual_cols(table, r)).collect();
+                            expected.sort_unstable();
+                            actual.sort_unstable();
 
-                            // Check if all values in the table are present in the result set
-                            // Find a value in the table that is not in the result set
-                            let model_contains_db = expected.iter().find(|v| {
-                                !actual.contains(v)
-                            });
-                            let db_contains_model = actual.iter().find(|v| {
-                                !expected.contains(v)
-                            });
-
-                            if let Some(model_contains_db) = model_contains_db {
-                                tracing::debug!(
-                                    "table {} does not contain the expected values, the simulator model has more rows than the database: {:?}",
-                                    table.name,
-                                    print_row(model_contains_db)
-                                );
-                                print_diff(&expected, &actual, "simulator", "database");
-
-                                Ok(Err(format!("table {} does not contain the expected values, the simulator model has more rows than the database: {:?}", table.name, print_row(model_contains_db))))
-                            } else if let Some(db_contains_model) = db_contains_model {
-                                tracing::debug!(
-                                    "table {} does not contain the expected values, the database has more rows than the simulator model: {:?}",
-                                    table.name,
-                                    print_row(db_contains_model)
-                                );
-                                print_diff(&expected, &actual, "simulator", "database");
-
-                                Ok(Err(format!("table {} does not contain the expected values, the database has more rows than the simulator model: {:?}", table.name, print_row(db_contains_model))))
-                            } else {
+                            if expected == actual {
                                 Ok(Ok(()))
+                            } else {
+                                print_diff(&expected, &actual, "simulator", "database");
+                                Ok(Err(format!(
+                                    "table {} does not contain the expected values",
+                                    table.name
+                                )))
                             }
                         }
                         Err(err) => Err(LimboError::InternalError(format!("{err}"))),
                     }
                 }
-            }, vec![table.clone()]));
-        [select, assertion].into_iter().map(InteractionBuilder::with_interaction)
+            },
+            vec![table.clone()],
+        ));
+        [select, assertion]
+            .into_iter()
+            .map(InteractionBuilder::with_interaction)
     })
 }
 
@@ -2115,8 +2227,9 @@ fn property_fsync_no_wait<R: rand::Rng + ?Sized>(
     rng: &mut R,
     query_distr: &QueryDistribution,
     ctx: &impl GenerationContext,
-    _mvcc: bool,
+    mvcc: bool,
 ) -> Property {
+    assert!(!mvcc, "FsyncNoWait must not be generated in MVCC mode");
     Property::FsyncNoWait {
         query: Query::arbitrary_from(rng, ctx, query_distr),
     }
@@ -2322,7 +2435,10 @@ impl PropertyDiscriminants {
                 }
             }
             PropertyDiscriminants::FsyncNoWait => {
-                if env.profile.io.enable && !env.opts.disable_fsync_no_wait {
+                if env.profile.io.enable
+                    && !env.opts.disable_fsync_no_wait
+                    && env.can_simulate_power_loss()
+                {
                     50 // Freestyle number
                 } else {
                     0

@@ -24,6 +24,7 @@ use crate::{
         metrics::{InteractionStats, Remaining},
         property::Property,
     },
+    runner::env::SimulationType,
 };
 
 impl InteractionPlan {
@@ -59,15 +60,16 @@ impl InteractionPlan {
         }
 
         let num_interactions = env.opts.max_interactions as usize;
-        // If last interaction needs to check all db tables, generate the Property to do so.
-        // But only generate the interaction if we actually have any tables to check
-        // This can happen if we created a table, and then deleted the table, and there are no more tables to check
         if let Some(i) = self.last_interactions()
             && i.check_tables()
-            && !env
-                .connection_context(i.connection_index)
-                .tables()
-                .is_empty()
+            && (
+                // no need to assert expected state if there are no tables
+                // and the last interaction was a query
+                !env.connection_context(i.connection_index)
+                    .tables()
+                    .is_empty()
+                    || !matches!(&i.interactions, InteractionsType::Query(_))
+            )
         {
             let interactions = if let InteractionsType::Query(query) = &i.interactions {
                 assert!(query.is_dml());
@@ -203,7 +205,7 @@ impl<'a, R: rand::Rng> PlanGenerator<'a, R> {
                     };
 
                     let queries = possible_queries(conn_ctx.tables());
-                    let query_distr = QueryDistribution::new(queries, &remaining_);
+                    let query_distr = QueryDistribution::new(queries, &remaining_, false);
 
                     let query_gen = property.get_extensional_query_gen_function();
 
@@ -344,11 +346,13 @@ fn random_fault<R: rand::Rng + ?Sized>(
     env: &SimulatorEnv,
     conn_index: usize,
 ) -> Interactions {
-    let faults = if env.opts.disable_reopen_database {
-        vec![Fault::Disconnect]
-    } else {
-        vec![Fault::Disconnect, Fault::ReopenDatabase]
-    };
+    let mut faults = vec![Fault::Disconnect];
+    if !env.opts.disable_reopen_database {
+        faults.push(Fault::ReopenDatabase);
+        if env.can_simulate_power_loss() {
+            faults.push(Fault::PowerLoss);
+        }
+    }
     let fault = faults[rng.random_range(0..faults.len())];
     Interactions::new(conn_index, InteractionsType::Fault(fault))
 }
@@ -369,7 +373,9 @@ impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats, usize)> for Interactions {
         );
 
         let queries = possible_queries(conn_ctx.tables());
-        let query_distr = QueryDistribution::new(queries, &remaining_);
+        let allow_checkpoints =
+            !env.profile.mvcc && !matches!(env.type_, SimulationType::Differential);
+        let query_distr = QueryDistribution::new(queries, &remaining_, allow_checkpoints);
 
         #[expect(clippy::type_complexity)]
         let mut choices: Vec<(u32, Box<dyn Fn(&mut R) -> Interactions>)> = vec![

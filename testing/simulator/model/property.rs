@@ -168,13 +168,13 @@ pub enum Property {
         select: Select,
         where_clause: Predicate,
     },
-    /// FsyncNoWait is a property which tests if we do not loose any data after not waiting for fsync.
+    /// FsyncNoWait tests recovery when a query is interrupted at fsync.
     ///
     /// # Interactions
-    /// - Executes the `query` without waiting for fsync
-    /// - Drop all connections and Reopen the database
-    /// - Execute the `query` again
-    /// - Query tables to assert that the values were inserted
+    /// - Execute `query` until the memory backend has a pending fsync
+    /// - Simulate power loss and reopen the database
+    /// - Retry `query`; a query that reaches no fsync is not retried
+    /// - Compare the recovered database with the shadow model
     ///
     FsyncNoWait {
         query: Query,

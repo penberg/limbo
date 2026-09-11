@@ -1,20 +1,23 @@
 use std::{
     cell::{Cell, RefCell},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use rand::{Rng as _, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use tracing::{Level, instrument};
-use turso_core::{Completion, File, Result};
+use turso_core::{Completion, CompletionError, File, LimboError, Result};
 
 use crate::runner::{
     clock::SimulatorClock,
-    memory::io::{CallbackQueue, Fd, Operation, OperationType},
+    memory::io::{CallbackQueue, FileState, Operation, OperationType},
 };
 
 /// Tracks IO calls and faults for each type of I/O operation
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct IOTracker {
     pread_calls: usize,
     pread_faults: usize,
@@ -45,11 +48,12 @@ impl IOTracker {
 pub struct MemorySimFile {
     // TODO: maybe have a pending queue which is fast to append
     // and then we just do a mem swap the pending with the callback to minimize lock contention on callback queue
-    pub callbacks: CallbackQueue,
-    pub fd: Arc<Fd>,
-    pub buffer: RefCell<Vec<u8>>,
+    pub(super) callbacks: CallbackQueue,
+    pub(super) state: Arc<RefCell<FileState>>,
     // TODO: add fault map later here
-    pub closed: Cell<bool>,
+    pub(super) closed: Cell<bool>,
+    generation: Arc<AtomicU64>,
+    opened_generation: u64,
     io_tracker: RefCell<IOTracker>,
     pub rng: RefCell<ChaCha8Rng>,
     pub latency_probability: u8,
@@ -61,18 +65,20 @@ unsafe impl Send for MemorySimFile {}
 unsafe impl Sync for MemorySimFile {}
 
 impl MemorySimFile {
-    pub fn new(
+    pub(super) fn new(
         callbacks: CallbackQueue,
-        fd: Fd,
         seed: u64,
         latency_probability: u8,
         clock: Arc<SimulatorClock>,
+        generation: Arc<AtomicU64>,
     ) -> Self {
+        let opened_generation = generation.load(Ordering::Acquire);
         Self {
             callbacks,
-            fd: Arc::new(fd),
-            buffer: RefCell::new(Vec::new()),
+            state: Arc::new(RefCell::new(FileState::default())),
             closed: Cell::new(false),
+            generation,
+            opened_generation,
             io_tracker: RefCell::new(IOTracker::default()),
             rng: RefCell::new(ChaCha8Rng::seed_from_u64(seed)),
             latency_probability,
@@ -83,6 +89,35 @@ impl MemorySimFile {
 
     pub fn inject_fault(&self, fault: bool) {
         self.fault.set(fault);
+    }
+
+    pub(super) fn reopen(&self) -> Self {
+        Self {
+            callbacks: self.callbacks.clone(),
+            state: self.state.clone(),
+            closed: Cell::new(false),
+            generation: self.generation.clone(),
+            opened_generation: self.generation.load(Ordering::Acquire),
+            io_tracker: RefCell::new(self.io_tracker.borrow().clone()),
+            rng: RefCell::new(self.rng.borrow().clone()),
+            latency_probability: self.latency_probability,
+            clock: self.clock.clone(),
+            fault: Cell::new(self.fault.get()),
+        }
+    }
+
+    fn ensure_open(&self) -> Result<()> {
+        if !self.is_open() {
+            return Err(LimboError::CompletionError(CompletionError::IOError(
+                std::io::ErrorKind::Other,
+                "memory simulator file is closed",
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn is_open(&self) -> bool {
+        !self.closed.get() && self.opened_generation == self.generation.load(Ordering::Acquire)
     }
 
     pub fn stats_table(&self) -> String {
@@ -148,39 +183,22 @@ impl MemorySimFile {
             time: self.generate_latency(),
             op,
             fault,
-            fd: self.fd.clone(),
+            file: self.state.clone(),
         });
-    }
-
-    pub fn write_buf(&self, buf: &[u8], offset: usize) -> usize {
-        let mut file_buf = self.buffer.borrow_mut();
-        let more_space = if file_buf.len() < offset {
-            (offset + buf.len()) - file_buf.len()
-        } else {
-            buf.len().saturating_sub(file_buf.len() - offset)
-        };
-        if more_space > 0 {
-            file_buf.reserve(more_space);
-            for _ in 0..more_space {
-                file_buf.push(0);
-            }
-        }
-
-        file_buf[offset..][0..buf.len()].copy_from_slice(buf);
-        buf.len()
     }
 }
 
 impl File for MemorySimFile {
     fn lock_file(&self, _exclusive: bool) -> Result<()> {
-        Ok(())
+        self.ensure_open()
     }
 
     fn unlock_file(&self) -> Result<()> {
-        Ok(())
+        self.ensure_open()
     }
 
     fn pread(&self, pos: u64, c: Completion) -> Result<Completion> {
+        self.ensure_open()?;
         self.io_tracker.borrow_mut().pread_calls += 1;
 
         let op = OperationType::Read {
@@ -197,6 +215,7 @@ impl File for MemorySimFile {
         buffer: Arc<turso_core::Buffer>,
         c: Completion,
     ) -> Result<Completion> {
+        self.ensure_open()?;
         self.io_tracker.borrow_mut().pwrite_calls += 1;
         let op = OperationType::Write {
             buffer,
@@ -213,6 +232,11 @@ impl File for MemorySimFile {
         buffers: Vec<Arc<turso_core::Buffer>>,
         c: Completion,
     ) -> Result<Completion> {
+        self.ensure_open()?;
+        if buffers.is_empty() {
+            c.complete(0);
+            return Ok(c);
+        }
         if buffers.len() == 1 {
             return self.pwrite(pos, buffers[0].clone(), c);
         }
@@ -227,21 +251,25 @@ impl File for MemorySimFile {
     }
 
     fn sync(&self, c: Completion, _sync_type: turso_core::io::FileSyncType) -> Result<Completion> {
+        self.ensure_open()?;
         self.io_tracker.borrow_mut().sync_calls += 1;
         let op = OperationType::Sync {
             completion: c.clone(),
+            snapshot: self.state.borrow_mut().sync_started(),
         };
         self.insert_op(op);
         Ok(c)
     }
 
     fn size(&self) -> Result<u64> {
+        self.ensure_open()?;
         // TODO: size operation should also be scheduled. But this requires a change in how we
         // Use this function internally in Turso
-        Ok(self.buffer.borrow().len() as u64)
+        Ok(self.state.borrow().buffer.len as u64)
     }
 
     fn truncate(&self, len: u64, c: Completion) -> Result<Completion> {
+        self.ensure_open()?;
         self.io_tracker.borrow_mut().truncate_calls += 1;
         let op = OperationType::Truncate {
             completion: c.clone(),

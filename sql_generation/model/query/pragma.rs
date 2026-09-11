@@ -6,6 +6,18 @@ use serde::{Deserialize, Serialize};
 pub enum Pragma {
     AutoVacuumMode(VacuumMode),
     ForeignKeyList(String),
+    WalCheckpoint {
+        database: Option<String>,
+        mode: CheckpointMode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum CheckpointMode {
+    Passive,
+    Full,
+    Restart,
+    Truncate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +43,22 @@ impl Display for Pragma {
             Pragma::ForeignKeyList(table_name) => {
                 let table_name = table_name.replace('\'', "''");
                 write!(f, "PRAGMA foreign_key_list('{table_name}')")
+            }
+            Pragma::WalCheckpoint { database, mode } => {
+                write!(f, "PRAGMA ")?;
+                if let Some(database) = database {
+                    write!(f, "{database}.")?;
+                }
+                write!(
+                    f,
+                    "wal_checkpoint({})",
+                    match mode {
+                        CheckpointMode::Passive => "PASSIVE",
+                        CheckpointMode::Full => "FULL",
+                        CheckpointMode::Restart => "RESTART",
+                        CheckpointMode::Truncate => "TRUNCATE",
+                    }
+                )
             }
         }
     }

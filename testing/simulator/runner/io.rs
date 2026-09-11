@@ -105,6 +105,12 @@ impl SimIO for SimulatorIO {
         self.files.borrow_mut().clear()
     }
 
+    fn power_loss(&self) -> Result<()> {
+        Err(turso_core::LimboError::InvalidArgument(
+            "POWER_LOSS requires --io-backend memory".into(),
+        ))
+    }
+
     fn persist_files(&self) -> anyhow::Result<()> {
         // Files are persisted automatically
         Ok(())
