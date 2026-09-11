@@ -3,6 +3,93 @@ mod tests {
     use crate::common::{ExecRows, TempDatabase};
     use tempfile::TempDir;
 
+    #[test]
+    fn test_uuid_invalid_update_and_upsert_preserve_rows() {
+        for mvcc in [false, true] {
+            let opts = turso_core::DatabaseOpts::new()
+                .with_custom_types(true)
+                .with_encryption(true);
+            let db = TempDatabase::builder()
+                .with_opts(opts)
+                .with_mvcc(mvcc)
+                .build();
+            let conn = db.connect_limbo();
+            let mode: Vec<(String,)> = conn.exec_rows("PRAGMA journal_mode");
+            assert_eq!(mode, vec![(if mvcc { "mvcc" } else { "wal" }.to_string(),)]);
+
+            let uuid = "01945ca0-3189-76c0-9a8f-caf310fc8b8e";
+            conn.execute("CREATE TABLE t1(a INTEGER PRIMARY KEY, b uuid) STRICT")
+                .unwrap();
+            conn.execute(format!("INSERT INTO t1 VALUES (1, '{uuid}')"))
+                .unwrap();
+
+            for sql in [
+                "UPDATE t1 SET b = 42 WHERE a = 1",
+                "INSERT INTO t1 VALUES (1, '01945ca0-3189-76c0-9a8f-caf310fc8b8e') \
+                 ON CONFLICT(a) DO UPDATE SET b = 42",
+            ] {
+                let err = conn.execute(sql).unwrap_err();
+                assert!(
+                    err.to_string().contains("invalid UUID value"),
+                    "mvcc={mvcc}, {sql}: {err}"
+                );
+                let rows: Vec<(i64, String)> = conn.exec_rows("SELECT a, b FROM t1 ORDER BY a");
+                assert_eq!(rows, vec![(1, uuid.to_string())], "mvcc={mvcc}, {sql}");
+            }
+            conn.close().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_uuid_invalid_multirow_writes_preserve_transaction() {
+        for mvcc in [false, true] {
+            let opts = turso_core::DatabaseOpts::new()
+                .with_custom_types(true)
+                .with_encryption(true);
+            let db = TempDatabase::builder()
+                .with_opts(opts)
+                .with_mvcc(mvcc)
+                .build();
+            let conn = db.connect_limbo();
+            let mode: Vec<(String,)> = conn.exec_rows("PRAGMA journal_mode");
+            assert_eq!(mode, vec![(if mvcc { "mvcc" } else { "wal" }.to_string(),)]);
+
+            let uuid = "01945ca0-3189-76c0-9a8f-caf310fc8b8e";
+            conn.execute("CREATE TABLE t1(a INTEGER PRIMARY KEY, b uuid) STRICT")
+                .unwrap();
+            conn.execute(format!(
+                "INSERT INTO t1 VALUES (1, '{uuid}'), (2, '{uuid}')"
+            ))
+            .unwrap();
+            conn.execute("BEGIN").unwrap();
+            conn.execute(format!("INSERT INTO t1 VALUES (3, '{uuid}')"))
+                .unwrap();
+            let expected = vec![
+                (1, uuid.to_string()),
+                (2, uuid.to_string()),
+                (3, uuid.to_string()),
+            ];
+
+            for sql in [
+                "INSERT INTO t1 VALUES (4, '01945ca0-3189-76c0-9a8f-caf310fc8b8e'), (5, 42)",
+                "UPDATE t1 SET b = CASE WHEN a = 1 THEN '550e8400-e29b-41d4-a716-446655440000' \
+                 ELSE 42 END WHERE a < 3",
+            ] {
+                let err = conn.execute(sql).unwrap_err();
+                assert!(
+                    err.to_string().contains("invalid UUID value"),
+                    "mvcc={mvcc}, {sql}: {err}"
+                );
+                let rows: Vec<(i64, String)> = conn.exec_rows("SELECT a, b FROM t1 ORDER BY a");
+                assert_eq!(rows, expected, "mvcc={mvcc}, {sql}");
+            }
+            conn.execute("COMMIT").unwrap();
+            let rows: Vec<(i64, String)> = conn.exec_rows("SELECT a, b FROM t1 ORDER BY a");
+            assert_eq!(rows, expected, "mvcc={mvcc}, after COMMIT");
+            conn.close().unwrap();
+        }
+    }
+
     /// Custom types must be loaded from __turso_internal_types when reopening
     /// a database. Without this, SELECT returns raw encoded values and PRAGMA
     /// list_types omits user-defined types.

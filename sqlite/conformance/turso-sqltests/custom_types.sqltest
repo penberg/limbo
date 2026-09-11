@@ -318,7 +318,7 @@ expect {
     time(value text)|text|CASE WHEN value IS NULL THEN NULL WHEN time (value) IS NULL THEN RAISE (ABORT, 'invalid time value') ELSE rtrim (rtrim (strftime ('%H:%M:%f', value), '0'), '.') END|value||'<'
     timestamp(value text)|text|CASE WHEN value IS NULL THEN NULL WHEN datetime (value) IS NULL THEN RAISE (ABORT, 'invalid timestamp value') ELSE rtrim (rtrim (strftime ('%Y-%m-%d %H:%M:%f', value), '0'), '.') END|value||'<'
     timestamptz(value text)|text|CASE WHEN value IS NULL THEN NULL WHEN datetime (value) IS NULL THEN RAISE (ABORT, 'invalid timestamp value') ELSE rtrim (rtrim (strftime ('%Y-%m-%d %H:%M:%f', value), '0'), '.') END|value||'<'
-    uuid(value text)|blob|uuid_blob (value)|uuid_str (value)|uuid4_str ()|'<'
+    uuid(value any)|blob|CASE WHEN value IS NULL THEN NULL WHEN typeof (value) = 'blob' AND length (value) = 16 THEN value ELSE coalesce (uuid_blob (value), RAISE (ABORT, 'invalid UUID value')) END|uuid_str (value)|uuid4_str ()|'<'
     varchar(value text, maxlen integer)|text|CASE WHEN length (value) <= maxlen THEN value ELSE RAISE (ABORT, 'value too long for varchar') END|value||'<'
 }
 
@@ -353,7 +353,7 @@ expect {
     time(value text)|text|CASE WHEN value IS NULL THEN NULL WHEN time (value) IS NULL THEN RAISE (ABORT, 'invalid time value') ELSE rtrim (rtrim (strftime ('%H:%M:%f', value), '0'), '.') END|value||'<'
     timestamp(value text)|text|CASE WHEN value IS NULL THEN NULL WHEN datetime (value) IS NULL THEN RAISE (ABORT, 'invalid timestamp value') ELSE rtrim (rtrim (strftime ('%Y-%m-%d %H:%M:%f', value), '0'), '.') END|value||'<'
     timestamptz(value text)|text|CASE WHEN value IS NULL THEN NULL WHEN datetime (value) IS NULL THEN RAISE (ABORT, 'invalid timestamp value') ELSE rtrim (rtrim (strftime ('%Y-%m-%d %H:%M:%f', value), '0'), '.') END|value||'<'
-    uuid(value text)|blob|uuid_blob (value)|uuid_str (value)|uuid4_str ()|'<'
+    uuid(value any)|blob|CASE WHEN value IS NULL THEN NULL WHEN typeof (value) = 'blob' AND length (value) = 16 THEN value ELSE coalesce (uuid_blob (value), RAISE (ABORT, 'invalid UUID value')) END|uuid_str (value)|uuid4_str ()|'<'
     varchar(value text, maxlen integer)|text|CASE WHEN length (value) <= maxlen THEN value ELSE RAISE (ABORT, 'value too long for varchar') END|value||'<'
 }
 
@@ -365,6 +365,174 @@ test encode-null-rejects-primary-key {
 }
 expect error {
     NOT NULL constraint failed
+}
+
+test strict-uuid-accepts-generated-blobs {
+    CREATE TABLE t1(id uuid PRIMARY KEY) STRICT;
+    INSERT INTO t1 VALUES (uuid4());
+    INSERT INTO t1 VALUES (uuid7());
+    SELECT count(*), min(length(id)), max(length(id)) FROM t1;
+}
+expect {
+    2|36|36
+}
+
+test strict-uuid-rejects-invalid-blob {
+    CREATE TABLE t1(id uuid PRIMARY KEY) STRICT;
+    INSERT INTO t1 VALUES (X'0102');
+}
+expect error {
+    invalid UUID value
+}
+
+test strict-uuid-rejects-invalid-text {
+    CREATE TABLE t1(id uuid PRIMARY KEY) STRICT;
+    INSERT INTO t1 VALUES ('not a uuid');
+}
+expect error {
+    invalid UUID value
+}
+
+setup nullable-uuid {
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b uuid) STRICT;
+}
+
+@setup nullable-uuid
+test strict-uuid-nullable-rejects-integer {
+    INSERT INTO t1 VALUES (1, 42);
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+test strict-uuid-nullable-rejects-real {
+    INSERT INTO t1 VALUES (1, 3.5);
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+test strict-uuid-nullable-rejects-short-blob {
+    INSERT INTO t1 VALUES (1, X'0102');
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+test strict-uuid-nullable-rejects-malformed-text {
+    INSERT INTO t1 VALUES (1, 'not a uuid');
+}
+expect error {
+    invalid UUID value
+}
+
+setup uuid-row {
+    INSERT INTO t1 VALUES (1, '01945ca0-3189-76c0-9a8f-caf310fc8b8e');
+}
+
+@setup nullable-uuid
+@setup uuid-row
+test strict-uuid-update-rejects-integer {
+    UPDATE t1 SET b = 42;
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+@setup uuid-row
+test strict-uuid-update-rejects-real {
+    UPDATE t1 SET b = 3.5;
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+@setup uuid-row
+test strict-uuid-update-rejects-short-blob {
+    UPDATE t1 SET b = X'0102';
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+@setup uuid-row
+test strict-uuid-update-rejects-malformed-text {
+    UPDATE t1 SET b = 'not a uuid';
+}
+expect error {
+    invalid UUID value
+}
+
+test strict-uuid-not-null-update-rejects-short-blob {
+    CREATE TABLE t1(b uuid NOT NULL) STRICT;
+    INSERT INTO t1 VALUES ('01945ca0-3189-76c0-9a8f-caf310fc8b8e');
+    UPDATE t1 SET b = X'0102';
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+@setup uuid-row
+test strict-uuid-upsert-rejects-integer {
+    INSERT INTO t1 VALUES (1, '01945ca0-3189-76c0-9a8f-caf310fc8b8e')
+        ON CONFLICT(a) DO UPDATE SET b = 42;
+}
+expect error {
+    invalid UUID value
+}
+
+@setup nullable-uuid
+test strict-uuid-valid-inputs {
+    INSERT INTO t1 VALUES (1, '01945ca0-3189-76c0-9a8f-caf310fc8b8e'),
+        (2, X'01945ca0318976c09a8fcaf310fc8b8e'), (3, NULL);
+    SELECT a, quote(b) FROM t1 ORDER BY a;
+    UPDATE t1 SET b = X'01945ca0318976c09a8fcaf310fc8b8e' WHERE a = 1;
+    UPDATE t1 SET b = '01945ca0-3189-76c0-9a8f-caf310fc8b8e' WHERE a = 2;
+    UPDATE t1 SET b = NULL WHERE a = 3;
+    SELECT a, quote(b) FROM t1 ORDER BY a;
+}
+expect {
+    1|'01945ca0-3189-76c0-9a8f-caf310fc8b8e'
+    2|'01945ca0-3189-76c0-9a8f-caf310fc8b8e'
+    3|NULL
+    1|'01945ca0-3189-76c0-9a8f-caf310fc8b8e'
+    2|'01945ca0-3189-76c0-9a8f-caf310fc8b8e'
+    3|NULL
+}
+
+test strict-uuid-cast-null {
+    SELECT CAST(NULL AS uuid) IS NULL;
+}
+expect {
+    1
+}
+
+test uuid-blob-invalid-inputs-remain-null {
+    SELECT uuid_blob(42) IS NULL, uuid_blob(3.5) IS NULL,
+        uuid_blob(X'0102') IS NULL, uuid_blob('not a uuid') IS NULL,
+        uuid_blob(NULL) IS NULL;
+}
+expect {
+    1|1|1|1|1
+}
+
+test strict-uuid-foreign-key-matches-text-and-blob {
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE t1(id uuid PRIMARY KEY) STRICT;
+    CREATE TABLE t2(parent_id uuid REFERENCES t1(id)) STRICT;
+    INSERT INTO t1 VALUES ('01945ca0-3189-76c0-9a8f-caf310fc8b8e');
+    INSERT INTO t2 VALUES (X'01945ca0318976c09a8fcaf310fc8b8e');
+    SELECT parent_id FROM t2;
+}
+expect {
+    01945ca0-3189-76c0-9a8f-caf310fc8b8e
 }
 
 @requires strict "uses STRICT tables"
