@@ -1,6 +1,6 @@
 {
   "name": "@tursodatabase/cli-win32-x64-msvc",
-  "version": "0.8.0-pre.10",
+  "version": "0.8.0-pre.11",
   "description": "Turso CLI binary for Windows x64",
   "os": [
     "win32"
