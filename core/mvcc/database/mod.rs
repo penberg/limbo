@@ -1791,13 +1791,19 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CommitStateMachine<Clock, A> {
                 )
             {
                 self.commit_coordinator.clear_issued();
-                if self.commit_coordinator.take_abandoned(batch.writing.tx_id) {
-                    if self.mvcc_store.txs.get(&batch.writing.tx_id).is_some() {
-                        self.mvcc_store
-                            .rollback_tx_inner(batch.writing.tx_id, None, self.db_id);
+                let writer_is_another_tx = batch.writing.tx_id != self.tx_id;
+                if writer_is_another_tx {
+                    if self.commit_coordinator.take_abandoned(batch.writing.tx_id) {
+                        if self.mvcc_store.txs.get(&batch.writing.tx_id).is_some() {
+                            self.mvcc_store.rollback_tx_inner(
+                                batch.writing.tx_id,
+                                None,
+                                self.db_id,
+                            );
+                        }
+                    } else {
+                        self.commit_coordinator.request_retry(batch.writing.ticket);
                     }
-                } else {
-                    self.commit_coordinator.request_retry(batch.writing.ticket);
                 }
                 self.commit_coordinator.requeue(batch.rest.into_iter());
             } else {
