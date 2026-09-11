@@ -119,8 +119,6 @@ jobs:
       run: cargo run -p turso_stress --locked -- --nr-threads 2 --nr-iterations 1000
 
   libfuzzer-scalar-func:
-    # Allow this job to fail without failing the entire CI run
-    continue-on-error: true
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
@@ -139,5 +137,8 @@ jobs:
         cache-on-failure: true
     - name: Install cargo-fuzz
       run: cargo install cargo-fuzz@0.13.0
+    - name: Build all libFuzzer targets
+      run: cargo +nightly-2025-12-17 fuzz build --dev
     - name: Run scalar_func fuzzer
+      continue-on-error: true
       run: cargo +nightly-2025-12-17 fuzz run scalar_func -- -max_total_time=300
