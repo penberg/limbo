@@ -261,6 +261,13 @@ pub struct CheckpointStateMachine<Clock: LogicalClock, A: ConcurrentAllocator = 
     /// Positive roots whose btrees were destroyed in this checkpoint's pager write.
     /// Only these may be removed from `dropped_root_pages` at publish.
     freed_root_pages: HashSet<i64>,
+    /// Table rowids whose pager write or delete finished this checkpoint.
+    /// GC stamps only these, after pager commit. Stamping a skip-write makes
+    /// scans fall through to a B-tree that never got the row.
+    written_table_rowids: HashSet<(MVTableId, i64)>,
+    /// `index_write_set` slots whose pager write or delete finished. Slots, not
+    /// keys: `SortableIndexKey` is not `Hash`.
+    written_index_slots: HashSet<usize>,
 }
 
 /// One pending compaction job in the per-checkpoint sequence sweep.
@@ -842,6 +849,8 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
             staged_roots: crate::alloc::vec![],
             ended_created_roots: HashSet::default(),
             freed_root_pages: HashSet::default(),
+            written_table_rowids: HashSet::default(),
+            written_index_slots: HashSet::default(),
         }
     }
 
@@ -1783,9 +1792,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
         };
         let mut index = next_index;
         let mut processed = 0;
-        // Drop current SkipMap versions only when B-trees are stable (blocking Truncate).
-        let drop_current_if_in_btree = self.lock_states.blocking_checkpoint_lock_held
-            || !self.mvstore.experimental_mvcc_passive_checkpoint;
+        let drop_current_if_in_btree = true;
         while index < self.write_set.len() {
             let current = index;
             index += 1;
@@ -1797,16 +1804,19 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
             let row_id = &self.write_set[current].0.row.id;
             if let Some(entry) = self.mvstore.rows.get(row_id) {
                 let mut versions = entry.value().write();
-                self.mvstore.stamp_chain_materialized(
-                    &mut versions,
-                    materialized_frame,
-                    snapshot_ts,
-                );
-                let dropped = MvStore::<Clock, A>::gc_version_chain(
+                if let RowKey::Int(n) = row_id.row_id {
+                    if self.written_table_rowids.contains(&(row_id.table_id, n)) {
+                        self.mvstore.stamp_chain_materialized(
+                            &mut versions,
+                            materialized_frame,
+                            snapshot_ts,
+                        );
+                    }
+                }
+                let dropped = self.mvstore.gc_chain_now(
                     &mut versions,
                     lwm,
                     ckpt_max,
-                    self.mvstore.experimental_mvcc_passive_checkpoint,
                     min_reader_mark,
                     drop_current_if_in_btree,
                 );
@@ -1842,7 +1852,6 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
         // Same as table GC: keep empty SkipMap slots; Truncate Finalize unlinks later.
         let ckpt_max = self.durable_txid_max_new;
         let min_reader_mark = self.gc_floor_reader_mark();
-        // Same stamp as table GC (unchanged since CommitPagerTxn).
         let materialized_frame = WalPos::from_pair(self.pager.wal_pos());
         let snapshot_ts = self.snapshot_ts;
         let CheckpointState::GcIndexRows { next_index, lwm } = self.state else {
@@ -1850,8 +1859,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
         };
         let mut index = next_index;
         let mut processed = 0;
-        let drop_current_if_in_btree = self.lock_states.blocking_checkpoint_lock_held
-            || !self.mvstore.experimental_mvcc_passive_checkpoint;
+        let drop_current_if_in_btree = true;
         while index < self.index_write_set.len() {
             let current = index;
             index += 1;
@@ -1871,16 +1879,17 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                     .get(sortable_key)
                     .expect("index row from write set must exist in inner map");
                 let mut versions = inner_entry.value().write();
-                self.mvstore.stamp_chain_materialized(
-                    &mut versions,
-                    materialized_frame,
-                    snapshot_ts,
-                );
-                let dropped = MvStore::<Clock, A>::gc_version_chain(
+                if self.written_index_slots.contains(&current) {
+                    self.mvstore.stamp_chain_materialized(
+                        &mut versions,
+                        materialized_frame,
+                        snapshot_ts,
+                    );
+                }
+                let dropped = self.mvstore.gc_chain_now(
                     &mut versions,
                     lwm,
                     ckpt_max,
-                    self.mvstore.experimental_mvcc_passive_checkpoint,
                     min_reader_mark,
                     drop_current_if_in_btree,
                 );
@@ -1900,6 +1909,19 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
         } else {
             None
         }
+    }
+
+    fn record_written_table_row(&mut self, write_set_index: usize) {
+        let Some(row_id) = self
+            .get_current_row_version(write_set_index)
+            .map(|(row_version, _)| row_version.row.id.clone())
+        else {
+            return;
+        };
+        let RowKey::Int(n) = row_id.row_id else {
+            return;
+        };
+        self.written_table_rowids.insert((row_id.table_id, n));
     }
 
     /// Stages synthetic `persistent_tx_ts_max` row into the checkpoint write set
@@ -2509,6 +2531,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                 match write_row_state_machine.step(&())? {
                     IOResult::IO(io) => Ok(TransitionResult::Io(io)),
                     IOResult::Done(_) => {
+                        self.record_written_table_row(write_set_index);
                         let requires_seek = self.next_requires_seek_after_insert(write_set_index);
                         self.state = CheckpointState::WriteRow {
                             write_set_index: write_set_index + 1,
@@ -2531,6 +2554,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                 match delete_row_state_machine.step(&())? {
                     IOResult::IO(io) => Ok(TransitionResult::Io(io)),
                     IOResult::Done(_) => {
+                        self.record_written_table_row(write_set_index);
                         self.state = CheckpointState::WriteRow {
                             write_set_index: write_set_index + 1,
                             requires_seek: true,
@@ -2659,6 +2683,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                 match write_row_state_machine.step(&())? {
                     IOResult::IO(io) => Ok(TransitionResult::Io(io)),
                     IOResult::Done(_) => {
+                        self.written_index_slots.insert(index_write_set_index);
                         self.state = CheckpointState::WriteIndexRow {
                             index_write_set_index: index_write_set_index + 1,
                             requires_seek: true,
@@ -2682,6 +2707,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                 match delete_row_state_machine.step(&())? {
                     IOResult::IO(io) => Ok(TransitionResult::Io(io)),
                     IOResult::Done(_) => {
+                        self.written_index_slots.insert(index_write_set_index);
                         self.state = CheckpointState::WriteIndexRow {
                             index_write_set_index: index_write_set_index + 1,
                             requires_seek: true,
@@ -2973,7 +2999,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                 let backfill =
                     WalPos::from_pair((seq, self.pager.wal_backfill_frame().unwrap_or(0)));
                 *self.mvstore.backfill_floor.write() = backfill;
-                let lwm = self.mvstore.compute_lwm();
+                let lwm = self.mvstore.sample_gc_lwm();
                 // Reclaim retired root-page bindings no transaction can still see (end <= lwm).
                 self.mvstore.gc_rootpage_entries(lwm);
                 self.state = CheckpointState::GcTableRows { next_index: 0, lwm };
@@ -3005,11 +3031,11 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock, 
                     // That lock waits out open MVCC txs, so no old reader can see a later rewrite.
                     self.mvstore.drop_unused_row_versions_and_slots();
                 } else {
-                    // Passive: drop old versions and empty slots, but keep the latest SkipMap
-                    // copy of each row. Without it, an older reader can fall through to a
-                    // B-tree page that a later checkpoint already rewrote.
-                    // Also use the pager reader mark so we don't GC versions a brand-new
-                    // reader still needs before its MVCC tx is registered.
+                    // Passive: drop superseded history and empty slots. Rule 3 also
+                    // drops last currents when idle (`lwm == MAX`); with open
+                    // snapshots those stay in the SkipMap. Use the pager reader
+                    // mark so we don't GC versions a brand-new reader still needs
+                    // before its MVCC tx is registered.
                     self.mvstore
                         .drop_unused_row_versions_unlink_empty_at(self.gc_floor_reader_mark());
                 }
@@ -3687,7 +3713,13 @@ mod tests {
             versions.push(version.clone());
             mvstore.rows.insert(row_id, Arc::new(RwLock::new(versions)));
             checkpoint.write_set.push((version, None));
+            checkpoint.written_table_rowids.insert((table_id, i));
         }
+        // The real run publishes `backfill_floor` from the checkpointed WAL right
+        // before entering `GcTableRows`. Rule 3 needs every reader mark to have
+        // reached the stamp, and `gc_floor_reader_mark` is clamped by this floor,
+        // so a fixture that jumps straight into the state must publish it too.
+        *mvstore.backfill_floor.write() = WalPos::from_pair(checkpoint.pager.wal_pos());
         checkpoint.state = CheckpointState::GcTableRows {
             next_index: 0,
             lwm: u64::MAX,
@@ -3755,7 +3787,11 @@ mod tests {
                 .insert_index_version(index_id, key, version.clone())
                 .unwrap();
             checkpoint.index_write_set.push((index_id, version, false));
+            checkpoint.written_index_slots.insert(i as usize);
         }
+        // See the table variant: publish the floor the real `GcIndexRows` entry
+        // would have published, or Rule 3 keeps every stamped current.
+        *mvstore.backfill_floor.write() = WalPos::from_pair(checkpoint.pager.wal_pos());
         checkpoint.state = CheckpointState::GcIndexRows {
             next_index: 0,
             lwm: u64::MAX,
