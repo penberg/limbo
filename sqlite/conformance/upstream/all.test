@@ -34,23 +34,23 @@ set test_files {
   aggnested            fail
   aggorderby           fail
   alias                fail
-  alter                skip {dies mid-file on a TCL error}
+  alter                fail
   alter2               fail
   alter3               fail
   alter4               fail
   altercol             fail
   altercorrupt         fail
-  alterdropcol         skip {hangs at alterdropcol-9.2.1}
+  alterdropcol         fail
   alterdropcol2        fail
   alterlegacy          fail
   alterqf              fail
   altertab             fail
   altertab2            fail
-  altertab3          skip {aborts the harness on an engine panic at core/translate/expr/translator.rs:2286}
+  altertab3          fail
   altertrig            fail
   analyze              fail
   analyze3             fail
-  analyze4             fail
+  analyze4             pass
   analyze5             fail
   analyze6             fail
   analyze7             fail
@@ -72,7 +72,7 @@ set test_files {
   autoanalyze1         fail
   autoinc              fail
   autoindex1           fail
-  autoindex2           fail
+  autoindex2           pass
   autoindex3           fail
   autoindex4           pass
   autoindex5           fail
@@ -92,18 +92,18 @@ set test_files {
   bigfile2             pass
   bigmmap              fail
   bigrow               pass
-  bigsort              skip {builds a multi-GB database and WAL; far too slow to run}
+  bigsort              fail
   bind                 fail
   bind2                fail
   bindxfer             fail
-  bitvec               fail
+  bitvec               pass
   blob                 fail
   bloom1               fail
   boundary1            pass
   boundary2            pass
   boundary3            pass
   boundary4            pass
-  btree01            skip {aborts the harness on an engine panic}
+  btree01            fail
   btree02              fail
   busy                 fail
   busy2                fail
@@ -122,7 +122,7 @@ set test_files {
   changes2             pass
   check                fail
   chunksize            fail
-  cksumvfs             fail
+  cksumvfs             pass
   close                pass
   closure01            fail
   coalesce             pass
@@ -181,7 +181,7 @@ set test_files {
   date                 fail
   date2                fail
   date3                pass
-  date4                fail
+  date4                pass
   date5                pass
   dbfuzz001            fail
   dbpage               fail
@@ -189,8 +189,8 @@ set test_files {
   dbstatus2            fail
   delete               fail
   delete2              fail
-  delete3              skip {hangs at delete3-1.1}
-  delete4            skip {aborts the harness on an engine panic at core/storage/wal.rs:4363}
+  delete3              pass
+  delete4            fail
   delete_db            fail
   descidx1             fail
   descidx2             fail
@@ -242,11 +242,11 @@ set test_files {
   extension01          fail
   external_reader      fail
   fallocate            fail
-  filectrl             fail
+  filectrl             pass
   filefmt              fail
   filter1              fail
   filter2              pass
-  fkey1                skip {aborts the harness on an engine panic at sqlite/parser/src/ast.rs:1215}
+  fkey1                fail
   fkey2                fail
   fkey3                fail
   fkey4                fail
@@ -256,12 +256,12 @@ set test_files {
   fkey8                fail
   fordelete            fail
   format4              fail
-  full                 fail
-  func                 skip {needs "sqlite_register_test_function"}
+  full                 skip {meta-runner: sources permutations.test and runs the whole suite again}
+  func                 fail
   func2                pass
   func3                fail
-  func4                skip {needs "load_static_extension" (totype)}
-  func5                skip {needs "sqlite3_create_function"}
+  func4                fail
+  func5                fail
   func6                fail
   func7                pass
   func8                pass
@@ -323,12 +323,12 @@ set test_files {
   istrue               fail
   join                 fail
   join2                fail
-  join3                skip {dies mid-file on a TCL error}
+  join3                fail
   join4                fail
   join5                fail
   join6                pass
   join7                fail
-  join8                skip {needs "load_static_extension" (series)}
+  join8                fail
   join9                fail
   joinA                fail
   joinB                fail
@@ -337,12 +337,12 @@ set test_files {
   joinE                pass
   joinF                fail
   joinH                fail
-  journal1             skip {tests rollback journal files; Turso is WAL-only and will never support rollback journal modes}
-  journal2             skip {tests rollback journal files; Turso is WAL-only and will never support rollback journal modes}
-  journal3             skip {tests rollback journal files; Turso is WAL-only and will never support rollback journal modes}
-  jrnlmode             skip {tests journal_mode delete/truncate/persist/memory/off; Turso is WAL-only and will never support these modes}
-  jrnlmode2            skip {tests journal_mode delete/truncate/persist/memory/off; Turso is WAL-only and will never support these modes}
-  jrnlmode3            skip {tests journal_mode delete/truncate/persist/memory/off; Turso is WAL-only and will never support these modes}
+  journal1             fail
+  journal2             fail
+  journal3             fail
+  jrnlmode             fail
+  jrnlmode2            fail
+  jrnlmode3            fail
   json101              fail
   json102              pass
   json103              pass
@@ -374,8 +374,8 @@ set test_files {
   lookaside            fail
   main                 fail
   manydb               pass
-  memjournal           skip {tests journal_mode=memory; Turso is WAL-only and will never support it}
-  memjournal2          skip {tests journal_mode=memory; Turso is WAL-only and will never support it}
+  memjournal           fail
+  memjournal2          fail
   memleak              fail
   memsubsys1           fail
   memsubsys2           fail
@@ -390,10 +390,10 @@ set test_files {
   misc4                fail
   misc5                fail
   misc6                fail
-  misc7                skip {fd-exhaustion loop runs one test per available fd; effectively hangs with modern ulimits (524288)}
+  misc7                hang {fd-exhaustion loop runs one test per available fd; 524288 fds with modern ulimits}
   misc8                fail
   misuse               fail
-  mjournal             skip {tests master journal files (rollback mode only); Turso is WAL-only and will never support them}
+  mjournal             fail
   mmap1                fail
   mmap3                fail
   mmap4                fail
@@ -406,7 +406,7 @@ set test_files {
   nolock               fail
   normalize            fail
   notify1              fail
-  notify2              fail
+  notify2              hang {waits for worker threads that thread_spawn cannot start}
   notify3              fail
   notnull              fail
   notnull2             fail
@@ -433,12 +433,12 @@ set test_files {
   pager3               fail
   pager4               fail
   pageropt             fail
-  pagesize           skip {aborts the harness on an engine panic at core/storage/wal.rs:4363}
+  pagesize           fail
   parser1              fail
   pcache               fail
   pcache2              fail
   pendingrace          fail
-  percentile         skip {aborts the harness on an engine panic at core/percentile.rs:13}
+  percentile         fail
   pragma               fail
   pragma2              fail
   pragma3              fail
@@ -452,12 +452,12 @@ set test_files {
   ptrchng              fail
   pushdown             fail
   queryonly            fail
-  quick                fail
+  quick                skip {meta-runner: sources permutations.test and runs the whole suite again}
   quickcheck           pass
   quote                fail
   randexpr1            pass
   rdonly               fail
-  readonly             fail
+  readonly             pass
   recover              fail
   regexp1              fail
   regexp2              fail
@@ -466,11 +466,11 @@ set test_files {
   resolver01           fail
   returning1           fail
   rollback             fail
-  rollback2          skip {aborts the harness on an engine panic at core/storage/btree.rs:8315}
+  rollback2          fail
   round1               pass
   rowallock            fail
   rowhash              pass
-  rowid                skip {hangs at rowid-13.1}
+  rowid                fail
   rowvalue             fail
   rowvalue2            pass
   rowvalue3            fail
@@ -479,11 +479,11 @@ set test_files {
   rowvalue6            pass
   rowvalue7            pass
   rowvalue8            fail
-  rowvalue9          skip {aborts the harness on an engine panic at core/vdbe/builder.rs:1580}
+  rowvalue9          fail
   rowvalueA            pass
   rowvaluevtab         fail
   savepoint            fail
-  savepoint2           fail
+  savepoint2           pass
   savepoint4           fail
   savepoint5           pass
   savepoint6           fail
@@ -507,19 +507,19 @@ set test_files {
   select6              fail
   select7              fail
   select8              pass
-  select9              skip {needs "db collate" (custom TCL collations)}
+  select9              fail
   selectA              fail
   selectB              fail
   selectC              pass
   selectD              fail
   selectE              pass
   selectF              pass
-  selectG              skip {hangs on an INSERT with a 100,000-entry VALUES clause}
+  selectG              pass
   selectH              fail
   shmlock              fail
   shortread1           fail
   shrink               fail
-  sidedelete         skip {aborts the harness on an engine panic}
+  sidedelete         pass
   skipscan1            fail
   skipscan2            fail
   skipscan3            fail
@@ -532,8 +532,8 @@ set test_files {
   snapshot_up          fail
   softheap1            fail
   sort                 fail
-  sort2                fail
-  sort3                fail
+  sort2                pass
+  sort3                pass
   sort4                fail
   sort5                fail
   sorterref            pass
@@ -578,7 +578,7 @@ set test_files {
   tkt-2d1a5c67d        fail
   tkt-2ea2425d34       fail
   tkt-31338dca7e       pass
-  tkt-313723c356       fail
+  tkt-313723c356       pass
   tkt-385a5b56b9       fail
   tkt-38cb5df375       pass
   tkt-3998683a16       pass
@@ -591,7 +591,7 @@ set test_files {
   tkt-54844eea3f       pass
   tkt-5d863f876e       fail
   tkt-5e10420e8d       fail
-  tkt-5ee23731f        fail
+  tkt-5ee23731f        pass
   tkt-6bfb98dfc0       pass
   tkt-752e1646fc       pass
   tkt-78e04e52ea       fail
@@ -606,12 +606,12 @@ set test_files {
   tkt-99378177930f87bd fail
   tkt-9a8b09f8e6       pass
   tkt-9d68c883         fail
-  tkt-9f2eb3abac       fail
+  tkt-9f2eb3abac       pass
   tkt-a7b7803e         fail
   tkt-a7debbe0         pass
   tkt-a8a0d2996a       pass
   tkt-b1d3a2e531       fail
-  tkt-b351d95f9        fail
+  tkt-b351d95f9        pass
   tkt-b72787b1         pass
   tkt-b75a9ca6b0       fail
   tkt-ba7cbfaedc       pass
@@ -625,7 +625,7 @@ set test_files {
   tkt-d82e3f3721       fail
   tkt-f3e5abed55       fail
   tkt-f67b41381a       fail
-  tkt-f777251dc7a      skip {hangs at tkt-f7772-1.2}
+  tkt-f777251dc7a      fail
   tkt-f7b4edec         fail
   tkt-f973c7ac31       pass
   tkt-fa7bf5ec         pass
@@ -643,7 +643,7 @@ set test_files {
   tkt1537              fail
   tkt1567              fail
   tkt1644              fail
-  tkt1667              fail
+  tkt1667              pass
   tkt1873              pass
   tkt2141              pass
   tkt2192              pass
@@ -668,7 +668,7 @@ set test_files {
   tkt2920              fail
   tkt2927              pass
   tkt2942              pass
-  tkt3080              skip {hangs at tkt3080.1}
+  tkt3080              fail
   tkt3093              fail
   tkt3121              fail
   tkt3201              pass
@@ -690,14 +690,14 @@ set test_files {
   tkt3581              pass
   tkt35xx              fail
   tkt3630              pass
-  tkt3718              skip {hangs at tkt3718-1.2}
+  tkt3718              fail
   tkt3731              pass
   tkt3757              pass
   tkt3761              fail
   tkt3762              fail
   tkt3773              pass
   tkt3791              pass
-  tkt3793              fail
+  tkt3793              pass
   tkt3810              fail
   tkt3824              pass
   tkt3832              pass
@@ -719,7 +719,7 @@ set test_files {
   trace2               fail
   trace3               fail
   trans                fail
-  trans2               fail
+  trans2               hang {stress loop that takes over ten minutes}
   trans3               fail
   transitive1          fail
   trigger1             fail
@@ -768,20 +768,20 @@ set test_files {
   vacuum               fail
   vacuum-into          fail
   vacuum3              fail
-  vacuum4              fail
+  vacuum4              pass
   vacuum5              fail
-  vacuum6              fail
-  vacuummem            fail
+  vacuum6              pass
+  vacuummem            pass
   values               fail
   varint               pass
-  veryquick            fail
+  veryquick            skip {meta-runner: sources permutations.test and runs the whole suite again}
   view                 fail
   view2                pass
-  view3                skip {hangs at view3-1.1}
+  view3                fail
   wal                  fail
   wal2                 fail
   wal3                 fail
-  wal4                 fail
+  wal4                 pass
   wal5                 fail
   wal6                 fail
   wal7                 fail
@@ -800,11 +800,11 @@ set test_files {
   walprotocol2         fail
   walro                fail
   walro2               fail
-  walseh1              fail
+  walseh1              pass
   walsetlk             fail
   walsetlk2            fail
-  walsetlk3            fail
-  walsetlk_recover     fail
+  walsetlk3            hang {vwait for a testvfs callback that never fires}
+  walsetlk_recover     hang {vwait for a testvfs callback that never fires}
   walsetlk_snapshot    fail
   walshared            fail
   walslow              fail
@@ -825,12 +825,12 @@ set test_files {
   whereE               pass
   whereF               fail
   whereG               fail
-  whereH               fail
+  whereH               pass
   whereI               fail
   whereJ               fail
   whereK               fail
   whereL               fail
-  whereM               fail
+  whereM               pass
   whereN               fail
   wherelimit           fail
   wherelimit2          fail
@@ -842,7 +842,7 @@ set test_files {
   win32nolock          fail
   window1              fail
   window2              pass
-  window3              skip {hangs at window3-1.17.13.4}
+  window3              pass
   window4              fail
   window5              fail
   window6              fail
@@ -862,9 +862,9 @@ set test_files {
   with4                fail
   with5                fail
   with6                fail
-  withM                fail
+  withM                pass
   without_rowid1       fail
-  without_rowid2       fail
+  without_rowid2       pass
   without_rowid3       fail
   without_rowid4       fail
   without_rowid5       fail
