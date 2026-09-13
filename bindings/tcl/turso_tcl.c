@@ -67,7 +67,41 @@ typedef struct TursoDb {
      * see zombie_dbs below. */
     char           *zombie_name;
     struct TursoDb *next_zombie;
+    Tcl_Obj        *progress_script; /* [db progress N SCRIPT] */
+    int             progress_nops;
+    int             in_progress_cb;   /* the script above is running */
+    int             progress_pending; /* [db progress] changed inside it */
 } TursoDb;
+
+/* The engine calls this every N virtual machine steps; a non-zero result
+ * from the script interrupts the statement, as in the upstream binding.
+ * The engine holds its handler lock while calling us, so a [db progress]
+ * issued by the script cannot be applied here; it is recorded and applied
+ * on the next command the handle runs. A statement the script runs on the
+ * same connection does not fire the handler again. */
+static int tcl_progress_bridge(void *pArg)
+{
+    TursoDb *tdb = (TursoDb *)pArg;
+    if (!tdb->progress_script || tdb->in_progress_cb) return 0;
+    tdb->in_progress_cb = 1;
+    int rc = Tcl_EvalObjEx(tdb->interp, tdb->progress_script, TCL_EVAL_GLOBAL);
+    tdb->in_progress_cb = 0;
+    if (rc != TCL_OK) return 1;
+    int result = 0;
+    Tcl_GetIntFromObj(NULL, Tcl_GetObjResult(tdb->interp), &result);
+    return result;
+}
+
+static void apply_progress_handler(TursoDb *tdb)
+{
+    tdb->progress_pending = 0;
+    if (tdb->progress_script) {
+        sqlite3_progress_handler(tdb->db, tdb->progress_nops,
+                                 tcl_progress_bridge, tdb);
+    } else {
+        sqlite3_progress_handler(tdb->db, 0, NULL, NULL);
+    }
+}
 
 /* Connections closed with [sqlite3_close_v2] while statements were still
  * outstanding. The library keeps such a zombie alive until its last
@@ -507,6 +541,7 @@ static void TursoDbFree(ClientData cd)
         sqlite3_close(tdb->db);
     }
     if (tdb->null_obj) Tcl_DecrRefCount(tdb->null_obj);
+    if (tdb->progress_script) Tcl_DecrRefCount(tdb->progress_script);
     Tcl_Free((char *)tdb);
 }
 
@@ -540,6 +575,9 @@ static int TursoDbCmd(ClientData cd, Tcl_Interp *interp,
         CMD_COPY
     };
     int cmdIdx;
+    if (tdb->progress_pending && !tdb->in_progress_cb) {
+        apply_progress_handler(tdb);
+    }
 
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?args?");
@@ -782,10 +820,39 @@ static int TursoDbCmd(ClientData cd, Tcl_Interp *interp,
      * their effect fail on their own assertions. A hook subcommand called
      * with no script returns the empty string, as upstream does when no
      * hook is set. */
+    /* ---- progress N SCRIPT ---- */
+
+    case CMD_PROGRESS: {
+        if (objc == 2) {
+            Tcl_ResetResult(interp);
+            return TCL_OK;
+        }
+        if (objc != 4) {
+            Tcl_WrongNumArgs(interp, 2, objv, "N SCRIPT");
+            return TCL_ERROR;
+        }
+        int n_ops;
+        if (Tcl_GetIntFromObj(interp, objv[2], &n_ops) != TCL_OK) return TCL_ERROR;
+        if (tdb->progress_script) {
+            Tcl_DecrRefCount(tdb->progress_script);
+            tdb->progress_script = NULL;
+        }
+        tdb->progress_nops = n_ops;
+        if (Tcl_GetString(objv[3])[0] != '\0') {
+            tdb->progress_script = objv[3];
+            Tcl_IncrRefCount(tdb->progress_script);
+        }
+        if (tdb->in_progress_cb) {
+            tdb->progress_pending = 1;
+        } else {
+            apply_progress_handler(tdb);
+        }
+        return TCL_OK;
+    }
+
     case CMD_BUSY:
     case CMD_AUTH:
     case CMD_AUTHORIZER:
-    case CMD_PROGRESS:
     case CMD_COMMIT_HOOK:
     case CMD_UPDATE_HOOK:
     case CMD_ROLLBACK_HOOK:
