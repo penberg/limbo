@@ -673,6 +673,19 @@ pub unsafe extern "C" fn sqlite3_open_v2(
             (filename_str.to_string(), false, false)
         };
 
+    // Open read-only when asked to, and also when the file exists but is
+    // not writable: SQLite falls back to read-only access in that case
+    // instead of failing to open.
+    let file_is_readonly = !use_memory
+        && std::fs::metadata(&effective_filename)
+            .map(|m| m.permissions().readonly())
+            .unwrap_or(false);
+    let file_open_flags = if (flags & SQLITE_OPEN_READONLY) != 0 || file_is_readonly {
+        turso_core::OpenFlags::ReadOnly
+    } else {
+        turso_core::OpenFlags::default()
+    };
+
     let use_shared_memory = use_memory && cache_shared;
 
     let (io, db) = if use_shared_memory {
@@ -708,7 +721,7 @@ pub unsafe extern "C" fn sqlite3_open_v2(
         match turso_core::Database::open_file_with_flags(
             io.clone(),
             &effective_filename,
-            turso_core::OpenFlags::default(),
+            file_open_flags,
             default_db_opts(),
             None,
             Arc::new(SqliteDialect),
