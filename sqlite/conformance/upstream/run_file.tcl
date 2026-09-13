@@ -27,6 +27,7 @@ if {$__run_file_rc != 0 && $__run_file_rc != 2} {
   puts ""
   puts "ABORTED: $__run_file_name.test line $__run_file_where: [string range $__run_file_err 0 200]"
   if {[llength [info procs finish_test]] > 0} {
+    incr ::TC(count)
     incr ::TC(errors)
     lappend ::TC(fail_list) "$__run_file_name-ABORTED"
     finish_test
