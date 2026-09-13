@@ -62,7 +62,8 @@ fn default_db_opts() -> DatabaseOpts {
             .with_generated_columns(true)
             .with_vacuum(true)
             .with_without_rowid(true)
-            .with_attach(true);
+            .with_attach(true)
+            .with_autovacuum(true);
     }
     opts
 }
