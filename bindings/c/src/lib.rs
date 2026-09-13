@@ -961,6 +961,18 @@ pub unsafe extern "C" fn sqlite3_busy_handler(
 /// There can only be a single busy handler for a database connection. Setting a busy timeout
 /// clears any previously set busy handler.
 #[no_mangle]
+pub unsafe extern "C" fn sqlite3_db_readonly(
+    db: *mut sqlite3,
+    _db_name: *const ffi::c_char,
+) -> ffi::c_int {
+    if db.is_null() {
+        return -1;
+    }
+    let inner = (*db).inner.lock().unwrap();
+    inner._db.is_readonly() as ffi::c_int
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn sqlite3_busy_timeout(db: *mut sqlite3, ms: ffi::c_int) -> ffi::c_int {
     if db.is_null() {
         return SQLITE_MISUSE;

@@ -88,6 +88,7 @@ int sqlite3_trace_v2(sqlite3 *_db,
 void sqlite3_progress_handler(sqlite3 *_db, int _n, int (*_callback)(void *), void *_context);
 
 int sqlite3_busy_timeout(sqlite3 *_db, int _ms);
+int sqlite3_db_readonly(sqlite3 *_db, const char *_db_name);
 
 int sqlite3_set_authorizer(sqlite3 *db,
                            int (*xAuth)(void*, int, const char*, const char*, const char*, const char*),
