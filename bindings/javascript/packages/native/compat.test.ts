@@ -76,7 +76,7 @@ test('readonly-db', () => {
         }
         {
             const ro = new Database(path, { readonly: true });
-            expect(() => ro.exec("INSERT INTO t VALUES (2)")).toThrowError(/Resource is read-only/g);
+            expect(() => ro.exec("INSERT INTO t VALUES (2)")).toThrowError(/attempt to write a readonly database/g);
             expect(ro.prepare("SELECT * FROM t").all()).toEqual([{ x: 1 }])
             ro.close();
         }

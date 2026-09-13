@@ -120,7 +120,7 @@ test('readonly-db', async () => {
         }
         {
             const ro = await connect(path, { readonly: true });
-            await expect(async () => await ro.exec("INSERT INTO t VALUES (2)")).rejects.toThrowError(/Resource is read-only/g);
+            await expect(async () => await ro.exec("INSERT INTO t VALUES (2)")).rejects.toThrowError(/attempt to write a readonly database/g);
             expect(await (await ro.prepare("SELECT * FROM t")).all()).toEqual([{ x: 1 }])
             ro.close();
         }

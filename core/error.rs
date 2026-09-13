@@ -69,7 +69,7 @@ pub enum LimboError {
     TooBig,
     #[error("database table is locked")]
     TableLocked,
-    #[error("Error: Resource is read-only")]
+    #[error("attempt to write a readonly database")]
     ReadOnly,
     #[error("Database is busy")]
     Busy,
