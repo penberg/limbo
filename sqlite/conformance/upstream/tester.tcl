@@ -174,17 +174,14 @@ proc floats_equal {a b} {
 proc do_test {name cmd expected} {
   global TC testprefix
 
-  # Add prefix if it exists
-  if {$testprefix ne ""} {
-    set name "${testprefix}-$name"
-  }
+  fix_testname name
 
   incr TC(count)
   puts -nonewline "$name... "
   flush stdout
 
   if {[catch {uplevel #0 $cmd} result]} {
-    puts "ERROR: $result"
+    puts "ERROR: [truncate_for_output $result]"
     lappend TC(fail_list) $name
     incr TC(errors)
     return
@@ -193,12 +190,36 @@ proc do_test {name cmd expected} {
   # Normalize Turso error prefixes so results match SQLite's format.
   set result [normalize_result $result]
 
-  # Compare result with expected
+  # Compare result with expected. The pattern forms are upstream's:
+  #   /RE/     the regular expression RE must match the result
+  #   ~/RE/    RE must not match
+  #   /*GLOB/  a leading * means the body is a glob, not a regexp
+  #   #/RE/    a # in RE stands for a number
   set ok 0
-  if {[regexp {^/.*/$} $expected]} {
-    # Regular expression match
-    set pattern [string range $expected 1 end-1]
-    set ok [regexp $pattern $result]
+  if {[regexp {^[~#]?/.*/$} $expected]} {
+    set re $expected
+    set negate 0
+    if {[string index $re 0] eq "~"} {
+      set negate 1
+      set re [string range $re 1 end]
+    }
+    set numbers 0
+    if {[string index $re 0] eq "#"} {
+      set numbers 1
+      set re [string range $re 1 end]
+    }
+    set re [string range $re 1 end-1]
+    if {[string index $re 0] eq "*"} {
+      set ok [string match $re $result]
+    } else {
+      if {$numbers} {
+        set re [string map {# {[-0-9.]+}} $re]
+      }
+      set ok [regexp $re $result]
+    }
+    if {$negate} {
+      set ok [expr {!$ok}]
+    }
   } elseif {[string first "*" $expected] != -1} {
     # Glob pattern match (only if expected string contains a literal '*')
     set ok [string match $expected $result]
@@ -248,21 +269,65 @@ proc do_test {name cmd expected} {
     puts "Ok"
   } else {
     puts "FAILED"
-    puts "  Expected: $expected"
-    puts "  Got:      $result"
+    puts "  Expected: [truncate_for_output $expected]"
+    puts "  Got:      [truncate_for_output $result]"
     lappend TC(fail_list) $name
     incr TC(errors)
   }
 }
 
-# Execute SQL test with expected results.
-proc do_execsql_test {name sql {expected {}}} {
-  do_test $name [list execsql $sql] [list {*}$expected]
+# Some tests compare values of many megabytes; printing them in full
+# turns the run log into gigabytes. Show the start and the total size.
+proc truncate_for_output {value} {
+  set limit 2000
+  if {[string length $value] <= $limit} {
+    return $value
+  }
+  return "[string range $value 0 [expr {$limit - 1}]]... ([string length $value] bytes)"
+}
+
+# Upstream prefixes a test name with $testprefix only when the name
+# starts with a digit; names that already carry a prefix are left alone.
+proc fix_testname {varname} {
+  upvar $varname testname
+  if {[info exists ::testprefix] && $::testprefix ne ""
+   && [string is digit [string range $testname 0 0]]
+  } {
+    set testname "${::testprefix}-$testname"
+  }
+}
+
+# Execute SQL test with expected results. Accepts upstream's optional
+# leading "-db HANDLE" to run against a connection other than "db".
+proc do_execsql_test {args} {
+  set db db
+  if {[lindex $args 0] eq "-db"} {
+    set db [lindex $args 1]
+    set args [lrange $args 2 end]
+  }
+  if {[llength $args] == 2} {
+    lassign $args name sql
+    set expected {}
+  } elseif {[llength $args] == 3} {
+    lassign $args name sql expected
+  } else {
+    error "wrong # args: should be \"do_execsql_test ?-db DB? name sql ?expected?\""
+  }
+  uplevel [list do_test $name [list execsql $sql $db] [list {*}$expected]]
 }
 
 # Execute SQL test expecting an error
-proc do_catchsql_test {name sql expected} {
-  do_test $name [list catchsql $sql] $expected
+proc do_catchsql_test {args} {
+  set db db
+  if {[lindex $args 0] eq "-db"} {
+    set db [lindex $args 1]
+    set args [lrange $args 2 end]
+  }
+  if {[llength $args] != 3} {
+    error "wrong # args: should be \"do_catchsql_test ?-db DB? name sql expected\""
+  }
+  lassign $args name sql expected
+  uplevel [list do_test $name [list catchsql $sql $db] $expected]
 }
 
 # Placeholder for virtual table conditional tests
@@ -277,8 +342,20 @@ proc integrity_check {name} {
 }
 
 # Query execution plan test (simplified)
-proc do_eqp_test {name sql expected} {
-  do_execsql_test $name "EXPLAIN QUERY PLAN $sql" $expected
+proc do_eqp_test {args} {
+  set db db
+  if {[lindex $args 0] eq "-db"} {
+    set db [lindex $args 1]
+    set args [lrange $args 2 end]
+  }
+  lassign $args name sql expected
+  uplevel [list do_execsql_test -db $db $name "EXPLAIN QUERY PLAN $sql" $expected]
+}
+
+# Run the plan check and then the query itself, as upstream.
+proc do_eqp_execsql_test {name sql eqp res} {
+  uplevel [list do_eqp_test $name.eqp $sql $eqp]
+  uplevel [list do_execsql_test $name.res $sql $res]
 }
 
 # Capability checking (simplified - assume all features available)
