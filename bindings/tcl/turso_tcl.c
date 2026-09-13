@@ -45,6 +45,11 @@ typedef struct CachedStmt {
     sqlite3_stmt *stmt;    /* prepared statement */
 } CachedStmt;
 
+#define TURSO_OPEN_READONLY  0x00000001
+#define TURSO_OPEN_READWRITE 0x00000002
+#define TURSO_OPEN_CREATE    0x00000004
+#define TURSO_OPEN_URI       0x00000040
+
 typedef struct TursoDb {
     sqlite3    *db;
     Tcl_Interp *interp;
@@ -2750,11 +2755,38 @@ static int TursoOpenCmd(ClientData cd, Tcl_Interp *interp,
     const char *handle_name = Tcl_GetString(objv[1]);
     const char *filename    = Tcl_GetString(objv[2]);
 
+    /* Options of the upstream binding. -readonly and -uri change how the
+     * file is opened; -vfs, -key, -nomutex, -fullmutex, -nofollow and
+     * -create have no Turso equivalent and are accepted and ignored. */
+    int flags = TURSO_OPEN_READWRITE | TURSO_OPEN_CREATE;
+    int i;
+    for (i = 3; i + 1 < objc; i += 2) {
+        const char *opt = Tcl_GetString(objv[i]);
+        int         val = 0;
+        if (strcmp(opt, "-readonly") == 0) {
+            if (Tcl_GetBooleanFromObj(interp, objv[i + 1], &val) != TCL_OK) {
+                return TCL_ERROR;
+            }
+            if (val) flags = (flags & ~(TURSO_OPEN_READWRITE | TURSO_OPEN_CREATE))
+                             | TURSO_OPEN_READONLY;
+        } else if (strcmp(opt, "-uri") == 0) {
+            if (Tcl_GetBooleanFromObj(interp, objv[i + 1], &val) != TCL_OK) {
+                return TCL_ERROR;
+            }
+            if (val) flags |= TURSO_OPEN_URI;
+        } else if (strcmp(opt, "-create") == 0) {
+            if (Tcl_GetBooleanFromObj(interp, objv[i + 1], &val) != TCL_OK) {
+                return TCL_ERROR;
+            }
+            if (!val) flags &= ~TURSO_OPEN_CREATE;
+        }
+    }
+
     sqlite3 *db  = NULL;
-    int      rc  = sqlite3_open(filename, &db);
+    int      rc  = sqlite3_open_v2(filename, &db, flags, NULL);
 
     if (rc != SQLITE_OK) {
-        const char *errmsg = db ? sqlite3_errmsg(db) : "out of memory";
+        const char *errmsg = db ? sqlite3_errmsg(db) : sqlite3_errstr(rc);
         Tcl_SetResult(interp, (char *)errmsg, TCL_VOLATILE);
         if (db) sqlite3_close(db);
         return TCL_ERROR;
