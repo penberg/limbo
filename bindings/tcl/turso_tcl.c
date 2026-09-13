@@ -121,6 +121,38 @@ typedef struct TclFuncData {
     Tcl_Obj    *arg_names[MAX_FUNC_ARGS];  /* argument variable names */
 } TclFuncData;
 
+/* A TCL script registered with [db collate NAME SCRIPT]. The engine calls
+ * it with the two strings appended and expects an integer back. */
+typedef struct TclCollateData {
+    Tcl_Interp *interp;
+    Tcl_Obj    *script;
+} TclCollateData;
+
+static int tcl_collate_bridge(void *pApp, int nA, const void *zA,
+                              int nB, const void *zB)
+{
+    TclCollateData *data = (TclCollateData *)pApp;
+    Tcl_Obj *cmd = Tcl_DuplicateObj(data->script);
+    Tcl_IncrRefCount(cmd);
+    Tcl_ListObjAppendElement(data->interp, cmd,
+                             Tcl_NewStringObj((const char *)zA, nA));
+    Tcl_ListObjAppendElement(data->interp, cmd,
+                             Tcl_NewStringObj((const char *)zB, nB));
+    int result = 0;
+    if (Tcl_EvalObjEx(data->interp, cmd, TCL_EVAL_GLOBAL) == TCL_OK) {
+        Tcl_GetIntFromObj(NULL, Tcl_GetObjResult(data->interp), &result);
+    }
+    Tcl_DecrRefCount(cmd);
+    return result;
+}
+
+static void tcl_collate_destroy(void *pApp)
+{
+    TclCollateData *data = (TclCollateData *)pApp;
+    Tcl_DecrRefCount(data->script);
+    Tcl_Free((char *)data);
+}
+
 /* ------------------------------------------------------------------ */
 /* Value helpers                                                        */
 /* ------------------------------------------------------------------ */
@@ -486,14 +518,26 @@ static int TursoDbCmd(ClientData cd, Tcl_Interp *interp,
         "eval", "one", "exists", "changes", "total_changes",
         "last_insert_rowid", "errorcode", "errmsg", "null", "nullvalue",
         "func", "function", "close", "limit", "status", "transaction",
-        "cache",
+        "cache", "collate", "timeout", "interrupt", "version",
+        "busy", "auth", "authorizer", "progress", "commit_hook",
+        "update_hook", "rollback_hook", "wal_hook", "preupdate", "trace",
+        "trace_v2", "profile", "unlock_notify", "enable_load_extension",
+        "config", "erase", "bind_fallback", "collation_needed",
+        "backup", "restore", "incrblob", "serialize", "deserialize",
+        "copy",
         NULL
     };
     enum {
         CMD_EVAL, CMD_ONE, CMD_EXISTS, CMD_CHANGES, CMD_TOTAL_CHANGES,
         CMD_LAST_INSERT_ROWID, CMD_ERRORCODE, CMD_ERRMSG, CMD_NULL, CMD_NULLVALUE,
         CMD_FUNC, CMD_FUNCTION, CMD_CLOSE, CMD_LIMIT, CMD_STATUS, CMD_TRANSACTION,
-        CMD_CACHE
+        CMD_CACHE, CMD_COLLATE, CMD_TIMEOUT, CMD_INTERRUPT, CMD_VERSION,
+        CMD_BUSY, CMD_AUTH, CMD_AUTHORIZER, CMD_PROGRESS, CMD_COMMIT_HOOK,
+        CMD_UPDATE_HOOK, CMD_ROLLBACK_HOOK, CMD_WAL_HOOK, CMD_PREUPDATE, CMD_TRACE,
+        CMD_TRACE_V2, CMD_PROFILE, CMD_UNLOCK_NOTIFY, CMD_ENABLE_LOAD_EXTENSION,
+        CMD_CONFIG, CMD_ERASE, CMD_BIND_FALLBACK, CMD_COLLATION_NEEDED,
+        CMD_BACKUP, CMD_RESTORE, CMD_INCRBLOB, CMD_SERIALIZE, CMD_DESERIALIZE,
+        CMD_COPY
     };
     int cmdIdx;
 
@@ -687,6 +731,87 @@ static int TursoDbCmd(ClientData cd, Tcl_Interp *interp,
         }
         return rc;
     }
+
+    /* ---- collate NAME SCRIPT ---- */
+
+    case CMD_COLLATE: {
+        if (objc != 4) {
+            Tcl_WrongNumArgs(interp, 2, objv, "NAME SCRIPT");
+            return TCL_ERROR;
+        }
+        TclCollateData *data = (TclCollateData *)Tcl_Alloc(sizeof(TclCollateData));
+        data->interp = interp;
+        data->script = objv[3];
+        Tcl_IncrRefCount(data->script);
+        int rc = sqlite3_create_collation_v2(
+            tdb->db, Tcl_GetString(objv[2]), 0, (void *)data,
+            (int (*)(void))tcl_collate_bridge,
+            (void (*)(void))tcl_collate_destroy);
+        if (rc != SQLITE_OK) {
+            tcl_collate_destroy(data);
+            Tcl_SetResult(interp, (char *)sqlite3_errmsg(tdb->db), TCL_VOLATILE);
+            return TCL_ERROR;
+        }
+        return TCL_OK;
+    }
+
+    /* ---- timeout MS ---- */
+
+    case CMD_TIMEOUT: {
+        int ms;
+        if (objc != 3) {
+            Tcl_WrongNumArgs(interp, 2, objv, "MILLISECONDS");
+            return TCL_ERROR;
+        }
+        if (Tcl_GetIntFromObj(interp, objv[2], &ms) != TCL_OK) return TCL_ERROR;
+        sqlite3_busy_timeout(tdb->db, ms);
+        return TCL_OK;
+    }
+
+    case CMD_INTERRUPT:
+        sqlite3_interrupt(tdb->db);
+        return TCL_OK;
+
+    case CMD_VERSION:
+        Tcl_SetResult(interp, (char *)sqlite3_libversion(), TCL_STATIC);
+        return TCL_OK;
+
+    /* Subcommands of the upstream binding that Turso has no engine support
+     * for. They accept their arguments and do nothing, so a test file that
+     * calls them at top level keeps running; the tests that depend on
+     * their effect fail on their own assertions. A hook subcommand called
+     * with no script returns the empty string, as upstream does when no
+     * hook is set. */
+    case CMD_BUSY:
+    case CMD_AUTH:
+    case CMD_AUTHORIZER:
+    case CMD_PROGRESS:
+    case CMD_COMMIT_HOOK:
+    case CMD_UPDATE_HOOK:
+    case CMD_ROLLBACK_HOOK:
+    case CMD_WAL_HOOK:
+    case CMD_PREUPDATE:
+    case CMD_TRACE:
+    case CMD_TRACE_V2:
+    case CMD_PROFILE:
+    case CMD_UNLOCK_NOTIFY:
+    case CMD_ENABLE_LOAD_EXTENSION:
+    case CMD_CONFIG:
+    case CMD_ERASE:
+    case CMD_BIND_FALLBACK:
+    case CMD_COLLATION_NEEDED:
+    case CMD_BACKUP:
+    case CMD_RESTORE:
+    case CMD_SERIALIZE:
+    case CMD_DESERIALIZE:
+    case CMD_COPY:
+        Tcl_ResetResult(interp);
+        return TCL_OK;
+
+    case CMD_INCRBLOB:
+        Tcl_SetResult(interp, (char *)"incremental blob I/O is not supported",
+                      TCL_STATIC);
+        return TCL_ERROR;
 
     /* ---- eval ---- */
 
