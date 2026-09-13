@@ -212,6 +212,9 @@ struct sqlite3Inner {
     pub(crate) p_err: *mut ffi::c_void,
     pub(crate) filename: CString,
     pub(crate) stmt_list: *mut sqlite3_stmt,
+    /// Set when the caller opened "" and we created a private on-disk
+    /// database for it; the file is removed when the handle goes away.
+    pub(crate) temp_path: Option<std::path::PathBuf>,
 }
 
 impl Drop for sqlite3Inner {
@@ -219,6 +222,12 @@ impl Drop for sqlite3Inner {
         // Run the engine's close so the last connection on a database
         // checkpoints its WAL, as SQLite does when a connection closes.
         let _ = self.conn.close();
+        if let Some(path) = &self.temp_path {
+            let base = path.to_string_lossy().into_owned();
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{base}{suffix}"));
+            }
+        }
     }
 }
 
@@ -242,6 +251,7 @@ impl sqlite3 {
             p_err: std::ptr::null_mut(),
             filename,
             stmt_list: std::ptr::null_mut(),
+            temp_path: None,
         };
         Self {
             inner: Mutex::new(inner),
@@ -669,9 +679,22 @@ pub unsafe extern "C" fn sqlite3_open_v2(
             }
         } else if (flags & SQLITE_OPEN_MEMORY) != 0 || filename_str == ":memory:" {
             (":memory:".to_string(), true, false)
+        } else if filename_str.is_empty() {
+            // SQLite opens a private on-disk database for "" and deletes it
+            // when the connection closes.
+            (
+                temp_database_path().to_string_lossy().into_owned(),
+                false,
+                false,
+            )
         } else {
             (filename_str.to_string(), false, false)
         };
+    let temp_path = if filename_str.is_empty() && !use_memory {
+        Some(std::path::PathBuf::from(&effective_filename))
+    } else {
+        None
+    };
 
     // Open read-only when asked to, and also when the file exists but is
     // not writable: SQLite falls back to read-only access in that case
@@ -736,12 +759,14 @@ pub unsafe extern "C" fn sqlite3_open_v2(
 
     match db.connect() {
         Ok(conn) => {
-            let stored_filename = if use_memory {
+            let stored_filename = if use_memory || temp_path.is_some() {
                 CString::new("".to_string()).unwrap()
             } else {
                 CString::new(effective_filename).unwrap()
             };
-            *db_out = sqlite3::new(io, db, conn, stored_filename).into_raw();
+            let handle = sqlite3::new(io, db, conn, stored_filename);
+            handle.inner.lock().unwrap().temp_path = temp_path;
+            *db_out = handle.into_raw();
             SQLITE_OK
         }
         Err(e) => {
@@ -749,6 +774,12 @@ pub unsafe extern "C" fn sqlite3_open_v2(
             SQLITE_CANTOPEN
         }
     }
+}
+
+fn temp_database_path() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("turso-temp-{}-{n}.db", std::process::id()))
 }
 
 #[no_mangle]
