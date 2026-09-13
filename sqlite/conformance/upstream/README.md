@@ -84,9 +84,11 @@ the `test_files` table at the top of `all.test` with one of three statuses:
   short `hang_timeout_seconds` limit (30 by default) instead of
   `file_timeout_seconds`, and shows as `XHANG`. If it completes, the run
   fails with a request to move it to `fail`.
-- `skip` — not run at all. Only the meta-runner files (`full`, `quick`,
+- `skip` — not run at all. The meta-runner files (`full`, `quick`,
   `veryquick`), which would source `permutations.test` and run the whole
-  suite again. Every real test file runs; hangs and crashes are contained
+  suite again, and the fuzz family (`fuzz`, `fuzz-oss1`, `fuzz2`, `fuzz3`,
+  `fuzz4`, `fuzzer1`, `fuzzer2`) until the CI failure they cause is
+  understood. Every other test file runs; hangs and crashes are contained
   per file.
 
 To bless a file after fixing its remaining failures, change its status from
