@@ -15,10 +15,14 @@ set ALL_TESTS 1
 #          do not fail the run. If such a file becomes fully green the run
 #          fails with a request to move it to "pass", so the known-bad list
 #          only ever shrinks.
-#   skip - not run at all. Used for files that hang, that die on a missing
-#          test-harness command, or that test features Turso will never
-#          support (for example the rollback journal modes; Turso is
-#          WAL-only). The reason is noted next to each.
+#   hang - known to run past the timeout. The file runs like a known-bad
+#          file but with the short timeout (hang_timeout_seconds), so a
+#          run does not spend minutes on it. If it completes, the run
+#          fails with a request to move it to "fail". The reason is
+#          noted next to each.
+#   skip - not run at all. Only for the meta-runner files that would
+#          source permutations.test and run the whole suite again. The
+#          reason is noted next to each.
 #
 # To bless a file: fix the remaining failures, then change its status here
 # from "fail" to "pass".
@@ -880,6 +884,17 @@ set TC(fail_list) [list]
 set __runner_results [list]
 set __runner_blessed_failed [list]
 set __runner_xpassed [list]
+set __runner_abort_list [list]
+
+# A file that runs longer than this is killed and reported as HANG. Files
+# with the "hang" status get the shorter limit.
+if {![info exists file_timeout_seconds]} {
+  set file_timeout_seconds 180
+}
+if {![info exists hang_timeout_seconds]} {
+  set hang_timeout_seconds 30
+}
+set __runner_hang_completed [list]
 
 # The list above mixes 2-field (pass/fail) and 3-field (skip + reason)
 # entries, so walk it manually instead of with foreach.
@@ -889,7 +904,7 @@ while {$__runner_i < [llength $test_files]} {
   set __runner_status [lindex $test_files [expr {$__runner_i + 1}]]
   incr __runner_i 2
   set __runner_reason ""
-  if {$__runner_status eq "skip"} {
+  if {$__runner_status eq "skip" || $__runner_status eq "hang"} {
     set __runner_reason [lindex $test_files $__runner_i]
     incr __runner_i
   }
@@ -911,18 +926,48 @@ while {$__runner_i < [llength $test_files]} {
   # Each file is self-contained (it sources tester.tcl and calls finish_test),
   # so running it standalone prints its own "All N tests passed!" or "N errors
   # out of M tests" line, which we parse below for this file's counts.
+  # run_file.tcl sources the file and prints its summary even when the
+  # file stops on a TCL error outside of a do_test, so every file that
+  # starts is counted. A file that runs longer than the timeout is killed
+  # and reported as a hang.
   set __runner_crashed 0
+  set __runner_timed_out 0
   set __runner_out ""
-  set __runner_rc [catch {
-    exec [info nameofexecutable] $testdir/$__runner_name.test 2>@1
-  } __runner_out __runner_opts]
+  set __runner_chan [open [list | [info nameofexecutable] \
+      $testdir/run_file.tcl $testdir/$__runner_name.test 2>@1] r]
+  fconfigure $__runner_chan -blocking 0
+  set __runner_pid [pid $__runner_chan]
+  set __runner_timeout [expr {$__runner_status eq "hang" ?
+                              $hang_timeout_seconds : $file_timeout_seconds}]
+  set __runner_deadline [expr {[clock seconds] + $__runner_timeout}]
+  while {![eof $__runner_chan]} {
+    set __runner_data [read $__runner_chan]
+    append __runner_out $__runner_data
+    if {$__runner_data eq ""} {
+      if {[clock seconds] > $__runner_deadline} {
+        set __runner_timed_out 1
+        catch {exec kill -9 $__runner_pid}
+        after 100
+        catch {append __runner_out [read $__runner_chan]}
+        break
+      }
+      after 20
+    }
+  }
+  fconfigure $__runner_chan -blocking 1
+  set __runner_rc [catch {close $__runner_chan} __runner_err __runner_opts]
   puts $__runner_out
-  if {$__runner_rc
+  if {$__runner_timed_out} {
+    puts "HANG in $__runner_name.test: killed after $__runner_timeout seconds"
+  } elseif {$__runner_rc
       && [lindex [dict get $__runner_opts -errorcode] 0] eq "CHILDKILLED"} {
     set __runner_crashed 1
     set __runner_signal [lindex [dict get $__runner_opts -errorcode] 2]
     puts "CRASH in $__runner_name.test: killed by signal $__runner_signal"
   }
+  set __runner_aborted ""
+  regexp {\nABORTED: [^\n]* line (\d*): ([^\n]*)} $__runner_out \
+      -> __runner_abort_line __runner_aborted
 
   # Derive this file's counts from the summary line its finish_test printed. A
   # file that crashed before finishing leaves both at 0, and the crash flag
@@ -935,20 +980,45 @@ while {$__runner_i < [llength $test_files]} {
                  $__runner_out -> __runner_e __runner_t]} {
     set __runner_nerr $__runner_e
     set __runner_ntest $__runner_t
+  } else {
+    # The process died (crash or hang) before printing a summary: count
+    # the per-test result lines it printed, and the death as one failure.
+    set __runner_ntest [regexp -all -line {^[A-Za-z0-9_.-]+\.\.\. (Ok|FAILED|ERROR)} $__runner_out]
+    set __runner_nerr [regexp -all -line {^[A-Za-z0-9_.-]+\.\.\. (FAILED|ERROR)} $__runner_out]
+    if {$__runner_crashed || $__runner_timed_out} {
+      incr __runner_ntest
+      incr __runner_nerr
+    }
   }
   incr TC(count) $__runner_ntest
   incr TC(errors) $__runner_nerr
 
+  if {$__runner_aborted ne ""} {
+    lappend __runner_abort_list [list $__runner_name $__runner_abort_line \
+        $__runner_aborted]
+  }
   if {$__runner_status eq "pass"} {
-    if {$__runner_crashed || $__runner_nerr > 0} {
+    if {$__runner_crashed || $__runner_timed_out || $__runner_nerr > 0} {
       lappend __runner_blessed_failed $__runner_name
-      set __runner_verdict [expr {$__runner_crashed ? "CRASH" : "FAIL"}]
+      set __runner_verdict [expr {$__runner_crashed ? "CRASH" :
+                                  $__runner_timed_out ? "HANG" : "FAIL"}]
     } else {
       set __runner_verdict "OK"
+    }
+  } elseif {$__runner_status eq "hang"} {
+    if {$__runner_timed_out} {
+      set __runner_verdict "XHANG"
+    } else {
+      lappend __runner_hang_completed $__runner_name
+      set __runner_verdict [expr {$__runner_crashed ? "XCRASH" : "DONE"}]
     }
   } else {
     if {$__runner_crashed} {
       set __runner_verdict "XCRASH"
+    } elseif {$__runner_timed_out} {
+      set __runner_verdict "XHANG"
+    } elseif {$__runner_aborted ne ""} {
+      set __runner_verdict "XABORT"
     } elseif {$__runner_nerr > 0} {
       set __runner_verdict "XFAIL"
     } elseif {$__runner_ntest == 0} {
@@ -962,7 +1032,8 @@ while {$__runner_i < [llength $test_files]} {
     }
   }
   lappend __runner_results \
-      [list $__runner_name $__runner_verdict $__runner_ntest $__runner_nerr ""]
+      [list $__runner_name $__runner_verdict $__runner_ntest $__runner_nerr \
+           [expr {$__runner_status eq "hang" ? $__runner_reason : ""}]]
 }
 
 set __runner_namew [string length "File"]
@@ -997,6 +1068,17 @@ if {$TC(count) > 0} {
 puts [format "Total: %d/%d tests passed (%.1f%%)" \
     [expr {$TC(count) - $TC(errors)}] $TC(count) $__runner_pct]
 
+if {[llength $__runner_abort_list] > 0} {
+  puts ""
+  puts "Files that stopped on an error outside of a test (their tests up to"
+  puts "that point are counted; the stop itself counts as one failure):"
+  foreach __runner_row $__runner_abort_list {
+    lassign $__runner_row __runner_name __runner_abort_line __runner_aborted
+    puts [format "  %-24s line %-5s %s" $__runner_name.test \
+        $__runner_abort_line $__runner_aborted]
+  }
+}
+
 set __runner_exit 0
 if {[llength $__runner_blessed_failed] > 0} {
   puts ""
@@ -1007,6 +1089,12 @@ if {[llength $__runner_xpassed] > 0} {
   puts ""
   puts "Known-bad test files now fully pass: $__runner_xpassed"
   puts "Bless them by changing their status from \"fail\" to \"pass\" in all.test."
+  set __runner_exit 1
+}
+if {[llength $__runner_hang_completed] > 0} {
+  puts ""
+  puts "Files marked hang now complete: $__runner_hang_completed"
+  puts "Change their status from \"hang\" to \"fail\" in all.test."
   set __runner_exit 1
 }
 puts ""
