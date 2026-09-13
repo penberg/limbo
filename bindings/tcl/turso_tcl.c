@@ -2195,6 +2195,121 @@ static int TursoTotalChangesCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
+/* sqlite3_get_autocommit DB */
+static int TursoGetAutocommitCmd(ClientData cd, Tcl_Interp *interp,
+                                 int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    TursoDb *tdb;
+    if (db_only_args(interp, objc, objv, &tdb) != TCL_OK) return TCL_ERROR;
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(sqlite3_get_autocommit(tdb->db)));
+    return TCL_OK;
+}
+
+/* sqlite3_interrupt DB */
+static int TursoInterruptCmd(ClientData cd, Tcl_Interp *interp,
+                             int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    TursoDb *tdb;
+    if (db_only_args(interp, objc, objv, &tdb) != TCL_OK) return TCL_ERROR;
+    sqlite3_interrupt(tdb->db);
+    return TCL_OK;
+}
+
+/* sqlite3_extended_result_codes DB BOOLEAN */
+static int TursoExtendedResultCodesCmd(ClientData cd, Tcl_Interp *interp,
+                                       int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    int onoff;
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "DB BOOLEAN");
+        return TCL_ERROR;
+    }
+    TursoDb *tdb = find_turso_db(interp, Tcl_GetString(objv[1]));
+    if (!tdb) {
+        Tcl_AppendResult(interp, "no such database: ", Tcl_GetString(objv[1]), NULL);
+        return TCL_ERROR;
+    }
+    if (Tcl_GetBooleanFromObj(interp, objv[2], &onoff) != TCL_OK) return TCL_ERROR;
+    sqlite3_extended_result_codes(tdb->db, onoff);
+    return TCL_OK;
+}
+
+/* sqlite3_db_readonly DB NAME */
+static int TursoDbReadonlyCmd(ClientData cd, Tcl_Interp *interp,
+                              int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "DB NAME");
+        return TCL_ERROR;
+    }
+    TursoDb *tdb = find_turso_db(interp, Tcl_GetString(objv[1]));
+    if (!tdb) {
+        Tcl_AppendResult(interp, "no such database: ", Tcl_GetString(objv[1]), NULL);
+        return TCL_ERROR;
+    }
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(
+        sqlite3_db_readonly(tdb->db, Tcl_GetString(objv[2]))));
+    return TCL_OK;
+}
+
+/* sqlite3_wal_checkpoint DB ?NAME? */
+static int TursoWalCheckpointCmd(ClientData cd, Tcl_Interp *interp,
+                                 int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc != 2 && objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "DB ?NAME?");
+        return TCL_ERROR;
+    }
+    TursoDb *tdb = find_turso_db(interp, Tcl_GetString(objv[1]));
+    if (!tdb) {
+        Tcl_AppendResult(interp, "no such database: ", Tcl_GetString(objv[1]), NULL);
+        return TCL_ERROR;
+    }
+    const char *name = objc == 3 ? Tcl_GetString(objv[2]) : NULL;
+    int rc = sqlite3_wal_checkpoint(tdb->db, name);
+    Tcl_SetResult(interp, (char *)sqlite3_errstr(rc), TCL_STATIC);
+    return TCL_OK;
+}
+
+/* sqlite3_wal_checkpoint_v2 DB MODE ?NAME? -> {busy nLog nCkpt} */
+static int TursoWalCheckpointV2Cmd(ClientData cd, Tcl_Interp *interp,
+                                   int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    static const char *modes[] = {"passive", "full", "restart", "truncate", NULL};
+    int mode;
+    if (objc != 3 && objc != 4) {
+        Tcl_WrongNumArgs(interp, 1, objv, "DB MODE ?NAME?");
+        return TCL_ERROR;
+    }
+    TursoDb *tdb = find_turso_db(interp, Tcl_GetString(objv[1]));
+    if (!tdb) {
+        Tcl_AppendResult(interp, "no such database: ", Tcl_GetString(objv[1]), NULL);
+        return TCL_ERROR;
+    }
+    if (Tcl_GetIndexFromObj(interp, objv[2], modes, "mode", 0, &mode) != TCL_OK) {
+        return TCL_ERROR;
+    }
+    const char *name = objc == 4 ? Tcl_GetString(objv[3]) : NULL;
+    int n_log = 0, n_ckpt = 0;
+    int rc = sqlite3_wal_checkpoint_v2(tdb->db, name, mode, &n_log, &n_ckpt);
+    if (rc != SQLITE_OK && rc != SQLITE_BUSY) {
+        Tcl_SetResult(interp, (char *)sqlite3_errstr(rc), TCL_STATIC);
+        return TCL_ERROR;
+    }
+    Tcl_Obj *res = Tcl_NewListObj(0, NULL);
+    Tcl_ListObjAppendElement(interp, res, Tcl_NewIntObj(rc == SQLITE_BUSY));
+    Tcl_ListObjAppendElement(interp, res, Tcl_NewIntObj(n_log));
+    Tcl_ListObjAppendElement(interp, res, Tcl_NewIntObj(n_ckpt));
+    Tcl_SetObjResult(interp, res);
+    return TCL_OK;
+}
+
 /* sqlite3_last_insert_rowid DB */
 static int TursoLastInsertRowidCmd(ClientData cd, Tcl_Interp *interp,
                                    int objc, Tcl_Obj *const objv[])
@@ -3031,6 +3146,18 @@ int Tursotcl_Init(Tcl_Interp *interp)
                          TursoChangesCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "sqlite3_total_changes",
                          TursoTotalChangesCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "sqlite3_get_autocommit",
+                         TursoGetAutocommitCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "sqlite3_interrupt",
+                         TursoInterruptCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "sqlite3_extended_result_codes",
+                         TursoExtendedResultCodesCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "sqlite3_db_readonly",
+                         TursoDbReadonlyCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "sqlite3_wal_checkpoint",
+                         TursoWalCheckpointCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "sqlite3_wal_checkpoint_v2",
+                         TursoWalCheckpointV2Cmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "sqlite3_last_insert_rowid",
                          TursoLastInsertRowidCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "sqlite3_complete",
