@@ -112,3 +112,4 @@ postgres/regress/results/
 
 # Amp orb runtime files
 .amp/portals/*
+sqlite/conformance/upstream/logs/

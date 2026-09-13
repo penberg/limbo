@@ -80,3 +80,10 @@ jobs:
         run: make -C bindings/tcl build
       - name: Run SQLite TCL conformance tests
         run: tclsh sqlite/conformance/upstream/all.test
+      - name: Upload per-file test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-tcl-logs
+          path: sqlite/conformance/upstream/logs/
+          if-no-files-found: ignore

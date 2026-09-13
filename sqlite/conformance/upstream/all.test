@@ -894,6 +894,8 @@ if {![info exists file_timeout_seconds]} {
 if {![info exists hang_timeout_seconds]} {
   set hang_timeout_seconds 30
 }
+set __runner_logdir [file join $testdir logs]
+file mkdir $__runner_logdir
 set __runner_hang_completed [list]
 
 # The list above mixes 2-field (pass/fail) and 3-field (skip + reason)
@@ -956,7 +958,28 @@ while {$__runner_i < [llength $test_files]} {
   }
   fconfigure $__runner_chan -blocking 1
   set __runner_rc [catch {close $__runner_chan} __runner_err __runner_opts]
-  puts $__runner_out
+  # The full output of every file goes to logs/NAME.log. The console gets
+  # the file's summary, its failed-test list, and any abort, crash or hang
+  # line: with every test line printed, a run writes tens of megabytes to
+  # the console, which is more than CI log capture copes with. Set
+  # TURSO_TCL_VERBOSE=1 to print everything.
+  set __runner_log [open [file join $__runner_logdir $__runner_name.log] w]
+  puts -nonewline $__runner_log $__runner_out
+  close $__runner_log
+  if {[info exists env(TURSO_TCL_VERBOSE)] && $env(TURSO_TCL_VERBOSE) ne ""} {
+    puts $__runner_out
+  } else {
+    puts "$__runner_name.test:"
+    foreach __runner_line [split $__runner_out \n] {
+      if {[regexp {^(All \d+ tests passed!|\d+ errors out of \d+ tests|Failed tests: |ABORTED: |thread '.*' panicked at )} $__runner_line]
+          || [string match "*panicked at*" $__runner_line]} {
+        if {[string length $__runner_line] > 400} {
+          set __runner_line "[string range $__runner_line 0 399]... ([string length $__runner_line] bytes)"
+        }
+        puts "  $__runner_line"
+      }
+    }
+  }
   if {$__runner_timed_out} {
     puts "HANG in $__runner_name.test: killed after $__runner_timeout seconds"
   } elseif {$__runner_rc

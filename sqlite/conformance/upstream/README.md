@@ -60,6 +60,12 @@ A file that runs longer than `file_timeout_seconds` (180 by default) is
 killed and shows as `XHANG`; a file whose process dies on a signal shows
 as `XCRASH`. Neither takes down the rest of the run.
 
+The full output of each file is written to `logs/NAME.log`; the console
+shows only each file's summary, failed-test list, and any abort, crash
+or hang line, because the complete output of a run is tens of megabytes.
+Set `TURSO_TCL_VERBOSE=1` to print everything. CI uploads the `logs`
+directory as the `sqlite-tcl-logs` artifact.
+
 `lock_common.tcl`, `malloc_common.tcl`, `bc_common.tcl`, `fuzz_common.tcl`
 and `wal_common.tcl` are the upstream helper files. The one change is in
 `lock_common.tcl`: the child processes it starts for multi-connection
