@@ -3148,14 +3148,77 @@ pub unsafe extern "C" fn sqlite3_strnicmp(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_create_collation_v2(
-    _db: *mut sqlite3,
-    _name: *const ffi::c_char,
+    db: *mut sqlite3,
+    name: *const ffi::c_char,
     _enc: ffi::c_int,
-    _context: *mut ffi::c_void,
-    _cmp: Option<unsafe extern "C" fn() -> ffi::c_int>,
-    _destroy: Option<unsafe extern "C" fn()>,
+    context: *mut ffi::c_void,
+    cmp: Option<unsafe extern "C" fn() -> ffi::c_int>,
+    destroy: Option<unsafe extern "C" fn()>,
 ) -> ffi::c_int {
-    stub!();
+    if db.is_null() || name.is_null() {
+        return SQLITE_MISUSE;
+    }
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s.to_owned(),
+        Err(_) => return SQLITE_MISUSE,
+    };
+    let inner = (*db).inner.lock().unwrap();
+    let Some(cmp) = cmp else {
+        inner.conn.unregister_external_collation(&name);
+        return SQLITE_OK;
+    };
+    let bridge = Box::new(CollationBridge {
+        context,
+        cmp: std::mem::transmute::<unsafe extern "C" fn() -> ffi::c_int, CollationCompareFn>(cmp),
+        destroy: destroy.map(|f| {
+            std::mem::transmute::<unsafe extern "C" fn(), unsafe extern "C" fn(*mut ffi::c_void)>(f)
+        }),
+    });
+    inner.conn.register_external_collation(
+        name,
+        Box::into_raw(bridge) as usize,
+        collation_bridge_compare,
+        Some(collation_bridge_destroy),
+    );
+    SQLITE_OK
+}
+
+type CollationCompareFn = unsafe extern "C" fn(
+    *mut ffi::c_void,
+    ffi::c_int,
+    *const ffi::c_void,
+    ffi::c_int,
+    *const ffi::c_void,
+) -> ffi::c_int;
+
+struct CollationBridge {
+    context: *mut ffi::c_void,
+    cmp: CollationCompareFn,
+    destroy: Option<unsafe extern "C" fn(*mut ffi::c_void)>,
+}
+
+unsafe extern "C" fn collation_bridge_compare(
+    context: usize,
+    left_ptr: *const u8,
+    left_len: usize,
+    right_ptr: *const u8,
+    right_len: usize,
+) -> i32 {
+    let bridge = &*(context as *const CollationBridge);
+    (bridge.cmp)(
+        bridge.context,
+        left_len as ffi::c_int,
+        left_ptr as *const ffi::c_void,
+        right_len as ffi::c_int,
+        right_ptr as *const ffi::c_void,
+    )
+}
+
+unsafe extern "C" fn collation_bridge_destroy(context: usize) {
+    let bridge = Box::from_raw(context as *mut CollationBridge);
+    if let Some(destroy) = bridge.destroy {
+        destroy(bridge.context);
+    }
 }
 
 #[no_mangle]
