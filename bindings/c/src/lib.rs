@@ -214,6 +214,14 @@ struct sqlite3Inner {
     pub(crate) stmt_list: *mut sqlite3_stmt,
 }
 
+impl Drop for sqlite3Inner {
+    fn drop(&mut self) {
+        // Run the engine's close so the last connection on a database
+        // checkpoints its WAL, as SQLite does when a connection closes.
+        let _ = self.conn.close();
+    }
+}
+
 impl sqlite3 {
     pub fn new(
         io: Arc<dyn turso_core::IO>,
