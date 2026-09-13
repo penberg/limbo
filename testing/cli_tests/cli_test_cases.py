@@ -332,11 +332,11 @@ def test_uri_readonly():
     turso.run_test("read-only-uri-reads-work", "SELECT COUNT(*) FROM demo;", "5")
     turso.run_test_fn(
         "INSERT INTO demo (id, value) values (6, 'demo');",
-        lambda res: "read-only" in res,
+        lambda res: "readonly database" in res,
         "read-only-uri-writes-fail",
     )
-    turso.run_test_fn("CREATE TABLE t(a);", lambda res: "read-only" in res, "read-only-uri-cant-create-table")
-    turso.run_test_fn("DROP TABLE demo;", lambda res: "read-only" in res, "read-only-uri-cant-drop-table")
+    turso.run_test_fn("CREATE TABLE t(a);", lambda res: "readonly database" in res, "read-only-uri-cant-create-table")
+    turso.run_test_fn("DROP TABLE demo;", lambda res: "readonly database" in res, "read-only-uri-cant-drop-table")
     turso.init_test_db()
     turso.quit()
 

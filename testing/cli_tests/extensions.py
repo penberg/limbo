@@ -885,12 +885,12 @@ def test_csv():
     )
     turso.run_test_fn(
         "UPDATE csv SET c0 = 10 WHERE c1 = '2.0';",
-        lambda res: "is read-only" in res,
+        lambda res: "readonly database" in res,
         "UPDATE on CSV table should fail",
     )
     turso.run_test_fn(
         "DELETE FROM csv WHERE c1 = '2.0';",
-        lambda res: "is read-only" in res,
+        lambda res: "readonly database" in res,
         "DELETE on CSV table should fail",
     )
     turso.run_test_fn("DROP TABLE csv;", null, "Drop CSV table")
