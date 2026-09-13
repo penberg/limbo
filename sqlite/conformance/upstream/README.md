@@ -89,7 +89,7 @@ the `test_files` table at the top of `all.test` with one of three statuses:
 - `hang` — known to run past the timeout. The file still runs, with the
   short `hang_timeout_seconds` limit (30 by default) instead of
   `file_timeout_seconds`, and shows as `XHANG`. If it completes, the run
-  fails with a request to move it to `fail`.
+  says so without failing, since that can depend on the machine.
 - `skip` — not run at all. The meta-runner files (`full`, `quick`,
   `veryquick`), which would source `permutations.test` and run the whole
   suite again, and the fuzz family (`fuzz`, `fuzz-oss1`, `fuzz2`, `fuzz3`,

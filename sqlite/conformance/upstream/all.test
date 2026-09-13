@@ -17,9 +17,10 @@ set ALL_TESTS 1
 #          only ever shrinks.
 #   hang - known to run past the timeout. The file runs like a known-bad
 #          file but with the short timeout (hang_timeout_seconds), so a
-#          run does not spend minutes on it. If it completes, the run
-#          fails with a request to move it to "fail". The reason is
-#          noted next to each.
+#          run does not spend minutes on it. A run that sees it complete
+#          says so, without failing: whether it completes can depend on
+#          the machine (misc7 runs one test per available fd). The reason
+#          is noted next to each.
 #   skip - not run at all. For the meta-runner files that would source
 #          permutations.test and run the whole suite again, and for files
 #          that cannot run in CI yet. The reason is noted next to each.
@@ -1116,9 +1117,8 @@ if {[llength $__runner_xpassed] > 0} {
 }
 if {[llength $__runner_hang_completed] > 0} {
   puts ""
-  puts "Files marked hang now complete: $__runner_hang_completed"
-  puts "Change their status from \"hang\" to \"fail\" in all.test."
-  set __runner_exit 1
+  puts "Files marked hang completed within the short timeout on this machine: $__runner_hang_completed"
+  puts "If that holds everywhere, change their status from \"hang\" to \"fail\" in all.test."
 }
 puts ""
 if {$__runner_exit == 0} {
